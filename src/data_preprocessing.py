@@ -1,8 +1,11 @@
 """
-数据预处理模块
+数据预处理模块 (Optimized and Robust Version)
 处理GeoLife轨迹数据和OSM数据
-- 修正 GeoLifeDataLoader 中 load_trajectory 的列名错误。
-- 增加对 GeoLife 6列数据的鲁棒性处理。
+
+关键优化点:
+1. GeoLife DataLoader 能够鲁棒地处理 6 列和 7 列格式。
+2. 实现了经纬度异常值的强制清洗，避免数据错误中断。
+3. 轨迹特征计算（距离、方位角）已完全向量化，大幅提升了性能。
 """
 import os
 import pandas as pd
@@ -10,8 +13,9 @@ import numpy as np
 from datetime import datetime
 from typing import List, Tuple, Dict
 import json
-from geopy.distance import geodesic
 import warnings
+from tqdm import tqdm
+
 # 暂时忽略设置副本警告，因为它在 pandas 中通常是良性的
 pd.options.mode.chained_assignment = None
 
@@ -22,7 +26,7 @@ class GeoLifeDataLoader:
         self.data_root = data_root
 
     def load_trajectory(self, file_path: str) -> pd.DataFrame:
-        """加载单个轨迹文件，鲁棒地处理 6 列或 7 列数据"""
+        """加载单个轨迹文件，鲁棒地处理 6 列或 7 列数据，并进行数据清洗"""
 
         # 1. 读取原始数据，跳过前6行元数据
         try:
@@ -35,98 +39,126 @@ class GeoLifeDataLoader:
 
         # 2. 根据列数分配正确的列名并进行标准化
         if num_cols == 7:
-            # 标准 GeoLife 格式：7列
+            # 标准 GeoLife 格式：7列 (lat, lon, res, alt, date_days, date, time)
             df.columns = ['latitude', 'longitude', 'reserved', 'altitude', 'date_days', 'date', 'time']
-            df['reserved'] = df['reserved'].replace({0.0: 0, 0: 0}).astype(int) # 确保保留字段为整数或0
+            df['reserved'] = df['reserved'].replace({0.0: 0, 0: 0}).astype(int)
         elif num_cols == 6:
-            # 常见错误格式：6列，通常缺失 'reserved' 或 'altitude'。
-            # 假设该格式缺失的是 'reserved' 字段，或者 'reserved' 和 'altitude' 合并了
-            # 为了简化和鲁棒性，我们假设缺失的是 'reserved' 占位符。
-            # 如果缺失的是 altitude，则使用 NaN 填充 altitude。
+            # 非标准 GeoLife 格式：6列。我们假设缺失 Reserved 列。
             try:
-                # 尝试用 6 列模式加载，并假设缺失 altitude 列 (第4列)
-                # 原始顺序: lat, lon, res, alt, date_days, date, time
-                # 6列顺序: lat, lon, res, date_days, date, time （缺失 alt）
-                df.columns = ['latitude', 'longitude', 'reserved', 'date_days', 'date', 'time']
-                df.insert(3, 'altitude', np.nan)  # 在第4列位置插入 altitude 填充 NaN
-                df['reserved'] = df['reserved'].replace({0.0: 0, 0: 0}).astype(int)
-            except ValueError:
-                # 如果上述尝试失败，可能缺失的是 reserved 列 (第3列)
-                # 假设顺序: lat, lon, alt, date_days, date, time （缺失 res）
+                # 假设缺失 Reserved (第3列)
                 df.columns = ['latitude', 'longitude', 'altitude', 'date_days', 'date', 'time']
-                df.insert(2, 'reserved', 0) # 在第3列位置插入 reserved 填充 0
+                df.insert(2, 'reserved', 0) # 插入 reserved 填充 0
+            except ValueError:
+                # 假设缺失 Altitude (第4列)
+                df.columns = ['latitude', 'longitude', 'reserved', 'date_days', 'date', 'time']
+                df.insert(3, 'altitude', np.nan)  # 插入 altitude 填充 NaN
+                df['reserved'] = df['reserved'].replace({0.0: 0, 0: 0}).astype(int)
 
             warnings.warn(f"文件 {os.path.basename(file_path)} 只有 6 列，已尝试标准化为 7 列。")
         else:
             raise ValueError(f"文件 {file_path} 列数为 {num_cols}，既非 6 也非 7。无法处理。")
 
-        # 3. 后续处理 (适用于所有 7 列标准化后的数据)
-
-        # 合并日期和时间
+        # 3. 合并日期时间
         df['datetime'] = pd.to_datetime(df['date'] + ' ' + df['time'])
         df = df.sort_values('datetime').reset_index(drop=True)
 
-        # 计算速度、加速度等特征
-        df = self._calculate_features(df)
+        # 4. 强制数据清洗：删除无效坐标点 (解决 Latitude must be in the [-90, 90] range 错误)
+        invalid_lat_mask = (df['latitude'] < -90) | (df['latitude'] > 90)
+        invalid_lon_mask = (df['longitude'] < -180) | (df['longitude'] > 180)
 
-        # 清理不必要的列，只保留用于后续分析的列
+        if invalid_lat_mask.any() or invalid_lon_mask.any():
+            warnings.warn(f"文件 {os.path.basename(file_path)} 发现 {invalid_lat_mask.sum()} 个无效纬度和 {invalid_lon_mask.sum()} 个无效经度，正在删除。")
+            # 仅保留有效的点
+            df = df[~invalid_lat_mask & ~invalid_lon_mask].reset_index(drop=True)
+
+            if len(df) < 2:
+                raise ValueError("轨迹文件在清洗后点数过少。")
+
+        # 5. 向量化计算特征 (大幅提高速度)
+        df = self._calculate_features_vectorized(df)
+
+        # 清理不必要的列
         df = df.drop(columns=['date', 'time', 'date_days'])
 
         return df
 
-    def _calculate_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """计算轨迹特征"""
-        # 计算距离（米）
-        distances = []
-        for i in range(len(df)):
-            if i == 0:
-                distances.append(0)
-            else:
-                dist = geodesic(
-                    (df.iloc[i-1]['latitude'], df.iloc[i-1]['longitude']),
-                    (df.iloc[i]['latitude'], df.iloc[i]['longitude'])
-                ).meters
-                distances.append(dist)
+    # -----------------------------------------------------------
+    # V E C T O R I Z E D   F E A T U R E S (高性能计算)
+    # -----------------------------------------------------------
+
+    def _calculate_features_vectorized(self, df: pd.DataFrame) -> pd.DataFrame:
+        """计算轨迹特征 (使用向量化优化性能)"""
+
+        # 1. 计算时间差（秒）
+        df['time_diff'] = df['datetime'].diff().dt.total_seconds().fillna(0)
+
+        # 2. 向量化计算距离 (Haversine 公式)
+
+        # 提取当前点和前一个点的坐标
+        lat1 = df['latitude'].shift(1).fillna(df['latitude'].iloc[0])
+        lon1 = df['longitude'].shift(1).fillna(df['longitude'].iloc[0])
+        lat2 = df['latitude']
+        lon2 = df['longitude']
+
+        # 转换为弧度
+        lat1_rad, lon1_rad, lat2_rad, lon2_rad = map(np.radians, [lat1, lon1, lat2, lon2])
+
+        # Haversine 公式实现
+        dlon = lon2_rad - lon1_rad
+        dlat = lat2_rad - lat1_rad
+
+        # a = sin²(Δφ/2) + cos(φ1) * cos(φ2) * sin²(Δλ/2)
+        a = np.sin(dlat/2.0)**2 + np.cos(lat1_rad) * np.cos(lat2_rad) * np.sin(dlon/2.0)**2
+        # c = 2 * atan2(√a, √(1−a))
+        c = 2 * np.arcsin(np.sqrt(a))
+
+        R = 6371000 # 地球半径，单位：米
+        distances = R * c
+
+        distances.iloc[0] = 0.0 # 第一个点的距离为 0
         df['distance'] = distances
 
-        # 计算时间差（秒）
-        df['time_diff'] = df['datetime'].diff().dt.total_seconds()
-        df['time_diff'] = df['time_diff'].fillna(0)
+        # 3. 向量化计算速度和加速度
+        time_diff_safe = df['time_diff'].replace(0, 1e-6) # 避免除以 0
 
-        # 计算速度（m/s）
-        df['speed'] = df['distance'] / (df['time_diff'] + 1e-6)  # 避免除零
+        df['speed'] = df['distance'] / time_diff_safe
 
-        # 计算加速度（m/s²）
-        df['acceleration'] = df['speed'].diff() / (df['time_diff'] + 1e-6)
+        df['acceleration'] = df['speed'].diff() / time_diff_safe
         df['acceleration'] = df['acceleration'].fillna(0)
 
-        # 计算方向变化（度）
-        bearings = []
-        for i in range(len(df)):
-            if i == 0:
-                bearings.append(0)
-            else:
-                lat1, lon1 = df.iloc[i-1]['latitude'], df.iloc[i-1]['longitude']
-                lat2, lon2 = df.iloc[i]['latitude'], df.iloc[i]['longitude']
-                bearing = self._calculate_bearing(lat1, lon1, lat2, lon2)
-                bearings.append(bearing)
-        df['bearing'] = bearings
+        # 4. 向量化计算方向（Bearing）
+        df['bearing'] = self._calculate_bearing_vectorized(lat1_rad.values, lon1_rad.values, lat2_rad.values, lon2_rad.values)
 
-        # 计算方向变化率
-        df['bearing_change'] = df['bearing'].diff().abs()
-        df['bearing_change'] = df['bearing_change'].fillna(0)
-        df['bearing_change'] = df['bearing_change'].apply(lambda x: min(x, 360-x))
+        # 5. 计算方向变化率
+        df['bearing_change'] = df['bearing'].diff().abs().fillna(0)
+
+        # 处理角度跨越 360/0 度的变化 (取较小值)
+        df['bearing_change'] = np.where(df['bearing_change'] > 180, 360 - df['bearing_change'], df['bearing_change'])
 
         return df
 
-    def _calculate_bearing(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-        """计算方位角（度）"""
-        lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
+    def _calculate_bearing_vectorized(self, lat1: np.ndarray, lon1: np.ndarray, lat2: np.ndarray, lon2: np.ndarray) -> np.ndarray:
+        """向量化计算方位角（度）"""
+
         dlon = lon2 - lon1
+
+        # 方位角公式
         y = np.sin(dlon) * np.cos(lat2)
         x = np.cos(lat1) * np.sin(lat2) - np.sin(lat1) * np.cos(lat2) * np.cos(dlon)
+
         bearing = np.degrees(np.arctan2(y, x))
-        return (bearing + 360) % 360
+
+        # 转换为 0-360 度范围
+        bearing = (bearing + 360) % 360
+
+        # 第一个点的 bearing 设为 0
+        bearing[0] = 0.0
+
+        return bearing
+
+    # -----------------------------------------------------------
+    # O T H E R   M E T H O D S (保持不变)
+    # -----------------------------------------------------------
 
     def load_labels(self, user_id: str) -> pd.DataFrame:
         """加载用户标签数据"""
@@ -294,7 +326,8 @@ def preprocess_trajectory_segments(segments: List[Tuple[pd.DataFrame, str]],
     """预处理轨迹段，转换为固定长度的序列"""
     processed_segments = []
 
-    for segment, label in segments:
+    # 添加 tqdm 进度条，显示轨迹段处理进度
+    for segment, label in tqdm(segments, desc="[轨迹段预处理]"):
         if len(segment) < min_length:
             continue
 
