@@ -45,7 +45,7 @@ def main():
     parser.add_argument('--trajectory_path', type=str, required=True,
                        help='轨迹文件路径（.plt格式）')
     parser.add_argument('--osm_path', type=str, 
-                       default='data/beijing_osm_full_enhanced_verified.geojson',
+                       default='data/export.geojson',
                        help='OSM数据路径')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu',
                        help='设备')

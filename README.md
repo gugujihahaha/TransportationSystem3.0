@@ -57,19 +57,22 @@ pip install -r requirements.txt
 
 确保数据目录结构如下：
 - `data/Geolife Trajectories 1.3/` - GeoLife轨迹数据
-- `data/export.geojson` - OSM数据（可通过Overpass API获取）
+- `data/beijing_osm_full_enhanced_verified.geojson` - OSM数据（推荐，增强验证版）
+- 或 `data/export.geojson` - OSM数据（备用，可通过Overpass API获取）
 
 ### 2. 训练模型
 
 ```bash
 python train.py \
     --geolife_root "data/Geolife Trajectories 1.3" \
-    --osm_path "data/export.geojson" \
+    --osm_path "data/beijing_osm_full_enhanced_verified.geojson" \
     --batch_size 32 \
     --epochs 50 \
     --lr 0.001 \
     --save_dir checkpoints
 ```
+
+**注意**：如果不指定`--osm_path`，默认使用`beijing_osm_full_enhanced_verified.geojson`。如需使用其他文件，可通过参数指定。
 
 参数说明：
 - `--geolife_root`: GeoLife数据根目录
@@ -86,7 +89,7 @@ python train.py \
 python evaluate.py \
     --model_path checkpoints/best_model.pth \
     --geolife_root "data/Geolife Trajectories 1.3" \
-    --osm_path "data/export.geojson" \
+    --osm_path "data/beijing_osm_full_enhanced_verified.geojson" \
     --output_dir results
 ```
 
@@ -96,7 +99,7 @@ python evaluate.py \
 python predict.py \
     --model_path checkpoints/best_model.pth \
     --trajectory_path "data/Geolife Trajectories 1.3/Data/080/Trajectory/20070627094922.plt" \
-    --osm_path "data/export.geojson"
+    --osm_path "data/beijing_osm_full_enhanced_verified.geojson"
 ```
 
 ## 模型架构
