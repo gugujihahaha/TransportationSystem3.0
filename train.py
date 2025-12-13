@@ -177,7 +177,7 @@ def main():
                        default='data/Geolife Trajectories 1.3',
                        help='GeoLife数据根目录')
     parser.add_argument('--osm_path', type=str, 
-                       default='data/beijing_osm_full_enhanced_verified.geojson',
+                       default='data/export.geojson',
                        help='OSM数据路径')
     parser.add_argument('--max_users', type=int, default=None,
                        help='最大用户数（用于快速测试）')

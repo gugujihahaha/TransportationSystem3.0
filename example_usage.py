@@ -62,12 +62,15 @@ def example_build_knowledge_graph():
     print("示例2: 构建知识图谱")
     print("=" * 50)
     
-    osm_path = "data/export.geojson"
+    osm_path = "data/beijing_osm_full_enhanced_verified.geojson"
     
     if not os.path.exists(osm_path):
         print(f"   OSM数据文件不存在: {osm_path}")
-        print("   请先下载OSM数据")
-        return
+        print("   尝试使用备用文件: data/export.geojson")
+        osm_path = "data/export.geojson"
+        if not os.path.exists(osm_path):
+            print("   请先下载OSM数据")
+            return
     
     print("\n1. 加载OSM数据...")
     osm_loader = OSMDataLoader(osm_path)
@@ -98,7 +101,11 @@ def example_extract_features():
     print("=" * 50)
     
     geolife_root = "data/Geolife Trajectories 1.3"
-    osm_path = "data/export.geojson"
+    osm_path = "data/beijing_osm_full_enhanced_verified.geojson"
+    
+    # 如果新文件不存在，尝试使用备用文件
+    if not os.path.exists(osm_path):
+        osm_path = "data/export.geojson"
     
     # 加载数据
     print("\n1. 加载数据...")
