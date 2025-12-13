@@ -187,3 +187,4 @@ def main():
 if __name__ == '__main__':
     main()
 
+# python evaluate.py --model_path checkpoints/best_model.pth

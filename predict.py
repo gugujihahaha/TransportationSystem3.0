@@ -105,3 +105,4 @@ def main():
 if __name__ == '__main__':
     main()
 
+# python predict.py --model_path checkpoints/best_model.pth --trajectory_path <轨迹文件路径>
