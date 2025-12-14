@@ -73,7 +73,7 @@ def main():
     # 创建模型
     num_classes = len(label_encoder.classes_)
     model = TransportationModeClassifier(
-        trajectory_feature_dim=7,
+        trajectory_feature_dim=9,
         kg_feature_dim=11,
         hidden_dim=128,
         num_layers=2,

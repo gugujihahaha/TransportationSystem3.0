@@ -44,8 +44,8 @@ class FeatureExtractor:
         if kg_features.shape[1] != 11:
             raise ValueError(f"KG 特征提取的维度错误：预期 11 维，实际 {kg_features.shape[1]} 维。")
 
-        if trajectory_features.shape[1] != 7:
-            raise ValueError(f"轨迹特征的维度错误：预期 7 维，实际 {trajectory_features.shape[1]} 维。")
+        if trajectory_features.shape[1] != 9:
+            raise ValueError(f"轨迹特征的维度错误：预期 9 维，实际 {trajectory_features.shape[1]} 维。")
 
         return trajectory_features, kg_features
 
