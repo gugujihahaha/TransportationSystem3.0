@@ -15,9 +15,9 @@ from scipy.spatial import KDTree  # 核心修改：引入 KDTree
 
 class TransportationKnowledgeGraph:
     """交通知识图谱"""
-
+    # ... (初始化方法 __init__ 保持不变) ...
     def __init__(self):
-        self.graph = nx.MultiDiGraph()  # 有向多重图
+        self.graph = nx.MultiDiGraph()
         self.road_network = None
         self.pois = None
         self.road_type_mapping = {
@@ -32,6 +32,7 @@ class TransportationKnowledgeGraph:
             'parking': 'car'
         }
 
+    # ... (_add_road_network, _add_pois, _link_roads_to_pois 保持不变) ...
     def build_from_osm(self, road_network: pd.DataFrame, pois: pd.DataFrame):
         """从OSM数据构建知识图谱"""
         self.road_network = road_network
@@ -50,6 +51,7 @@ class TransportationKnowledgeGraph:
 
     def _add_road_network(self):
         """添加道路网络到知识图谱"""
+        # ... (与原文件一致) ...
         for _, road in self.road_network.iterrows():
             road_id = road['id']
             road_type = road.get('highway') or road.get('railway', '')
@@ -88,6 +90,7 @@ class TransportationKnowledgeGraph:
 
     def _add_pois(self):
         """添加POI到知识图谱"""
+        # ... (与原文件一致) ...
         for _, poi in self.pois.iterrows():
             poi_id = poi['id']
             poi_type = poi['type']
@@ -112,6 +115,7 @@ class TransportationKnowledgeGraph:
         """
         使用 KDTree 加速 POI 到最近道路节点的链接。
         """
+        # ... (与原文件一致) ...
         poi_nodes = [n for n, d in self.graph.nodes(data=True) if d.get('type') == 'poi']
         road_nodes_data = [(n, d) for n, d in self.graph.nodes(data=True) if d.get('type') == 'road_node']
 
@@ -182,6 +186,7 @@ class TransportationKnowledgeGraph:
     def get_road_type_for_location(self, lat: float, lon: float,
                                    max_distance: float = 50.0) -> Optional[str]:
         """获取指定位置的道路类型"""
+        # ... (与原文件一致) ...
         min_dist = float('inf')
         nearest_type = None
 
@@ -202,6 +207,7 @@ class TransportationKnowledgeGraph:
     def get_nearby_pois(self, lat: float, lon: float,
                        max_distance: float = 200.0) -> List[Dict]:
         """获取附近的POI"""
+        # ... (与原文件一致) ...
         nearby_pois = []
 
         for node, data in self.graph.nodes(data=True):
@@ -221,27 +227,35 @@ class TransportationKnowledgeGraph:
 
         return sorted(nearby_pois, key=lambda x: x['distance'])
 
-    def extract_kg_features(self, trajectory: pd.DataFrame) -> np.ndarray:
-        """从知识图谱提取特征"""
+    def extract_kg_features(self, trajectory: np.ndarray) -> np.ndarray:
+        """
+        从知识图谱提取特征。
+        重大修正：将输入类型从 pd.DataFrame 更改为 np.ndarray。
+        """
         features = []
 
+        # 修正：假设输入的 np.ndarray 轨迹为 (N, 7)，其中第 0 列是纬度 (lat)，第 1 列是经度 (lon)
+        # 原始 trajectory: ['latitude', 'longitude', 'speed', 'acceleration', 'bearing_change', 'distance', 'time_diff']
+
         # 为特征提取过程添加 tqdm
-        for _, point in tqdm(trajectory.iterrows(), desc="   [KG特征提取]"):
-            lat = point['latitude']
-            lon = point['longitude']
+        # 使用 trajectory.shape[0] 获取点数进行迭代
+        for i in tqdm(range(trajectory.shape[0]), desc="   [KG特征提取]"):
+            # 从 NumPy 数组中获取经纬度
+            lat = trajectory[i, 0] # 纬度
+            lon = trajectory[i, 1] # 经度
 
             # 特征1: 道路类型（one-hot编码）
             road_type = self.get_road_type_for_location(lat, lon)
-            road_type_features = self._encode_road_type(road_type)
+            road_type_features = self._encode_road_type(road_type) # 6维
 
             # 特征2: 附近POI信息
             nearby_pois = self.get_nearby_pois(lat, lon)
-            poi_features = self._encode_pois(nearby_pois)
+            poi_features = self._encode_pois(nearby_pois) # 4维
 
             # 特征3: 道路密度（附近道路节点数量）
-            road_density = self._calculate_road_density(lat, lon)
+            road_density = self._calculate_road_density(lat, lon) # 1维
 
-            # 合并特征
+            # 合并特征 (6 + 4 + 1 = 11 维)
             point_features = np.concatenate([
                 road_type_features,
                 poi_features,
@@ -250,10 +264,12 @@ class TransportationKnowledgeGraph:
 
             features.append(point_features)
 
-        return np.array(features)
+        # 确保返回 float32 类型
+        return np.array(features, dtype=np.float32)
 
     def _encode_road_type(self, road_type: Optional[str]) -> np.ndarray:
         """编码道路类型为one-hot向量"""
+        # ... (与原文件一致) ...
         types = ['walk', 'bike', 'car', 'bus', 'train', 'unknown']
         encoding = np.zeros(len(types))
 
@@ -265,6 +281,7 @@ class TransportationKnowledgeGraph:
 
     def _encode_pois(self, pois: List[Dict]) -> np.ndarray:
         """编码POI信息"""
+        # ... (与原文件一致) ...
         # 特征: [是否有公交站, 是否有地铁站, 是否有停车场, 最近POI距离]
         features = np.zeros(4)
 
@@ -283,6 +300,7 @@ class TransportationKnowledgeGraph:
     def _calculate_road_density(self, lat: float, lon: float,
                                radius: float = 100.0) -> float:
         """计算道路密度"""
+        # ... (与原文件一致) ...
         count = 0
 
         for node, data in self.graph.nodes(data=True):
@@ -299,6 +317,7 @@ class TransportationKnowledgeGraph:
 
     def get_graph_statistics(self) -> Dict:
         """获取知识图谱统计信息"""
+        # ... (与原文件一致) ...
         return {
             'num_nodes': self.graph.number_of_nodes(),
             'num_edges': self.graph.number_of_edges(),
