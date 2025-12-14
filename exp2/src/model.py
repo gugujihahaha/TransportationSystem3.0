@@ -12,11 +12,11 @@ class TransportationModeClassifier(nn.Module):
     """交通方式分类器 - 修正 num_classes = 11"""
 
     def __init__(self,
-                 trajectory_feature_dim: int = 7,
+                 trajectory_feature_dim: int = 9,
                  kg_feature_dim: int = 11,
                  hidden_dim: int = 128,
                  num_layers: int = 2,
-                 num_classes: int = 11,  # <<< 关键修正：从 6 改为 11
+                 num_classes: int = 6,
                  dropout: float = 0.3):
         """
         Args:
@@ -116,11 +116,11 @@ class AttentionFusionModel(nn.Module):
     """带注意力机制的特征融合模型（可选） - 修正 num_classes = 11"""
 
     def __init__(self,
-                 trajectory_feature_dim: int = 7,
+                 trajectory_feature_dim: int = 9,
                  kg_feature_dim: int = 11,
                  hidden_dim: int = 128,
                  num_layers: int = 2,
-                 num_classes: int = 11,  # <<< 关键修正：从 6 改为 11
+                 num_classes: int = 6,
                  dropout: float = 0.3):
         super(AttentionFusionModel, self).__init__()
 

@@ -334,7 +334,8 @@ def preprocess_trajectory_segments(segments: List[Tuple[pd.DataFrame, str]],
         # 提取特征序列
         # 注意：这里需要确保 segment 中包含这些特征列
         features = segment[['latitude', 'longitude', 'speed', 'acceleration',
-                           'bearing_change', 'distance', 'time_diff']].values
+                           'bearing_change', 'distance', 'time_diff',
+                           'total_distance', 'total_time']].values
 
         # 如果序列太长，进行采样
         if len(features) > 200:

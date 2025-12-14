@@ -28,7 +28,7 @@ from src.knowledge_graph import TransportationKnowledgeGraph
 
 
 # ========================== 特征维度常量 (保持不变) ==========================
-TRAJECTORY_FEATURE_DIM = 7
+TRAJECTORY_FEATURE_DIM = 9
 KG_FEATURE_DIM = 11
 # ==============================================================================
 
@@ -149,6 +149,18 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None):
     print("\n2.2 正在预处理轨迹段...")
     processed_segments = preprocess_trajectory_segments(all_segments, min_length=10)
     print(f" -> 预处理完成。剩余 {len(processed_segments)} 个可用轨迹段。")
+
+    # +++++ 在这里添加类别过滤 +++++
+    valid_modes = {'walk', 'bike', 'bus', 'car', 'train', 'taxi'}
+    original_count = len(processed_segments)
+    processed_segments = [
+        (traj, label) for traj, label in processed_segments
+        if label in valid_modes
+    ]
+    filtered_count = original_count - len(processed_segments)
+    if filtered_count > 0:
+        print(f" -> 过滤掉 {filtered_count} 个非标准类别的轨迹段")
+    # +++++ 添加结束 +++++
 
     if not processed_segments:
         print("错误: 没有加载到任何可用轨迹段。")
