@@ -1,11 +1,13 @@
 """
-训练脚本 (已实现缓存 Checkpointing)
-- 确保在 GeoLife 加载和模型训练阶段显示实时进度。
-- 阶段 1 和阶段 2 的结果会被缓存到 'cache/' 目录，避免重复耗时计算。
+训练脚本 (最终版本：已实现 KG 特征提取缓存)
+
+核心优化点:
+1. 将耗时的 feature_extractor.extract_features() 从 DataLoader 中移出。
+2. 在 load_data 阶段一次性计算所有特征，并缓存到 'cache/processed_features.pkl'。
+3. DataLoader 只负责读取预提取的特征，极大加速阶段 4 的训练速度。
 """
 import os
 import argparse
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -14,67 +16,64 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import classification_report
 from tqdm import tqdm
-import pickle # <-- 缓存核心库
-import warnings # 用于缓存错误处理
+import pickle # 缓存核心库
+import warnings
+import multiprocessing # Windows 多进程保护
 
-# 导入自定义模块 (完全依赖您的 src 文件夹)
+# 导入自定义模块 (确保这些文件在您的 src 文件夹中)
 from src.data_preprocessing import GeoLifeDataLoader, OSMDataLoader, preprocess_trajectory_segments
 from src.feature_extraction import FeatureExtractor
 from src.model import TransportationModeClassifier
-from src.knowledge_graph import TransportationKnowledgeGraph # 导入知识图谱模块
+from src.knowledge_graph import TransportationKnowledgeGraph
 
 
-# ========================== 特征维度常量 (用于模型和验证) ==========================
+# ========================== 特征维度常量 (保持不变) ==========================
 TRAJECTORY_FEATURE_DIM = 7
 KG_FEATURE_DIM = 11
 # ==============================================================================
 
 
-# ========================== 缓存配置 ==========================
+# ========================== 缓存配置 (更新：缓存最终特征) ==========================
 CACHE_DIR = 'cache'
 KG_CACHE_PATH = os.path.join(CACHE_DIR, 'kg_data.pkl')
-PROCESSED_DATA_CACHE_PATH = os.path.join(CACHE_DIR, 'processed_data.pkl')
+# <<< 新增：用于缓存最终提取好的特征 (包含轨迹特征、KG特征和编码标签) >>>
+PROCESSED_FEATURE_CACHE_PATH = os.path.join(CACHE_DIR, 'processed_features.pkl')
 os.makedirs(CACHE_DIR, exist_ok=True)
 # =============================================================
 
 
 class TrajectoryDataset(Dataset):
-    """轨迹数据集"""
+    """轨迹数据集 (现在直接加载预提取的特征向量)"""
 
-    def __init__(self, segments, feature_extractor, label_encoder):
-        self.segments = segments
-        self.feature_extractor = feature_extractor
-        self.label_encoder = label_encoder
+    # 构造函数只接收预提取的特征列表：[(traj_feat_array, kg_feat_array, encoded_label_integer), ...]
+    def __init__(self, all_features_and_labels):
+        self.data = all_features_and_labels
+        # 注意: 构造函数中不再需要 feature_extractor 和 label_encoder
 
     def __len__(self):
-        return len(self.segments)
+        return len(self.data)
 
     def __getitem__(self, idx):
-        # 注意: 这一步会在 DataLoader 的 worker 进程中并行执行 (CPU)
-        trajectory, label = self.segments[idx]
-
-        # 提取特征
-        trajectory_features, kg_features = self.feature_extractor.extract_features(trajectory)
+        # 这一步只是简单的数据读取和转换为 Tensor，速度极快
+        trajectory_features, kg_features, label_encoded = self.data[idx]
 
         # 转换为tensor
         trajectory_tensor = torch.FloatTensor(trajectory_features)
         kg_tensor = torch.FloatTensor(kg_features)
 
-        # 编码标签
-        label_encoded = self.label_encoder.transform([label])[0]
+        # 标签已经是数字编码
         label_tensor = torch.LongTensor([label_encoded])[0]
 
         return trajectory_tensor, kg_tensor, label_tensor
 
 
 def load_data(geolife_root: str, osm_path: str, max_users: int = None):
-    """加载所有数据，并实现阶段 1 和阶段 2 的缓存检查"""
+    """加载所有数据，并实现阶段 1 (KG) 和 阶段 2 (特征) 的缓存检查"""
 
     geolife_loader = GeoLifeDataLoader(geolife_root)
     users = geolife_loader.get_all_users()
     if max_users and max_users < len(users):
         users = users[:max_users]
-
 
     # ================= 阶段 1: 知识图谱构建 (缓存检查) ==================
     kg = None
@@ -85,111 +84,105 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None):
                 kg = pickle.load(f)
             print("1.0 知识图谱从缓存加载完成。")
         except Exception as e:
-            # 健壮性增强：缓存文件损坏，删除并重建
             warnings.warn(f"[WARN] 知识图谱缓存文件加载失败 ({e})，将重新构建。")
             os.remove(KG_CACHE_PATH)
-            kg = None # 强制重建
+            kg = None
 
     if kg is None:
-        # --- 正常执行阶段 1 (耗时部分) ---
+        # --- 正常执行阶段 1 (重建) ---
         print("\n================ 阶段 1: 数据加载与知识图谱构建 (重建) ==================")
         print(f"1.1 正在初始化 GeoLife 数据加载器: {geolife_root}")
         print(f" -> 找到 {len(users)} 个 GeoLife 用户（将处理其中 {len(users)} 个）")
-
-        # 加载OSM数据并构建知识图谱
-        print("\n1.2 正在加载 OSM 数据...")
         osm_loader = OSMDataLoader(osm_path)
         osm_data = osm_loader.load_osm_data()
-
         road_network = osm_loader.extract_road_network(osm_data)
         pois = osm_loader.extract_pois(osm_data)
         print(f" -> OSM 数据提取完成: {len(road_network)} 条道路, {len(pois)} 个POI。")
-
-        # KG构建和关联阶段
         print("\n1.3 正在构建交通知识图谱...")
         kg = TransportationKnowledgeGraph()
         kg.build_from_osm(road_network, pois)
         print(f" -> 知识图谱构建阶段已完成。统计: {kg.get_graph_statistics()}")
-
-        # --- 阶段 1 缓存 ---
         print(f"1.4 知识图谱构建完成，正在存储到缓存文件：{KG_CACHE_PATH}")
         with open(KG_CACHE_PATH, 'wb') as f:
-            # 使用 HIGHEST_PROTOCOL 提升序列化速度
             pickle.dump(kg, f, protocol=pickle.HIGHEST_PROTOCOL)
         print("1.4 知识图谱缓存完成。")
 
 
-    # ================= 阶段 2: 轨迹加载、分段与特征提取 (缓存检查) ==================
-    processed_segments = None
+    # ================= 阶段 2: 轨迹加载、分段与【特征提取】(缓存检查) ==================
+    all_features_and_labels = None
     label_encoder = None
-    if os.path.exists(PROCESSED_DATA_CACHE_PATH):
-        print("\n================ 阶段 2: 轨迹加载与特征提取 (从缓存加载) ==================")
+
+    # <<< 检查最终特征缓存 >>>
+    if os.path.exists(PROCESSED_FEATURE_CACHE_PATH):
+        print(f"\n================ 阶段 2: 特征提取 (从缓存加载) ==================")
         try:
-            with open(PROCESSED_DATA_CACHE_PATH, 'rb') as f:
-                processed_segments, label_encoder = pickle.load(f)
-            print(f"2.0 预处理数据从缓存加载完成。剩余 {len(processed_segments)} 个可用轨迹段。")
+            with open(PROCESSED_FEATURE_CACHE_PATH, 'rb') as f:
+                all_features_and_labels, label_encoder = pickle.load(f)
+            print(f"2.0 预提取特征从缓存加载完成。共有 {len(all_features_and_labels)} 条记录。")
+            return all_features_and_labels, kg, label_encoder # 成功，直接返回
         except Exception as e:
-            # 健壮性增强：缓存文件损坏，删除并重建
-            warnings.warn(f"[WARN] 预处理数据缓存文件加载失败 ({e})，将重新处理。")
-            os.remove(PROCESSED_DATA_CACHE_PATH)
-            processed_segments = None # 强制重建
+            warnings.warn(f"[WARN] 最终特征缓存文件加载失败 ({e})，将重新处理。")
+            os.remove(PROCESSED_FEATURE_CACHE_PATH)
+            all_features_and_labels = None # 强制重建
 
-    if processed_segments is None:
-        # --- 正常执行阶段 2 (耗时部分) ---
-        print("\n================ 阶段 2: 轨迹加载、分段与特征提取 (重建) ==================")
+    # --- 缓存不存在或损坏，执行耗时的重建步骤 ---
+    print("\n================ 阶段 2: 轨迹加载、分段与【特征提取】 (重建) ==================")
 
-        # 加载所有轨迹段
-        print("2.1 正在加载 GeoLife 轨迹段 (文件 I/O 密集)...")
-        all_segments = []
-
-        # 使用 tqdm 包装 GeoLife 用户循环，实时显示用户加载进度
-        for user_id in tqdm(users, desc="[GeoLife用户加载]"):
-            labels = geolife_loader.load_labels(user_id)
-            if labels.empty:
+    # 2.1 轨迹加载、分段与预处理 (耗时文件I/O)
+    print("2.1 正在加载 GeoLife 轨迹段 (文件 I/O 密集)...")
+    all_segments = []
+    for user_id in tqdm(users, desc="[GeoLife用户加载]"):
+        labels = geolife_loader.load_labels(user_id)
+        if labels.empty: continue
+        trajectory_dir = os.path.join(geolife_root, f"Data/{user_id}/Trajectory")
+        if not os.path.exists(trajectory_dir): continue
+        for traj_file in os.listdir(trajectory_dir):
+            if not traj_file.endswith('.plt'): continue
+            traj_path = os.path.join(trajectory_dir, traj_file)
+            try:
+                trajectory = geolife_loader.load_trajectory(traj_path)
+                segments = geolife_loader.segment_trajectory(trajectory, labels)
+                all_segments.extend(segments)
+            except Exception as e:
                 continue
+    print(f" -> GeoLife 轨迹加载完成。总共加载 {len(all_segments)} 个原始轨迹段。")
+    print("\n2.2 正在预处理轨迹段...")
+    processed_segments = preprocess_trajectory_segments(all_segments, min_length=10)
+    print(f" -> 预处理完成。剩余 {len(processed_segments)} 个可用轨迹段。")
 
-            trajectory_dir = os.path.join(geolife_root, f"Data/{user_id}/Trajectory")
-            if not os.path.exists(trajectory_dir):
-                continue
+    if not processed_segments:
+        print("错误: 没有加载到任何可用轨迹段。")
+        return [], kg, None
 
-            # 内部循环（加载单个用户的轨迹文件）
-            for traj_file in os.listdir(trajectory_dir):
-                if not traj_file.endswith('.plt'):
-                    continue
+    # 2.3 创建标签编码器 (必须先创建)
+    all_labels_str = [label for _, label in processed_segments]
+    label_encoder = LabelEncoder()
+    label_encoder.fit(all_labels_str)
 
-                traj_path = os.path.join(trajectory_dir, traj_file)
-                try:
-                    # load_trajectory 返回 DataFrame
-                    trajectory = geolife_loader.load_trajectory(traj_path)
-                    segments = geolife_loader.segment_trajectory(trajectory, labels)
-                    all_segments.extend(segments)
-                except Exception as e:
-                    # 避免在 tqdm 中打印大量内容
-                    # print(f"\n[WARN] 加载轨迹文件失败 {traj_path}: {e}")
-                    continue
+    # 2.4 【关键步骤：特征提取】(耗时操作，仅运行一次)
+    print("\n2.4 正在进行耗时的【KG特征提取】...")
+    feature_extractor = FeatureExtractor(kg)
+    all_features_and_labels = []
 
-        print(f" -> GeoLife 轨迹加载完成。总共加载 {len(all_segments)} 个原始轨迹段。")
+    # 仅在主进程中执行一次耗时操作，用 tqdm 实时显示进度
+    for trajectory, label_str in tqdm(processed_segments, desc="[KG特征提取] (首次运行耗时较长)"):
+        # 提取特征 (耗时操作)
+        trajectory_features, kg_features = feature_extractor.extract_features(trajectory)
 
-        # 预处理轨迹段
-        print("\n2.2 正在预处理轨迹段...")
-        # preprocess_trajectory_segments 负责将 DataFrame 转换为 NumPy 数组
-        processed_segments = preprocess_trajectory_segments(all_segments, min_length=10)
-        print(f" -> 预处理完成。剩余 {len(processed_segments)} 个可用轨迹段。")
+        # 编码标签 (立即转换为数字)
+        label_encoded = label_encoder.transform([label_str])[0]
 
-        # 创建标签编码器
-        all_labels = [label for _, label in processed_segments]
-        label_encoder = LabelEncoder()
-        label_encoder.fit(all_labels)
+        # 存储特征数组和数字标签
+        all_features_and_labels.append((trajectory_features, kg_features, label_encoded))
 
-        # --- 阶段 2 缓存 ---
-        print(f"2.3 轨迹预处理完成，正在存储到缓存文件：{PROCESSED_DATA_CACHE_PATH}")
-        data_to_save = (processed_segments, label_encoder)
-        with open(PROCESSED_DATA_CACHE_PATH, 'wb') as f:
-            pickle.dump(data_to_save, f, protocol=pickle.HIGHEST_PROTOCOL)
-        print("2.3 预处理数据缓存完成。")
+    # 2.5 缓存最终特征
+    print(f"\n2.5 最终特征提取完成，正在存储到缓存文件：{PROCESSED_FEATURE_CACHE_PATH}")
+    data_to_save = (all_features_and_labels, label_encoder)
+    with open(PROCESSED_FEATURE_CACHE_PATH, 'wb') as f:
+        pickle.dump(data_to_save, f, protocol=pickle.HIGHEST_PROTOCOL)
+    print("2.5 最终特征缓存完成。")
 
-    # 返回所有组件
-    return processed_segments, kg, label_encoder
+    return all_features_and_labels, kg, label_encoder
 
 
 def train_epoch(model, dataloader, criterion, optimizer, device):
@@ -199,7 +192,7 @@ def train_epoch(model, dataloader, criterion, optimizer, device):
     correct = 0
     total = 0
 
-    # 训练批次的 tqdm
+    # 训练批次的 tqdm (标签已修正)
     for trajectory_features, kg_features, labels in tqdm(dataloader, desc="   [训练批次]"):
         # 将数据从 CPU 移动到 GPU
         trajectory_features = trajectory_features.to(device)
@@ -232,7 +225,7 @@ def evaluate(model, dataloader, criterion, device, label_encoder):
     all_labels = []
 
     with torch.no_grad():
-        # 评估批次的 tqdm
+        # 评估批次的 tqdm (标签已修正)
         for trajectory_features, kg_features, labels in tqdm(dataloader, desc="   [评估批次]"):
             # 将数据从 CPU 移动到 GPU
             trajectory_features = trajectory_features.to(device)
@@ -252,7 +245,6 @@ def evaluate(model, dataloader, criterion, device, label_encoder):
 
     # 分类报告
     class_names = label_encoder.classes_
-    # 添加 zero_division=0 避免警告/错误
     report = classification_report(all_labels, all_preds,
                                   target_names=class_names,
                                   output_dict=True, zero_division=0)
@@ -263,10 +255,10 @@ def evaluate(model, dataloader, criterion, device, label_encoder):
 def main():
     parser = argparse.ArgumentParser(description='训练交通方式识别模型')
     parser.add_argument('--geolife_root', type=str,
-                       default='data/Geolife Trajectories 1.3',
+                       default='../data/Geolife Trajectories 1.3',
                        help='GeoLife数据根目录')
     parser.add_argument('--osm_path', type=str,
-                       default='data/export.geojson',
+                       default='../data/export.geojson',
                        help='OSM数据路径')
     parser.add_argument('--max_users', type=int, default=None,
                        help='最大用户数（用于快速测试）')
@@ -284,10 +276,10 @@ def main():
                        help='Dropout比率')
     parser.add_argument('--save_dir', type=str, default='checkpoints',
                        help='模型保存目录')
-    # <<< 新增：用于并行数据加载和特征提取 >>>
+    # 新增：用于并行数据加载和特征提取
     parser.add_argument('--num_workers', type=int, default=4,
                        help='用于数据加载的进程数，以利用多核CPU加速I/O和特征提取')
-    # <<< 保持自动检测 GPU 逻辑不变 >>>
+    # 保持自动检测 GPU 逻辑不变
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu',
                        help='设备')
 
@@ -296,27 +288,28 @@ def main():
     # 创建保存目录
     os.makedirs(args.save_dir, exist_ok=True)
 
-    # 加载数据 (利用缓存跳过耗时环节)
-    segments, kg, label_encoder = load_data(args.geolife_root, args.osm_path, args.max_users)
+    # 加载数据 (返回 all_features_and_labels 列表)
+    all_features_and_labels, kg, label_encoder = load_data(args.geolife_root, args.osm_path, args.max_users)
 
-    if len(segments) == 0:
+    if len(all_features_and_labels) == 0:
         print("错误: 没有加载到任何数据，请检查数据路径和预处理条件。")
         return
 
-    # 创建特征提取器
+    # <<< 关键：不再需要创建 FeatureExtractor，因为特征已提取完毕 >>>
     print("\n================ 阶段 3: 模型初始化与训练 ==================")
-    feature_extractor = FeatureExtractor(kg)
+    # feature_extractor = FeatureExtractor(kg) # 此行已删除！
 
     # 准备标签编码器
     num_classes = len(label_encoder.classes_)
     print(f" -> 类别数: {num_classes}")
     print(f" -> 类别: {label_encoder.classes_}")
 
-    # 创建数据集
-    dataset = TrajectoryDataset(segments, feature_extractor, label_encoder)
+    # 创建数据集 (传入预提取的特征列表)
+    dataset = TrajectoryDataset(all_features_and_labels)
 
     # 划分训练集和测试集
-    labels_for_stratify = label_encoder.transform([segments[i][1] for i in range(len(segments))])
+    # 标签现在已经预编码，直接从 all_features_and_labels 中提取
+    labels_for_stratify = [label for _, _, label in all_features_and_labels]
     train_indices, test_indices = train_test_split(
         range(len(dataset)),
         test_size=0.2,
@@ -327,8 +320,7 @@ def main():
     train_dataset = torch.utils.data.Subset(dataset, train_indices)
     test_dataset = torch.utils.data.Subset(dataset, test_indices)
 
-    # <<< 修正：应用 num_workers 参数和 pin_memory=True >>>
-    # pin_memory=True: 加速数据从 CPU 到 GPU 的传输
+    # 应用 num_workers 参数和 pin_memory=True
     train_loader = DataLoader(train_dataset,
                               batch_size=args.batch_size,
                               shuffle=True,
@@ -339,7 +331,6 @@ def main():
                              shuffle=False,
                              num_workers=args.num_workers,
                              pin_memory=True)
-    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
     print(f" -> 训练集大小: {len(train_dataset)}, 测试集大小: {len(test_dataset)}")
 
@@ -351,7 +342,7 @@ def main():
         num_layers=args.num_layers,
         num_classes=num_classes,
         dropout=args.dropout
-    ).to(args.device) # <<< 关键：将模型移动到 GPU/CPU
+    ).to(args.device)
 
     print(f" -> 模型参数数量: {sum(p.numel() for p in model.parameters())}")
     print(f" -> 训练设备: {args.device}")
@@ -365,7 +356,6 @@ def main():
     best_test_loss = float('inf')
 
     print(f"\n================ 阶段 4: 模型训练 (共 {args.epochs} 轮) ==================")
-    # 触发 LSTM 工作原理图
     print("模型结构采用 Bi-LSTM，适用于序列数据和异构特征融合。")
 
 
@@ -411,4 +401,8 @@ def main():
 
 
 if __name__ == '__main__':
+    # 启用 Windows 多进程保护，以确保 DataLoader 能够稳定启动 worker 进程
+    if os.name == 'nt':
+        multiprocessing.freeze_support()
+
     main()

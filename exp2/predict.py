@@ -2,18 +2,13 @@
 预测脚本
 用于对新轨迹进行交通方式识别
 """
-import os
 import argparse
 import torch
-import pandas as pd
-import numpy as np
-from torch.utils.data import DataLoader
 
 from src.data_preprocessing import GeoLifeDataLoader, OSMDataLoader
 from src.knowledge_graph import TransportationKnowledgeGraph
 from src.feature_extraction import FeatureExtractor
 from src.model import TransportationModeClassifier
-from sklearn.preprocessing import LabelEncoder
 
 
 def predict_trajectory(model, trajectory, feature_extractor, device, label_encoder):
@@ -45,7 +40,7 @@ def main():
     parser.add_argument('--trajectory_path', type=str, required=True,
                        help='轨迹文件路径（.plt格式）')
     parser.add_argument('--osm_path', type=str, 
-                       default='data/export.geojson',
+                       default='../data/export.geojson',
                        help='OSM数据路径')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu',
                        help='设备')
@@ -105,4 +100,4 @@ def main():
 if __name__ == '__main__':
     main()
 
-# python predict.py --model_path checkpoints/best_model.pth --trajectory_path <轨迹文件路径>
+# python predict.py --model_path checkpoints/exp2_model.pth --trajectory_path <轨迹文件路径>
