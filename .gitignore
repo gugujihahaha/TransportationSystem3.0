@@ -37,7 +37,7 @@ ENV/
 .ipynb_checkpoints
 
 # Model checkpoints
-checkpoints/
+exp2/checkpoints/
 *.pth
 *.pt
 *.ckpt
@@ -57,6 +57,7 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.log
+
 
 
 

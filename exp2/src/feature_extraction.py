@@ -3,10 +3,12 @@
 结合轨迹特征和知识图谱特征
 """
 import numpy as np
-import pandas as pd
 from typing import Tuple
+
+from .knowledge_graph import TransportationKnowledgeGraph
+
+
 # 导入 TransportationKnowledgeGraph，现在它能够处理 NumPy 数组
-from src.knowledge_graph import TransportationKnowledgeGraph
 
 
 class FeatureExtractor:

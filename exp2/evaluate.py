@@ -4,18 +4,14 @@
 import os
 import argparse
 import torch
-import numpy as np
 from torch.utils.data import DataLoader
 from sklearn.metrics import classification_report, confusion_matrix
-from sklearn.preprocessing import LabelEncoder
 import matplotlib.pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
 
 from src.data_preprocessing import GeoLifeDataLoader, OSMDataLoader, preprocess_trajectory_segments
 from src.knowledge_graph import TransportationKnowledgeGraph
-from src.feature_extraction import FeatureExtractor
-from src.model import TransportationModeClassifier
 from train import TrajectoryDataset
 
 
@@ -76,7 +72,6 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None):
     return processed_segments, kg
 from src.feature_extraction import FeatureExtractor
 from src.model import TransportationModeClassifier
-from sklearn.preprocessing import LabelEncoder
 
 
 def plot_confusion_matrix(y_true, y_pred, class_names, save_path):
@@ -99,10 +94,10 @@ def main():
     parser.add_argument('--model_path', type=str, required=True,
                        help='模型路径')
     parser.add_argument('--geolife_root', type=str, 
-                       default='data/Geolife Trajectories 1.3',
+                       default='../data/Geolife Trajectories 1.3',
                        help='GeoLife数据根目录')
     parser.add_argument('--osm_path', type=str, 
-                       default='data/export.geojson',
+                       default='../data/export.geojson',
                        help='OSM数据路径')
     parser.add_argument('--batch_size', type=int, default=32,
                        help='批次大小')
@@ -187,4 +182,4 @@ def main():
 if __name__ == '__main__':
     main()
 
-# python evaluate.py --model_path checkpoints/best_model.pth
+# python evaluate.py --model_path checkpoints/exp2_model.pth
