@@ -5,7 +5,7 @@
 关键优化点:
 1. GeoLife DataLoader 能够鲁棒地处理 6 列和 7 列格式。
 2. 实现了经纬度异常值的强制清洗，避免数据错误中断。
-3. 轨迹特征计算（距离、方位角）已完全向量化，大幅提升了性能。
+3. 轨迹特征计算（距离、方位角、累计量）已完全向量化，大幅提升了性能。
 """
 import os
 import pandas as pd
@@ -16,7 +16,7 @@ import json
 import warnings
 from tqdm import tqdm
 
-# 暂时忽略设置副本警告，因为它在 pandas 中通常是良性的
+# 暂时忽略设置副本警告
 pd.options.mode.chained_assignment = None
 
 class GeoLifeDataLoader:
@@ -39,7 +39,7 @@ class GeoLifeDataLoader:
 
         # 2. 根据列数分配正确的列名并进行标准化
         if num_cols == 7:
-            # 标准 GeoLife 格式：7列 (lat, lon, res, alt, date_days, date, time)
+            # 标准 GeoLife 格式：7列
             df.columns = ['latitude', 'longitude', 'reserved', 'altitude', 'date_days', 'date', 'time']
             df['reserved'] = df['reserved'].replace({0.0: 0, 0: 0}).astype(int)
         elif num_cols == 6:
@@ -62,19 +62,18 @@ class GeoLifeDataLoader:
         df['datetime'] = pd.to_datetime(df['date'] + ' ' + df['time'])
         df = df.sort_values('datetime').reset_index(drop=True)
 
-        # 4. 强制数据清洗：删除无效坐标点 (解决 Latitude must be in the [-90, 90] range 错误)
+        # 4. 强制数据清洗：删除无效坐标点
         invalid_lat_mask = (df['latitude'] < -90) | (df['latitude'] > 90)
         invalid_lon_mask = (df['longitude'] < -180) | (df['longitude'] > 180)
 
         if invalid_lat_mask.any() or invalid_lon_mask.any():
-            warnings.warn(f"文件 {os.path.basename(file_path)} 发现 {invalid_lat_mask.sum()} 个无效纬度和 {invalid_lon_mask.sum()} 个无效经度，正在删除。")
-            # 仅保留有效的点
+            warnings.warn(f"文件 {os.path.basename(file_path)} 发现无效坐标，正在删除。")
             df = df[~invalid_lat_mask & ~invalid_lon_mask].reset_index(drop=True)
 
             if len(df) < 2:
                 raise ValueError("轨迹文件在清洗后点数过少。")
 
-        # 5. 向量化计算特征 (大幅提高速度)
+        # 5. 向量化计算特征
         df = self._calculate_features_vectorized(df)
 
         # 清理不必要的列
@@ -87,35 +86,29 @@ class GeoLifeDataLoader:
     # -----------------------------------------------------------
 
     def _calculate_features_vectorized(self, df: pd.DataFrame) -> pd.DataFrame:
-        """计算轨迹特征 (使用向量化优化性能)"""
+        """计算轨迹特征 (使用向量化优化性能)，包括 9 维所需的所有特征"""
 
         # 1. 计算时间差（秒）
         df['time_diff'] = df['datetime'].diff().dt.total_seconds().fillna(0)
 
         # 2. 向量化计算距离 (Haversine 公式)
-
-        # 提取当前点和前一个点的坐标
         lat1 = df['latitude'].shift(1).fillna(df['latitude'].iloc[0])
         lon1 = df['longitude'].shift(1).fillna(df['longitude'].iloc[0])
         lat2 = df['latitude']
         lon2 = df['longitude']
 
-        # 转换为弧度
         lat1_rad, lon1_rad, lat2_rad, lon2_rad = map(np.radians, [lat1, lon1, lat2, lon2])
 
-        # Haversine 公式实现
         dlon = lon2_rad - lon1_rad
         dlat = lat2_rad - lat1_rad
 
-        # a = sin²(Δφ/2) + cos(φ1) * cos(φ2) * sin²(Δλ/2)
         a = np.sin(dlat/2.0)**2 + np.cos(lat1_rad) * np.cos(lat2_rad) * np.sin(dlon/2.0)**2
-        # c = 2 * atan2(√a, √(1−a))
         c = 2 * np.arcsin(np.sqrt(a))
 
         R = 6371000 # 地球半径，单位：米
         distances = R * c
 
-        distances.iloc[0] = 0.0 # 第一个点的距离为 0
+        distances.iloc[0] = 0.0
         df['distance'] = distances
 
         # 3. 向量化计算速度和加速度
@@ -135,6 +128,16 @@ class GeoLifeDataLoader:
         # 处理角度跨越 360/0 度的变化 (取较小值)
         df['bearing_change'] = np.where(df['bearing_change'] > 180, 360 - df['bearing_change'], df['bearing_change'])
 
+        # -----------------------------------------------------------
+        # 6. 扩展特征：累计距离和总时长 (NEW: 9维特征所需)
+        # -----------------------------------------------------------
+
+        # total_distance: 轨迹段的总累计距离 (从第一个点开始累加)
+        df['total_distance'] = df['distance'].cumsum()
+
+        # total_time: 轨迹段的总累计时长 (从第一个点开始累加)
+        df['total_time'] = df['time_diff'].cumsum()
+
         return df
 
     def _calculate_bearing_vectorized(self, lat1: np.ndarray, lon1: np.ndarray, lat2: np.ndarray, lon2: np.ndarray) -> np.ndarray:
@@ -142,16 +145,13 @@ class GeoLifeDataLoader:
 
         dlon = lon2 - lon1
 
-        # 方位角公式
         y = np.sin(dlon) * np.cos(lat2)
         x = np.cos(lat1) * np.sin(lat2) - np.sin(lat1) * np.cos(lat2) * np.cos(dlon)
 
         bearing = np.degrees(np.arctan2(y, x))
 
-        # 转换为 0-360 度范围
         bearing = (bearing + 360) % 360
 
-        # 第一个点的 bearing 设为 0
         bearing[0] = 0.0
 
         return bearing
@@ -180,7 +180,6 @@ class GeoLifeDataLoader:
             end_time = label_row['End Time']
             mode = label_row['Transportation Mode']
 
-            # 提取时间范围内的轨迹点
             mask = (trajectory['datetime'] >= start_time) & (trajectory['datetime'] <= end_time)
             segment = trajectory[mask].copy()
 
@@ -227,7 +226,6 @@ class OSMDataLoader:
         try:
             import ijson  # 需要安装: pip install ijson
 
-            # 使用ijson进行流式解析
             with open(self.geojson_path, 'rb') as f:
                 parser = ijson.items(f, 'features.item')
                 features = []
@@ -268,7 +266,6 @@ class OSMDataLoader:
             props = feature.get('properties', {})
             geometry = feature.get('geometry', {})
 
-            # 提取道路类型
             highway = props.get('highway', '')
             railway = props.get('railway', '')
 
@@ -293,12 +290,10 @@ class OSMDataLoader:
             props = feature.get('properties', {})
             geometry = feature.get('geometry', {})
 
-            # 提取公交站、地铁站等
             highway = props.get('highway', '')
             railway = props.get('railway', '')
             amenity = props.get('amenity', '')
 
-            # 支持更多POI类型（根据新数据可能包含的类型）
             poi_types = ['bus_stop', 'station', 'parking', 'taxi', 'subway_entrance']
 
             if (highway in poi_types or
@@ -323,26 +318,28 @@ class OSMDataLoader:
 
 def preprocess_trajectory_segments(segments: List[Tuple[pd.DataFrame, str]],
                                    min_length: int = 10) -> List[Tuple[np.ndarray, str]]:
-    """预处理轨迹段，转换为固定长度的序列"""
+    """预处理轨迹段，转换为固定长度的序列，提取 9 维特征"""
     processed_segments = []
+
+    # 9 维特征列表：
+    feature_cols = ['latitude', 'longitude', 'speed', 'acceleration',
+                    'bearing_change', 'distance', 'time_diff',
+                    'total_distance', 'total_time']
 
     # 添加 tqdm 进度条，显示轨迹段处理进度
     for segment, label in tqdm(segments, desc="[轨迹段预处理]"):
         if len(segment) < min_length:
             continue
 
-        # 提取特征序列
-        # 注意：这里需要确保 segment 中包含这些特征列
-        features = segment[['latitude', 'longitude', 'speed', 'acceleration',
-                           'bearing_change', 'distance', 'time_diff',
-                           'total_distance', 'total_time']].values
+        # 确保提取 9 维特征
+        features = segment[feature_cols].values
 
         # 如果序列太长，进行采样
         if len(features) > 200:
             indices = np.linspace(0, len(features)-1, 200, dtype=int)
             features = features[indices]
 
-        # 如果序列太短，进行填充
+        # 如果序列太短，进行填充 (目标长度 50，需根据模型要求调整)
         if len(features) < 50:
             padding = np.zeros((50 - len(features), features.shape[1]))
             features = np.vstack([features, padding])
