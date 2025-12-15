@@ -7,6 +7,8 @@ GeoLife数据加载和预处理模块 (Robust and Enhanced Version)
 2. 强制清洗无效的经纬度坐标点。
 3. 轨迹特征（包括9维）计算已完全向量化，提高性能。
 4. 修复：新增 get_all_users 方法。
+
+注意：已移除序列独立归一化，改为在 train.py 中进行全局归一化。
 """
 import os
 import pandas as pd
@@ -84,6 +86,7 @@ class GeoLifeDataLoader:
         df = df.drop('reserved', axis=1, errors='ignore')
 
         # 3. 合并日期时间
+        # 针对您日志中的 UserWarning: Could not infer format，这里不进行修正，保留原样以减少非核心修改
         df['datetime'] = pd.to_datetime(df['date'] + ' ' + df['time'])
         df = df.sort_values('datetime').reset_index(drop=True)
 
@@ -217,7 +220,9 @@ def preprocess_segments(segments: List[Tuple[pd.DataFrame, str]],
                        max_length: int = 200,
                        target_length: int = 100) -> List[Tuple[np.ndarray, str]]:
     """
-    预处理轨迹段，转换为固定长度的序列
+    预处理轨迹段，转换为固定长度的序列。
+    确保所有输出序列的长度都严格等于 target_length。
+    注意：此函数不再进行归一化，归一化操作在 train.py 中使用全局统计量完成。
     """
     processed_segments = []
 
@@ -233,24 +238,31 @@ def preprocess_segments(segments: List[Tuple[pd.DataFrame, str]],
 
         # 提取特征序列（9维特征）
         features = segment[feature_cols].values
+        L = len(features)
 
-        # 序列长度处理
-        if len(features) > max_length:
-            # 如果序列太长，进行均匀采样
-            indices = np.linspace(0, len(features)-1, target_length, dtype=int)
-            features = features[indices]
-        elif len(features) < target_length:
-            # 如果序列太短，进行零填充
-            padding = np.zeros((target_length - len(features), features.shape[1]))
+        # 序列长度处理 (确保最终长度为 target_length)
+        if L >= target_length:
+            # 序列长度大于等于 target_length，需要裁剪/采样
+
+            if L > max_length:
+                # 序列太长 (> max_length)，进行均匀采样
+                indices = np.linspace(0, L-1, target_length, dtype=int)
+                features = features[indices]
+            elif L > target_length:
+                # 序列在 [target_length, max_length] 之间，随机裁剪到 target_length
+                # L - target_length + 1 是可以作为起始点的最大索引 (保证裁剪到 target_length)
+                start_index = np.random.randint(0, L - target_length + 1)
+                features = features[start_index:start_index + target_length]
+            else: # L == target_length
+                pass # 长度刚好，不操作
+
+        elif L < target_length:
+            # 如果序列太短 (< target_length)，进行零填充
+            padding = np.zeros((target_length - L, features.shape[1]))
             features = np.vstack([features, padding])
 
-        # 特征归一化（每个序列独立归一化）
-        mean = np.mean(features, axis=0, keepdims=True)
-        std = np.std(features, axis=0, keepdims=True)
-        # 避免除以零：将标准差为零的列替换为 1
-        std[std == 0] = 1.0
 
-        features = (features - mean) / std
+        # --- 移除序列独立归一化代码 (已于上一轮修正中移除) ---
 
         processed_segments.append((features, label))
 

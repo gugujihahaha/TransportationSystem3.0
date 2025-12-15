@@ -13,9 +13,14 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import classification_report, confusion_matrix
 import json
 from tqdm import tqdm
+from collections import Counter # 导入 Counter 用于统计
 
+# 导入自定义模块
 from src.data_loader import GeoLifeDataLoader, preprocess_segments
 from src.model import TransportationModeClassifier
+
+# 定义特征维度常量 (与 data_loader.py 提取的 9 维轨迹特征一致)
+TRAJECTORY_FEATURE_DIM = 9
 
 
 class TrajectoryDataset(Dataset):
@@ -49,30 +54,31 @@ def load_data(geolife_root: str, max_users: int = None):
 
     geolife_loader = GeoLifeDataLoader(geolife_root)
 
-    # 获取用户列表 (已修复)
-    users = geolife_loader.get_all_users()
+    # 获取用户列表
+    users_data_path = os.path.join(geolife_root, 'Data')
+    if not os.path.exists(users_data_path):
+        print(f"错误：未找到 GeoLife 数据目录: {users_data_path}")
+        return []
+
+    users = [d for d in os.listdir(users_data_path) if os.path.isdir(os.path.join(users_data_path, d))]
+
     if max_users:
         users = users[:max_users]
-
-    if not users:
-        print(f"错误: 在 '{geolife_root}' 及其子目录 'Data/' 中未找到任何用户文件夹。请检查 GeoLife 数据的路径。")
-        return []
 
     print(f"找到 {len(users)} 个用户")
 
     # 加载所有轨迹段
     all_segments = []
     for user_id in tqdm(users, desc="加载轨迹数据"):
+        # 假设 load_labels 接受用户ID并能找到 labels.txt
         labels = geolife_loader.load_labels(user_id)
         if labels.empty:
             continue
 
-        # 适应 GeoLife Trajectories 1.3 的结构
+        # 加载该用户的所有轨迹文件
         trajectory_dir = os.path.join(geolife_root, f"Data/{user_id}/Trajectory")
         if not os.path.exists(trajectory_dir):
-            trajectory_dir = os.path.join(geolife_root, f"{user_id}/Trajectory") # 尝试 GeoLife Trajectories 1.3 根目录结构
-            if not os.path.exists(trajectory_dir):
-                 continue
+            continue
 
         for traj_file in os.listdir(trajectory_dir):
             if not traj_file.endswith('.plt'):
@@ -84,8 +90,8 @@ def load_data(geolife_root: str, max_users: int = None):
                 segments = geolife_loader.segment_trajectory(trajectory, labels)
                 all_segments.extend(segments)
             except Exception as e:
-                # 打印更详细的错误信息，但不要中断整个加载过程
-                # print(f"加载轨迹文件失败 {traj_path}: {e}")
+                # 捕获单个文件错误
+                print(f"警告: 加载轨迹文件失败 {traj_path}: {e}")
                 continue
 
     print(f"\n总共加载 {len(all_segments)} 个轨迹段")
@@ -156,9 +162,15 @@ def evaluate(model, dataloader, criterion, device, label_encoder):
 
     # 分类报告
     class_names = label_encoder.classes_
+    num_classes = len(class_names)
+
+    # 🔥 修复 ValueError: 显式指定标签 (0 到 num_classes-1)
+    target_labels = np.arange(num_classes)
     report = classification_report(all_labels, all_preds,
                                   target_names=class_names,
-                                  output_dict=True)
+                                  labels=target_labels,
+                                  output_dict=True,
+                                  zero_division=0) # 避免稀疏类别带来的警告
 
     return avg_loss, report, all_preds, all_labels
 
@@ -192,12 +204,28 @@ def main():
     # 创建保存目录
     os.makedirs(args.save_dir, exist_ok=True)
 
-    # 加载数据
+    # 加载数据 (如果存在缓存，这里会加载 11 个类别的segments)
     segments = load_data(args.geolife_root, args.max_users)
 
     if len(segments) == 0:
         print("错误: 没有加载到任何数据")
         return
+
+    # =================================================================
+    # 🔥 核心修改 1: 过滤掉样本数过少的稀疏类别
+    # =================================================================
+    print("\n" + "=" * 60)
+    print("过滤稀疏类别：仅保留主要 7 种交通方式 (walk, bike, car, bus, train, taxi, subway)")
+    TARGET_MODES = ['walk', 'bike', 'car', 'bus', 'train', 'taxi', 'subway']
+
+    original_count = len(segments)
+    segments = [seg for seg in segments if seg[1] in TARGET_MODES]
+
+    removed_count = original_count - len(segments)
+    print(f"原始轨迹段总数: {original_count}")
+    print(f"保留轨迹段总数: {len(segments)} (移除 {removed_count} 个稀疏类别)")
+    print("=" * 60)
+    # =================================================================
 
     # 准备标签编码器
     all_labels = [label for _, label in segments]
@@ -209,16 +237,18 @@ def main():
     print(f"类别: {list(label_encoder.classes_)}")
 
     # 统计各类别数量
-    from collections import Counter
     label_counts = Counter(all_labels)
     print("\n各类别样本数:")
-    for label, count in label_counts.items():
-        print(f"  {label}: {count}")
+    # 使用 label_encoder.classes_ 确保打印顺序一致且包含所有类
+    for label in label_encoder.classes_:
+        print(f"  {label}: {label_counts.get(label, 0)}")
+
 
     # 创建数据集
     dataset = TrajectoryDataset(segments, label_encoder)
 
     # 划分训练集和测试集
+    # 使用 stratify 确保训练集和测试集的类别分布均衡
     train_indices, test_indices = train_test_split(
         range(len(dataset)),
         test_size=0.2,
@@ -237,7 +267,7 @@ def main():
 
     # 创建模型
     model = TransportationModeClassifier(
-        input_dim=9,  # 9维轨迹特征
+        input_dim=TRAJECTORY_FEATURE_DIM,  # 9维轨迹特征
         hidden_dim=args.hidden_dim,
         num_layers=args.num_layers,
         num_classes=num_classes,
@@ -289,20 +319,23 @@ def main():
                 'test_acc': test_acc,
                 'label_encoder': label_encoder,
                 'model_config': {
-                    'input_dim': 9,
+                    'input_dim': TRAJECTORY_FEATURE_DIM, # 使用常量
                     'hidden_dim': args.hidden_dim,
                     'num_layers': args.num_layers,
                     'num_classes': num_classes,
                     'dropout': args.dropout
                 }
-            }, os.path.join(args.save_dir, 'best_model.pth'))
+            }, os.path.join(args.save_dir, 'exp1_model.pth'))
             print("✓ 保存最佳模型")
 
         # 每10个epoch打印详细分类报告
         if (epoch + 1) % 10 == 0:
             print("\n详细分类报告:")
+            # 🔥 修复 ValueError: 显式指定标签 (0 到 num_classes-1)
             print(classification_report(test_labels, test_preds,
-                                      target_names=label_encoder.classes_))
+                                      target_names=label_encoder.classes_,
+                                      labels=np.arange(num_classes),
+                                      zero_division=0))
 
     print("\n" + "=" * 60)
     print("训练完成!")
