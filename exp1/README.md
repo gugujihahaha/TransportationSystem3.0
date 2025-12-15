@@ -20,6 +20,7 @@ exp1/
 ## 数据特征
 
 从GPS轨迹中提取的9维特征：
+
 1. **latitude** - 纬度
 2. **longitude** - 经度
 3. **speed** - 速度 (m/s)
@@ -61,6 +62,7 @@ python train.py \
 ```
 
 **参数说明**：
+
 - `--geolife_root`: GeoLife数据根目录（相对于exp1目录）
 - `--batch_size`: 批次大小（默认32）
 - `--epochs`: 训练轮数（默认50）
@@ -75,12 +77,13 @@ python train.py \
 
 ```bash
 python evaluate.py \
-    --model_path checkpoints/best_model.pth \
+    --model_path checkpoints/exp1_model.pth \
     --geolife_root "../data/Geolife Trajectories 1.3" \
     --output_dir results
 ```
 
 **输出**：
+
 - `evaluation_report.json`: 详细评估报告
 - `confusion_matrix.png`: 混淆矩阵图
 - `predictions.csv`: 预测结果
@@ -89,7 +92,7 @@ python evaluate.py \
 
 ```bash
 python predict.py \
-    --model_path checkpoints/best_model.pth \
+    --model_path checkpoints/exp1_model.pth \
     --trajectory_path "../data/Geolife Trajectories 1.3/Data/080/Trajectory/20070627094922.plt"
 ```
 
@@ -98,18 +101,19 @@ python predict.py \
 基于仅轨迹特征的模型，预期准确率约在**75-80%**左右。
 
 **性能限制**：
+
 - 仅依赖运动模式，缺乏地理环境信息
 - 某些交通方式（如car和taxi）可能难以区分
 - 速度相似的交通方式可能混淆
 
 ## 与完整模型对比
 
-| 特征 | 仅轨迹特征 | 轨迹+知识图谱 |
-|------|-----------|---------------|
-| 准确率 | ~78% | ~86% |
-| 特征维度 | 9维 | 20维（9+11） |
-| 数据需求 | 仅GPS轨迹 | GPS轨迹+OSM数据 |
-| 计算复杂度 | 低 | 中等 |
+| 特征    | 仅轨迹特征  | 轨迹+知识图谱     |
+| ----- | ------ | ----------- |
+| 准确率   | ~78%   | ~86%        |
+| 特征维度  | 9维     | 20维（9+11）   |
+| 数据需求  | 仅GPS轨迹 | GPS轨迹+OSM数据 |
+| 计算复杂度 | 低      | 中等          |
 
 ## 依赖
 
@@ -123,6 +127,7 @@ python predict.py \
 - tqdm >= 4.65.0
 
 安装：
+
 ```bash
 pip install -r requirements.txt
 ```
@@ -132,12 +137,14 @@ pip install -r requirements.txt
 ### 模块导入
 
 代码使用相对导入：
+
 ```python
 from src.data_loader import GeoLifeDataLoader, preprocess_segments
 from src.model import TransportationModeClassifier
 ```
 
 这意味着：
+
 - 必须在 `exp1` 目录下运行脚本
 - `src` 目录必须包含 `__init__.py` 文件（已创建）
 - Python会将 `src` 识别为一个包
@@ -145,6 +152,7 @@ from src.model import TransportationModeClassifier
 ### 如果遇到导入错误
 
 如果遇到 `ModuleNotFoundError: No module named 'src'`，请确保：
+
 1. 在 `exp1` 目录下运行脚本
 2. `src/__init__.py` 文件存在
 3. 使用 `python train.py` 而不是 `python -m train`
