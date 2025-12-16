@@ -1,5 +1,5 @@
 """
-知识图谱构建模块 (混合优化版)
+知识图谱构建模块 (混合优化版 - 修复 Decimal 类型问题)
 结合网格缓存和批量查询，实现速度与准确率的最佳平衡
 
 核心优化:
@@ -7,6 +7,7 @@
 2. ✅ 网格缓存系统（常用位置缓存）
 3. ✅ 批量查询（未缓存点）
 4. ✅ 自适应缓存策略
+5. ✅ 修复 Decimal 类型问题
 """
 import numpy as np
 import pandas as pd
@@ -18,6 +19,7 @@ from tqdm import tqdm
 from scipy.spatial import KDTree
 import pickle
 import os
+from decimal import Decimal
 
 
 class TransportationKnowledgeGraph:
@@ -39,7 +41,7 @@ class TransportationKnowledgeGraph:
             'parking': 'car'
         }
 
-        # ========== KDTree 索引 ==========
+        # KDTree 索引
         self.road_kdtree = None
         self.road_coords = None
         self.road_types = None
@@ -48,9 +50,9 @@ class TransportationKnowledgeGraph:
         self.poi_coords = None
         self.poi_types = None
 
-        # ========== 网格缓存系统 ==========
+        # 网格缓存
         self._grid_cache = {}
-        self._cache_resolution = 0.001  # 约 111 米精度
+        self._cache_resolution = 0.001  # 约 111 米
         self._cache_hits = 0
         self._cache_misses = 0
 
@@ -73,6 +75,12 @@ class TransportationKnowledgeGraph:
 
         self._link_roads_to_pois()
 
+    def _convert_to_float(self, value):
+        """转换任意数值类型为 float"""
+        if isinstance(value, Decimal):
+            return float(value)
+        return float(value)
+
     def _add_road_network(self):
         """添加道路网络到知识图谱"""
         for _, road in self.road_network.iterrows():
@@ -92,24 +100,25 @@ class TransportationKnowledgeGraph:
 
             for i, coord in enumerate(coords):
                 node_id = f"{road_id}_node_{i}"
-                lon, lat = coord[0], coord[1]
+                # 修复：转换 Decimal 为 float
+                lon, lat = self._convert_to_float(coord[0]), self._convert_to_float(coord[1])
 
                 self.graph.add_node(node_id,
-                                    type='road_node',
-                                    road_id=road_id,
-                                    road_type=road_type,
-                                    latitude=lat,
-                                    longitude=lon)
+                                  type='road_node',
+                                  road_id=road_id,
+                                  road_type=road_type,
+                                  latitude=lat,
+                                  longitude=lon)
 
                 if i > 0:
-                    prev_node_id = f"{road_id}_node_{i - 1}"
-                    distance = geodesic((coords[i - 1][1], coords[i - 1][0]),
-                                        (lat, lon)).meters
+                    prev_node_id = f"{road_id}_node_{i-1}"
+                    distance = geodesic((coords[i-1][1], coords[i-1][0]),
+                                       (lat, lon)).meters
 
                     self.graph.add_edge(prev_node_id, node_id,
-                                        type='road_segment',
-                                        road_type=road_type,
-                                        distance=distance)
+                                      type='road_segment',
+                                      road_type=road_type,
+                                      distance=distance)
 
     def _add_pois(self):
         """添加POI到知识图谱"""
@@ -122,16 +131,18 @@ class TransportationKnowledgeGraph:
                 continue
 
             if isinstance(coordinates[0], list):
-                lon, lat = coordinates[0][0], coordinates[0][1]
+                # 修复：转换 Decimal 为 float
+                lon, lat = self._convert_to_float(coordinates[0][0]), self._convert_to_float(coordinates[0][1])
             else:
-                lon, lat = coordinates[0], coordinates[1]
+                # 修复：转换 Decimal 为 float
+                lon, lat = self._convert_to_float(coordinates[0]), self._convert_to_float(coordinates[1])
 
             self.graph.add_node(poi_id,
-                                type='poi',
-                                poi_type=poi_type,
-                                name=poi.get('name', ''),
-                                latitude=lat,
-                                longitude=lon)
+                              type='poi',
+                              poi_type=poi_type,
+                              name=poi.get('name', ''),
+                              latitude=lat,
+                              longitude=lon)
 
     def _build_spatial_indices(self):
         """预构建 KDTree 空间索引"""
@@ -144,9 +155,10 @@ class TransportationKnowledgeGraph:
         ]
 
         if road_nodes_data:
+            # 确保坐标是 float 类型
             self.road_coords = np.array([
-                (lat, lon) for lat, lon, _ in road_nodes_data
-            ])
+                (float(lat), float(lon)) for lat, lon, _ in road_nodes_data
+            ], dtype=np.float64)
             self.road_types = [
                 self.road_type_mapping.get(road_type, 'unknown')
                 for _, _, road_type in road_nodes_data
@@ -162,9 +174,10 @@ class TransportationKnowledgeGraph:
         ]
 
         if poi_nodes_data:
+            # 确保坐标是 float 类型
             self.poi_coords = np.array([
-                (lat, lon) for lat, lon, _ in poi_nodes_data
-            ])
+                (float(lat), float(lon)) for lat, lon, _ in poi_nodes_data
+            ], dtype=np.float64)
             self.poi_types = [poi_type for _, _, poi_type in poi_nodes_data]
             self.poi_kdtree = KDTree(self.poi_coords)
             print(f"   -> POI KDTree: {len(self.poi_coords)} 个节点")
@@ -191,7 +204,7 @@ class TransportationKnowledgeGraph:
 
         # 步骤1: 检查缓存
         for i in range(N):
-            lat, lon = trajectory[i, 0], trajectory[i, 1]
+            lat, lon = float(trajectory[i, 0]), float(trajectory[i, 1])
             grid_key = self._get_grid_key(lat, lon)
 
             if grid_key in self._grid_cache:
@@ -204,12 +217,12 @@ class TransportationKnowledgeGraph:
 
         # 步骤2: 批量查询未缓存的点
         if uncached_indices:
-            uncached_coords = np.array(uncached_coords)
+            uncached_coords = np.array(uncached_coords, dtype=np.float64)
             uncached_features = self._batch_query_all(uncached_coords)
 
             # 步骤3: 更新缓存和结果
             for i, idx in enumerate(uncached_indices):
-                lat, lon = trajectory[idx, 0], trajectory[idx, 1]
+                lat, lon = float(trajectory[idx, 0]), float(trajectory[idx, 1])
                 grid_key = self._get_grid_key(lat, lon)
                 self._grid_cache[grid_key] = uncached_features[i]
                 kg_features[idx] = uncached_features[i]
@@ -241,7 +254,7 @@ class TransportationKnowledgeGraph:
         ], axis=1)
 
     def _batch_query_road_types(self, coords: np.ndarray,
-                                max_distance: float = 50.0) -> np.ndarray:
+                                 max_distance: float = 50.0) -> np.ndarray:
         """批量查询道路类型"""
         N = coords.shape[0]
 
@@ -266,7 +279,7 @@ class TransportationKnowledgeGraph:
 
     def _batch_query_pois(self, coords: np.ndarray,
                           max_distance: float = 200.0) -> np.ndarray:
-        """批量查询 POI 信息"""
+        """批量查询 POI 信息（修复 Decimal 类型问题）"""
         N = coords.shape[0]
         poi_features = np.zeros((N, 4), dtype=np.float32)
 
@@ -287,17 +300,19 @@ class TransportationKnowledgeGraph:
                 if 'parking' in nearby_types:
                     poi_features[i, 2] = 1.0
 
-                # 最近 POI 距离
+                # 最近 POI 距离（修复 Decimal 问题）
                 poi_coords_nearby = self.poi_coords[indices[i]]
+                # 确保 coords 和 poi_coords_nearby 都是 float64
                 dists = np.linalg.norm(
-                    poi_coords_nearby - coords[i:i + 1], axis=1
+                    poi_coords_nearby.astype(np.float64) - coords[i:i+1].astype(np.float64),
+                    axis=1
                 ) * 111300.0
                 poi_features[i, 3] = min(dists) / 200.0  # 归一化
 
         return poi_features
 
     def _batch_query_road_density(self, coords: np.ndarray,
-                                  radius: float = 100.0) -> np.ndarray:
+                                   radius: float = 100.0) -> np.ndarray:
         """批量查询道路密度"""
         N = coords.shape[0]
 
@@ -374,7 +389,7 @@ class TransportationKnowledgeGraph:
         indices = road_tree.query_ball_point(poi_coords, r=max_degree_distance)
 
         link_count = 0
-        for i, neighbors_indices in enumerate(tqdm(indices, desc="   [KG关联进度]")):
+        for i, neighbors_indices in enumerate(tqdm(indices, desc="   [KG关联进度]", leave=False)):
             poi_node = poi_ids_list[i]
             poi_lat, poi_lon = poi_coords[i]
 
@@ -392,11 +407,11 @@ class TransportationKnowledgeGraph:
 
             if nearest_road is not None:
                 self.graph.add_edge(poi_node, nearest_road,
-                                    type='nearby_road',
-                                    distance=min_dist)
+                                  type='nearby_road',
+                                  distance=min_dist)
                 self.graph.add_edge(nearest_road, poi_node,
-                                    type='has_poi',
-                                    distance=min_dist)
+                                  type='has_poi',
+                                  distance=min_dist)
                 link_count += 1
 
         print(f" -> 知识图谱道路-POI关联完成。共添加 {link_count} 条关联边。")
@@ -407,9 +422,9 @@ class TransportationKnowledgeGraph:
             'num_nodes': self.graph.number_of_nodes(),
             'num_edges': self.graph.number_of_edges(),
             'road_nodes': len([n for n, d in self.graph.nodes(data=True)
-                               if d.get('type') == 'road_node']),
+                             if d.get('type') == 'road_node']),
             'poi_nodes': len([n for n, d in self.graph.nodes(data=True)
-                              if d.get('type') == 'poi']),
+                            if d.get('type') == 'poi']),
             'poi_links': len([u for u, v, k, d in self.graph.edges(data=True, keys=True)
                               if d.get('type') == 'nearby_road'])
         }
