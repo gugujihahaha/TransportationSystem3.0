@@ -157,8 +157,33 @@ class GeoLifeDataLoader:
         return bearing
 
     # -----------------------------------------------------------
-    # O T H E R   M E T H O D S (保持不变)
+    # O T H E R   M E T H O D S (标签归一化已添加)
     # -----------------------------------------------------------
+
+    def _normalize_mode(self, mode: str) -> str:
+        """
+        根据 7 大类标准合并交通方式标签。
+        7 大类: Walk, Bike, Bus, Car & taxi, Train, Airplane, Other
+        """
+        mode_lower = mode.lower().strip()
+
+        # 类别合并
+        if mode_lower in ['car', 'taxi', 'drive']:
+            return 'Car & taxi'
+        elif mode_lower in ['subway', 'train', 'railway', 'high-speed-rail']:
+            return 'Train'
+        elif mode_lower == 'walk':
+            return 'Walk'
+        elif mode_lower == 'bike':
+            return 'Bike'
+        elif mode_lower == 'bus':
+            return 'Bus'
+        elif mode_lower == 'airplane':
+            return 'Airplane'
+        else:
+            # 将 GeoLife 数据集中其他不常见或不一致的标签归入 'Other'
+            return 'Other'
+
 
     def load_labels(self, user_id: str) -> pd.DataFrame:
         """加载用户标签数据"""
@@ -172,7 +197,7 @@ class GeoLifeDataLoader:
         return df
 
     def segment_trajectory(self, trajectory: pd.DataFrame, labels: pd.DataFrame) -> List[Tuple[pd.DataFrame, str]]:
-        """根据标签分割轨迹"""
+        """根据标签分割轨迹，并进行标签归一化/合并为 7 大类"""
         segments = []
 
         for _, label_row in labels.iterrows():
@@ -180,11 +205,14 @@ class GeoLifeDataLoader:
             end_time = label_row['End Time']
             mode = label_row['Transportation Mode']
 
+            # 标签归一化/合并步骤
+            normalized_mode = self._normalize_mode(mode) # <-- 调用归一化函数
+
             mask = (trajectory['datetime'] >= start_time) & (trajectory['datetime'] <= end_time)
             segment = trajectory[mask].copy()
 
             if len(segment) > 0:
-                segments.append((segment, mode))
+                segments.append((segment, normalized_mode))
 
         return segments
 
@@ -316,32 +344,36 @@ class OSMDataLoader:
         return pd.DataFrame(pois)
 
 
+# src/data_preprocessing.py 文件中的函数
 def preprocess_trajectory_segments(segments: List[Tuple[pd.DataFrame, str]],
                                    min_length: int = 10) -> List[Tuple[np.ndarray, str]]:
     """预处理轨迹段，转换为固定长度的序列，提取 9 维特征"""
     processed_segments = []
+
+    # 设定固定的目标序列长度 (所有张量都将是 [50, 9] 的形状)
+    FIXED_SEQUENCE_LENGTH = 50
 
     # 9 维特征列表：
     feature_cols = ['latitude', 'longitude', 'speed', 'acceleration',
                     'bearing_change', 'distance', 'time_diff',
                     'total_distance', 'total_time']
 
-    # 添加 tqdm 进度条，显示轨迹段处理进度
     for segment, label in tqdm(segments, desc="[轨迹段预处理]"):
         if len(segment) < min_length:
             continue
 
-        # 确保提取 9 维特征
         features = segment[feature_cols].values
+        current_length = len(features)
 
-        # 如果序列太长，进行采样
-        if len(features) > 200:
-            indices = np.linspace(0, len(features)-1, 200, dtype=int)
+        # 1. 轨迹段长度规范化
+        if current_length > FIXED_SEQUENCE_LENGTH:
+            # 采样：如果太长（>50），采样到固定长度 50
+            indices = np.linspace(0, current_length - 1, FIXED_SEQUENCE_LENGTH, dtype=int)
             features = features[indices]
 
-        # 如果序列太短，进行填充 (目标长度 50，需根据模型要求调整)
-        if len(features) < 50:
-            padding = np.zeros((50 - len(features), features.shape[1]))
+        elif current_length < FIXED_SEQUENCE_LENGTH:
+            # 填充：如果太短（<50），用零填充到固定长度 50
+            padding = np.zeros((FIXED_SEQUENCE_LENGTH - current_length, features.shape[1]))
             features = np.vstack([features, padding])
 
         processed_segments.append((features, label))

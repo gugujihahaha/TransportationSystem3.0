@@ -97,7 +97,7 @@ def main():
                        default='../data/Geolife Trajectories 1.3',
                        help='GeoLife数据根目录')
     parser.add_argument('--osm_path', type=str, 
-                       default='../data/export.geojson',
+                       default='../data/exp2.geojson',
                        help='OSM数据路径')
     parser.add_argument('--batch_size', type=int, default=32,
                        help='批次大小')
