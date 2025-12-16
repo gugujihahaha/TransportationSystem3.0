@@ -16,7 +16,7 @@ def test_kg_speed():
 
     # 1. 构建 KG
     print("\n[1] 加载 OSM 数据...")
-    osm_loader = OSMDataLoader("../data/export.geojson")
+    osm_loader = OSMDataLoader("../data/exp2.geojson")
     osm_data = osm_loader.load_osm_data()
     roads = osm_loader.extract_road_network(osm_data)
     pois = osm_loader.extract_pois(osm_data)
