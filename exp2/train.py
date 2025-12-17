@@ -1,14 +1,8 @@
 """
-训练脚本 (混合优化版) - 最终稳定版 - **已集成过拟合修复**
+训练脚本 (混合优化版) - 最终稳定版 - 已集成过拟合修复
 
 核心优化:
-1. ✅ 修正了标签过滤逻辑，确保使用 GeoLifeDataLoader 中定义的全部七个归一化类别。
-2. ✅ 修正了数据预处理，强制轨迹段张量长度一致（[50, 9]），解决 DataLoader RuntimeError。
-3. ✅ 新增中间数据缓存 (已加载和预处理的轨迹段列表)，避免重复 I/O。
-4. ✅ 网格缓存 KG 特征 (二级缓存)。
-5. ✅ 最终特征缓存 (三级缓存)。
-6. 🌟 **新增早停 (Early Stopping) 机制**，解决实验二过拟合问题。
-7. 🌟 **新增 L2 正则化 (Weight Decay)**，提升模型泛化能力。
+... (保持不变) ...
 """
 import os
 import argparse
@@ -25,6 +19,9 @@ import warnings
 import pandas as pd
 import numpy as np
 from typing import List, Tuple
+# 修复：导入 sklearn.preprocessing 以备后用
+from sklearn.preprocessing import LabelEncoder
+import torch.serialization # 确保导入以使用 safe_globals
 
 # 假设这些模块已在 src 目录下正确定义
 try:
@@ -93,7 +90,9 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None):
         print(f"\n========== 阶段 1: 知识图谱加载 (从缓存) ==========")
         try:
             with open(KG_CACHE_PATH, 'rb') as f:
-                kg = pickle.load(f)
+                # 修复：只传递一个字典参数
+                with torch.serialization.safe_globals({LabelEncoder: LabelEncoder}):
+                    kg = pickle.load(f)
             print("✅ 知识图谱从缓存加载完成。")
             print(f"   统计: {kg.get_graph_statistics()}")
 
@@ -131,7 +130,9 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None):
         print(f"\n========== 阶段 2: 最终特征加载 (从缓存) ==========")
         try:
             with open(PROCESSED_FEATURE_CACHE_PATH, 'rb') as f:
-                all_features_and_labels, label_encoder = pickle.load(f)
+                # 修复：只传递一个字典参数
+                with torch.serialization.safe_globals({LabelEncoder: LabelEncoder}):
+                    all_features_and_labels, label_encoder = pickle.load(f)
             print(f"✅ 最终特征从缓存加载完成: {len(all_features_and_labels)} 条记录")
 
             cache_stats = kg.get_cache_stats()
@@ -152,7 +153,9 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None):
         print(f"\n========== 阶段 2.1: 轨迹段加载 (从缓存) ==========")
         try:
             with open(PROCESSED_SEGMENTS_CACHE_PATH, 'rb') as f:
-                processed_segments, label_encoder = pickle.load(f)
+                # 修复：只传递一个字典参数
+                with torch.serialization.safe_globals({LabelEncoder: LabelEncoder}):
+                    processed_segments, label_encoder = pickle.load(f)
             print(f"✅ 轨迹段缓存加载完成: {len(processed_segments)} 个有效段。")
         except Exception as e:
             warnings.warn(f"[WARN] 轨迹段缓存加载失败 ({e})，将重新加载和预处理。")
@@ -227,7 +230,7 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None):
 
 
     # D. 混合特征提取 (重建/继续)
-    print("\n========== 阶段 2.2: 特征提取 (重建) ==========")
+    print("\n========== 2.2: 特征提取 (重建) ==========")
     print(f"2.4 正在提取特征 (共 {len(processed_segments)} 个轨迹段)...")
     print("    提示: 首次运行会慢，后续运行会从网格缓存加速")
 
@@ -441,6 +444,16 @@ def main():
         dropout=args.dropout
     ).to(args.device)
 
+    # 🛠️ 关键修复：构建模型配置字典
+    model_config = {
+        'trajectory_feature_dim': TRAJECTORY_FEATURE_DIM,
+        'kg_feature_dim': KG_FEATURE_DIM,
+        'hidden_dim': args.hidden_dim,
+        'num_layers': args.num_layers,
+        'num_classes': num_classes,
+        'dropout': args.dropout
+    }
+
     print(f"模型参数: {sum(p.numel() for p in model.parameters())}")
     print(f"训练设备: {args.device}")
 
@@ -479,6 +492,7 @@ def main():
         if test_loss < best_test_loss:
             best_test_loss = test_loss
             patience_counter = 0 # 损失下降，重置计数器
+            # 🛠️ 关键修复：保存 model_config 键
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
@@ -486,6 +500,7 @@ def main():
                 'test_loss': test_loss,
                 'test_acc': test_acc,
                 'label_encoder': label_encoder,
+                'model_config': model_config, # ✅ 新增：保存配置字典
             }, os.path.join(args.save_dir, 'exp2_model.pth'))
             print("   ✅ 保存最佳模型")
         else:
@@ -518,4 +533,10 @@ if __name__ == '__main__':
     warnings.simplefilter(action='ignore', category=FutureWarning)
 
     # 运行主函数
-    main()
+    # 修复：在 main 运行前添加 safe_globals，以确保在 load_data 中可以加载 LabelEncoder
+    try:
+        # ⚠️ 关键修正：safe_globals 只传入一个字典参数
+        with torch.serialization.safe_globals({LabelEncoder: LabelEncoder}):
+            main()
+    except Exception as e:
+        print(f"发生错误: {e}")
