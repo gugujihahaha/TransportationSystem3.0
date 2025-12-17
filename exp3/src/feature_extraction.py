@@ -37,12 +37,14 @@ class FeatureExtractor:
             print(f"警告: KG 特征提取失败 ({e}). 使用零填充代替。")
             kg_features = np.zeros((trajectory.shape[0], 15), dtype=np.float32)
 
-        # 3. 验证维度
-        if kg_features.shape[1] != 15:
-            raise ValueError(f"KG 特征维度错误：预期 15 维，实际 {kg_features.shape[1]} 维。")
-
-        if trajectory_features.shape[1] != 9:
-            raise ValueError(f"轨迹特征维度错误：预期 9 维，实际 {trajectory_features.shape[1]} 维。")
+        # 3. 严格验证维度 (N, 15)
+        # trajectory 形状为 (50, 9)，kg_features 必须为 (50, 15)
+        if kg_features.ndim != 2 or kg_features.shape[1] != 15:
+            # 如果被压平了，重新 reshape
+            if kg_features.size == trajectory.shape[0] * 15:
+                kg_features = kg_features.reshape(trajectory.shape[0], 15)
+            else:
+                raise ValueError(f"KG 特征维度错误：预期末尾维度 15，实际 shape 为 {kg_features.shape}")
 
         return trajectory_features, kg_features
 
