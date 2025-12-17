@@ -137,22 +137,24 @@ class GeoLifeDataLoader:
         df['End Time'] = pd.to_datetime(df['End Time'])
         return df
 
-    def segment_trajectory(self, trajectory: pd.DataFrame,
-                           labels: pd.DataFrame) -> List[Tuple[pd.DataFrame, str]]:
-        """根据标签分割轨迹"""
+    def segment_trajectory(self, trajectory: pd.DataFrame, labels: pd.DataFrame) -> List[Tuple[pd.DataFrame, str]]:
         segments = []
+        # --- 核心修改：类别映射逻辑 ---
+        label_mapping = {
+            'taxi': 'Car & taxi', 'car': 'Car & taxi',
+            'bus': 'Bus', 'walk': 'Walk', 'bike': 'Bike',
+            'train': 'Train', 'subway': 'Subway', 'airplane': 'Airplane'
+        }
 
-        for _, label_row in labels.iterrows():
-            start_time = label_row['Start Time']
-            end_time = label_row['End Time']
-            mode = label_row['Transportation Mode']
+        for _, row in labels.iterrows():
+            st, et = pd.to_datetime(row['Start Time']), pd.to_datetime(row['End Time'])
+            raw_mode = str(row['Transportation Mode']).lower().strip()
+            mode = label_mapping.get(raw_mode, raw_mode.capitalize())  # 未定义的则首字母大写
 
-            mask = (trajectory['datetime'] >= start_time) & (trajectory['datetime'] <= end_time)
-            segment = trajectory[mask].copy()
-
-            if len(segment) > 0:
-                segments.append((segment, mode))
-
+            mask = (trajectory['datetime'] >= st) & (trajectory['datetime'] <= et)
+            seg = trajectory[mask].copy()
+            if len(seg) >= 10:
+                segments.append((seg, mode))
         return segments
 
     def get_all_users(self) -> List[str]:
