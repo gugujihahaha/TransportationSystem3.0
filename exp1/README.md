@@ -1,14 +1,23 @@
 # 实验1：基于深度学习的交通方式识别（仅轨迹特征）
 
-本实验仅使用 **GeoLife GPS 轨迹数据**，不涉及知识图谱，通过 Bi-LSTM 深度学习模型识别交通方式，作为后续实验的基线模型。
+## 📋 实验概述
 
-**重要说明：** 在训练和评估过程中，`taxi` 会被归类到 `car` 类别中，因为两者在轨迹特征上非常相似，难以区分。
+本实验是基线模型，**仅使用 GeoLife GPS 轨迹数据**，不涉及知识图谱，通过 **Bi-LSTM 深度学习模型**识别交通方式。作为后续实验（Exp2、Exp3）的对比基准，验证仅使用轨迹特征进行交通方式识别的可行性。
+
+**核心特点：**
+- ✅ 纯轨迹特征（9维）
+- ✅ 单输入 Bi-LSTM 模型
+- ✅ 标签自动合并（taxi → car & taxi）
+- ✅ 向量化特征计算优化
+- ✅ 鲁棒的数据格式处理
+
+---
 
 ## 🎯 实验目标
 
-- 验证仅使用轨迹特征进行交通方式识别的可行性
-- 建立基线模型性能指标
-- 为后续加入知识图谱特征提供对比基准
+1. **建立基线性能指标**：验证仅使用轨迹特征进行交通方式识别的可行性
+2. **为后续实验提供对比基准**：为加入知识图谱特征（Exp2、Exp3）提供性能对比
+3. **验证模型架构**：验证 Bi-LSTM 在序列分类任务中的有效性
 
 ---
 
@@ -16,17 +25,19 @@
 
 ```
 exp1/
-├── cache/                      # 缓存目录（可选，自动生成）
+├── cache/                      # 缓存目录（自动生成）
 ├── checkpoints/                # 模型保存目录
 │   └── exp1_model.pth         # 训练好的模型
 ├── results/                    # 评估结果目录
-│   ├── evaluation_report.json
-│   ├── confusion_matrix.png
-│   └── predictions.csv
+│   └── exp1/
+│       ├── evaluation_report.json
+│       ├── confusion_matrix.png
+│       ├── per_class_metrics.png
+│       └── predictions.csv
 ├── src/                        # 源代码模块
 │   ├── __init__.py
-│   ├── data_loader.py         # 数据加载和预处理
-│   └── model.py               # 深度学习模型
+│   ├── data_loader.py         # 数据加载和预处理（核心）
+│   └── model.py               # 深度学习模型（Bi-LSTM）
 ├── train.py                    # 训练脚本
 ├── evaluate.py                 # 评估脚本
 ├── predict.py                  # 预测脚本
@@ -38,25 +49,54 @@ exp1/
 
 ## 📊 数据特征
 
-### 从 GPS 轨迹中提取的 9 维特征：
+### 从 GPS 轨迹中提取的 9 维特征
 
-| 序号 | 特征名 | 说明 | 计算方法 |
-|------|--------|------|----------|
-| 1 | `latitude` | 纬度 | 原始数据 |
-| 2 | `longitude` | 经度 | 原始数据 |
-| 3 | `speed` | 速度 (m/s) | `distance / time_diff` |
-| 4 | `acceleration` | 加速度 (m/s²) | `Δspeed / time_diff` |
-| 5 | `bearing_change` | 方向变化 (度) | 方位角差值 |
-| 6 | `distance` | 相邻点距离 (米) | Haversine 公式 |
-| 7 | `time_diff` | 时间差 (秒) | `Δdatetime` |
-| 8 | `total_distance` | 累积距离 (米) | `∑distance` |
-| 9 | `total_time` | 累积时间 (秒) | `∑time_diff` |
+| 序号 | 特征名 | 维度 | 说明 | 计算方法 |
+|------|--------|------|------|----------|
+| 1 | `latitude` | 1 | 纬度 | 原始数据 |
+| 2 | `longitude` | 1 | 经度 | 原始数据 |
+| 3 | `speed` | 1 | 速度 (m/s) | `distance / time_diff` |
+| 4 | `acceleration` | 1 | 加速度 (m/s²) | `Δspeed / time_diff` |
+| 5 | `bearing_change` | 1 | 方向变化 (度) | 方位角差值（处理360度跨越） |
+| 6 | `distance` | 1 | 相邻点距离 (米) | Haversine 公式（向量化） |
+| 7 | `time_diff` | 1 | 时间差 (秒) | `Δdatetime` |
+| 8 | `total_distance` | 1 | 累积距离 (米) | `∑distance`（从起点累计） |
+| 9 | `total_time` | 1 | 累积时间 (秒) | `∑time_diff`（从起点累计） |
 
 **特征计算优化：**
-- ✅ 使用向量化 Haversine 公式计算距离
-- ✅ 批量计算方位角和方向变化
-- ✅ 鲁棒处理 6 列/7 列 GeoLife 格式
-- ✅ 自动清洗无效坐标点
+- ✅ **向量化 Haversine 公式**：批量计算距离，避免循环
+- ✅ **批量计算方位角**：使用 `np.arctan2` 向量化计算
+- ✅ **鲁棒处理 6 列/7 列 GeoLife 格式**：自动检测并标准化
+- ✅ **自动清洗无效坐标点**：删除 lat ∈ [-90, 90], lon ∈ [-180, 180] 范围外的点
+
+---
+
+## 🏷️ 类别标签处理
+
+### 标签重映射机制
+
+**核心逻辑：** 在 `src/data_loader.py` 的 `preprocess_segments()` 函数中，自动将 `taxi` 归类到 `car & taxi`。
+
+```python
+# 标签映射规则
+MAPPING = {
+    'taxi': 'car',  # taxi → car
+}
+NEW_CLASS_NAME = 'car & taxi'  # 最终标签名称
+```
+
+**最终类别（6类）：**
+- `walk`
+- `bike`
+- `car & taxi`（包含原始 `car` 和 `taxi`）
+- `bus`
+- `train`
+- `subway`
+
+**为什么合并 taxi 和 car？**
+- 两者在轨迹特征上非常相似（速度、加速度模式接近）
+- 仅使用轨迹特征难以区分
+- 合并后提高模型训练稳定性
 
 ---
 
@@ -65,37 +105,105 @@ exp1/
 ### TransportationModeClassifier (Bi-LSTM)
 
 ```
-输入: (batch_size, seq_len, 9)
+输入: (batch_size, seq_len=100, input_dim=9)
   ↓
-Bi-LSTM 编码器 (2层, 隐藏层128, 双向)
-  ↓ (batch_size, seq_len, 256)
+Bi-LSTM 编码器
+  - 隐藏层维度: 128
+  - 层数: 2
+  - 双向: True
+  - Dropout: 0.3
+  ↓ (batch_size, seq_len, 256)  # 128 * 2 (双向)
 取最后时间步
   ↓ (batch_size, 256)
-特征提取层: 256 → 128 → 64
+特征提取层
+  - Linear(256 → 128) + ReLU + Dropout
+  - Linear(128 → 64) + ReLU + Dropout
+  ↓ (batch_size, 64)
+分类层
+  - Linear(64 → 6)
   ↓
-分类层: 64 → 6
-  ↓
-输出: (batch_size, 6) [walk, bike, car, bus, train, taxi]
+输出: (batch_size, 6) [walk, bike, car & taxi, bus, train, subway]
 ```
 
 **模型参数：**
-- 输入维度: 9
-- LSTM 隐藏层: 128
-- LSTM 层数: 2
-- 双向: True
-- Dropout: 0.3
-- 总参数量: ~200K
+- **输入维度**: 9（轨迹特征）
+- **LSTM 隐藏层**: 128
+- **LSTM 层数**: 2
+- **双向**: True
+- **Dropout**: 0.3
+- **总参数量**: ~200K
 
-**类别说明：**
-- 训练时使用 7 种交通方式：`walk`, `bike`, `car`, `bus`, `train`, `taxi`, `subway`
-- **`taxi` 会被自动归类到 `car`**（因为两者轨迹特征相似）
-- 最终评估类别：`walk`, `bike`, `car`, `bus`, `train`, `subway`（6类）
+---
+
+## 🔄 数据处理流程
+
+### 1. 轨迹加载（`src/data_loader.py`）
+
+**支持两种 GeoLife 格式：**
+
+**7 列格式（标准）：**
+```
+Latitude,Longitude,Reserved,Altitude,Date_days,Date,Time
+39.984702,116.318417,0,492,39744.1201,2008-10-23,02:52:58
+```
+
+**6 列格式（非标准）：**
+```
+Latitude,Longitude,Altitude,Date_days,Date,Time
+39.984702,116.318417,492,39744.1201,2008-10-23,02:52:58
+```
+
+**自动处理逻辑：**
+- 检测列数（6 或 7）
+- 自动补全缺失列（Reserved 列填充 0）
+- 清洗无效坐标（lat ∈ [-90, 90], lon ∈ [-180, 180]）
+
+### 2. 序列预处理（`preprocess_segments()`）
+
+**序列长度规范化：**
+- **最小长度**: 10 个点（过滤太短的轨迹）
+- **目标长度**: 100 个点（固定序列长度）
+- **最大长度**: 200 个点（超过则均匀采样）
+
+**处理策略：**
+```python
+if L > 200:
+    # 均匀采样到 100
+    indices = np.linspace(0, L-1, 100, dtype=int)
+elif L > 100:
+    # 随机裁剪到 100
+    start_index = np.random.randint(0, L - 100 + 1)
+    features = features[start_index:start_index + 100]
+elif L < 100:
+    # 零填充到 100
+    padding = np.zeros((100 - L, 9))
+    features = np.vstack([features, padding])
+```
+
+**标签重映射：**
+- 自动将 `taxi` → `car` → `car & taxi`
+- 确保训练和评估使用一致的标签
+
+### 3. 特征归一化（`train.py`）
+
+**全局 Z-score 归一化：**
+```python
+# 计算训练集的全局均值和标准差
+mean = features.mean(axis=(0, 1))  # (9,)
+std = features.std(axis=(0, 1))     # (9,)
+
+# 归一化
+normalized = (features - mean) / (std + 1e-8)
+
+# 截断异常值
+normalized = np.clip(normalized, -5, 5)
+```
 
 ---
 
 ## 🚀 使用方法
 
-### 重要提示：运行位置
+### ⚠️ 重要提示：运行位置
 
 **必须在 `exp1` 目录下运行脚本**，因为使用了相对导入 `from src.xxx import ...`
 
@@ -109,7 +217,7 @@ cd exp1
 pip install -r requirements.txt
 ```
 
-**依赖包：**
+**依赖包列表：**
 ```
 torch>=2.0.0
 numpy>=1.24.0
@@ -173,7 +281,7 @@ python train.py \
 | `--save_dir` | `checkpoints` | 模型保存目录 |
 | `--device` | `cuda/cpu` | 训练设备 |
 
-**训练输出：**
+**训练输出示例：**
 ```
 ============================================================
 加载GeoLife数据...
@@ -183,19 +291,26 @@ python train.py \
 总共加载 16048 个轨迹段
 
 预处理轨迹段...
+标签重映射完成: 'taxi' 已并入 'car & taxi'
 预处理后剩余 14532 个有效轨迹段
 
-类别数: 7
-类别: ['bike' 'bus' 'car' 'subway' 'taxi' 'train' 'walk']
+过滤稀疏类别：仅保留主要 6 种交通方式
+原始轨迹段总数: 14532
+保留轨迹段总数: 14234 (移除 298 个稀疏类别)
+
+类别数: 6
+类别: ['bike' 'bus' 'car & taxi' 'subway' 'train' 'walk']
 
 各类别样本数:
   bike: 1234
   bus: 2345
-  car: 3456
-  ...
+  car & taxi: 3456
+  subway: 1234
+  train: 2345
+  walk: 3620
 
-训练集大小: 11625
-测试集大小: 2907
+训练集大小: 11387
+测试集大小: 2847
 
 模型参数数量: 201,094
 使用设备: cuda
@@ -216,12 +331,14 @@ Epoch 1/50
 python evaluate.py \
     --model_path checkpoints/exp1_model.pth \
     --geolife_root "../data/Geolife Trajectories 1.3" \
-    --output_dir results
+    --output_dir results/exp1 \
+    --batch_size 32
 ```
 
 **评估输出文件：**
 - `evaluation_report.json`: 详细评估报告（JSON格式）
 - `confusion_matrix.png`: 混淆矩阵图
+- `per_class_metrics.png`: 各类别性能指标图
 - `predictions.csv`: 预测结果（包含置信度）
 
 **评估报告示例：**
@@ -256,16 +373,17 @@ python predict.py \
 ============================================================
 预测结果
 ============================================================
-交通方式: car
+
+交通方式: car & taxi
 置信度: 0.8523 (85.23%)
 
 所有类别的概率:
-  car       : 0.8523 (85.23%) ██████████████████████████████████████████████
-  taxi      : 0.0821 ( 8.21%) ████
-  bus       : 0.0432 ( 4.32%) ██
-  train     : 0.0143 ( 1.43%) 
-  bike      : 0.0054 ( 0.54%) 
-  walk      : 0.0027 ( 0.27%) 
+🥇 car & taxi: 0.8523 (85.23%) ██████████████████████████████████████████████
+🥈 bus       : 0.0821 ( 8.21%) ████
+🥉 train     : 0.0432 ( 4.32%) ██
+4. walk      : 0.0143 ( 1.43%) 
+5. bike      : 0.0054 ( 0.54%) 
+6. subway    : 0.0027 ( 0.27%) 
 ```
 
 ---
@@ -286,7 +404,7 @@ python predict.py \
 |---------|-----------|--------|----------|
 | **Walk** | ~0.82 | ~0.86 | ~0.84 |
 | **Bike** | ~0.75 | ~0.73 | ~0.74 |
-| **Car** | ~0.80 | ~0.82 | ~0.81 | (包含 taxi)
+| **Car & Taxi** | ~0.80 | ~0.82 | ~0.81 |
 | **Bus** | ~0.72 | ~0.70 | ~0.71 |
 | **Train** | ~0.78 | ~0.75 | ~0.76 |
 | **Subway** | ~0.75 | ~0.73 | ~0.74 |
@@ -300,7 +418,7 @@ python predict.py \
    - 无法利用 POI 信息（公交站、地铁站）
 
 2. **速度相似的交通方式难以区分**
-   - Car vs Taxi: 速度模式非常相似（因此将 taxi 归类到 car）
+   - Car vs Taxi: 速度模式非常相似（因此合并为 car & taxi）
    - Bus vs Car: 在某些路段速度接近
 
 3. **仅依赖运动模式**
@@ -318,6 +436,8 @@ python predict.py \
 | **轨迹特征** | 9维 | 9维 | 9维 |
 | **KG特征** | - | 11维 | 15维 |
 | **总特征维度** | **9维** | 20维 | 24维 |
+| **序列长度** | 100 | 50 | 50 |
+| **模型类型** | 单输入 Bi-LSTM | 双输入 Bi-LSTM | 双输入 Bi-LSTM |
 | **准确率** | **~78%** | ~86% | ~88% |
 | **数据需求** | 仅 GPS 轨迹 | GPS + 基础 OSM | GPS + 完整 OSM |
 | **计算复杂度** | 低 | 中等 | 中等 |
@@ -330,52 +450,38 @@ python predict.py \
 
 ---
 
-## 💡 数据处理细节
+## 💡 技术特色
 
-### 1. GeoLife 数据格式处理
+### 1. 向量化特征计算
 
-**支持两种格式：**
-
-**7 列格式（标准）：**
-```
-Latitude,Longitude,Reserved,Altitude,Date_days,Date,Time
-39.984702,116.318417,0,492,39744.1201,2008-10-23,02:52:58
+**传统方法（循环）：**
+```python
+for i in range(len(df)):
+    distance[i] = haversine(lat[i-1], lon[i-1], lat[i], lon[i])
 ```
 
-**6 列格式（非标准）：**
-```
-Latitude,Longitude,Altitude,Date_days,Date,Time
-39.984702,116.318417,492,39744.1201,2008-10-23,02:52:58
+**优化方法（向量化）：**
+```python
+# 批量计算所有点对的距离
+lat1_rad, lon1_rad = np.radians(lat1), np.radians(lon1)
+lat2_rad, lon2_rad = np.radians(lat2), np.radians(lon2)
+distances = haversine_vectorized(lat1_rad, lon1_rad, lat2_rad, lon2_rad)
 ```
 
-**自动处理逻辑：**
-- 检测列数
+**性能提升：** 10-100倍加速
+
+### 2. 鲁棒的数据格式处理
+
+- 自动检测 6 列/7 列格式
 - 自动补全缺失列
-- 清洗无效坐标（lat ∈ [-90, 90], lon ∈ [-180, 180]）
+- 清洗无效坐标点
+- 处理时间格式异常
 
-### 2. 特征归一化
+### 3. 标签自动合并
 
-```python
-# Z-score 归一化
-normalized = (features - mean) / std
-
-# 截断异常值
-normalized = np.clip(normalized, -5, 5)
-```
-
-### 3. 序列长度处理
-
-```python
-# 最小长度: 10 个点
-# 目标长度: 100 个点
-
-if len(sequence) > 200:
-    # 均匀采样
-    sequence = uniform_sample(sequence, target_length=100)
-elif len(sequence) < 100:
-    # 零填充
-    sequence = zero_pad(sequence, target_length=100)
-```
+- 在数据预处理阶段自动合并 `taxi` → `car & taxi`
+- 确保训练和评估使用一致的标签
+- 避免类别不平衡问题
 
 ---
 
@@ -403,6 +509,10 @@ data/
 └── Geolife Trajectories 1.3/
     └── Data/
         ├── 000/
+        │   ├── Trajectory/
+        │   │   ├── 20081023025304.plt
+        │   │   └── ...
+        │   └── labels.txt
         ├── 001/
         ...
 ```
@@ -501,14 +611,15 @@ from src.model import TransportationModeClassifier
 
 **`src/data_loader.py`：**
 - `GeoLifeDataLoader`: 加载和预处理 GeoLife 数据
-- `preprocess_segments`: 序列标准化和归一化
+- `preprocess_segments`: 序列标准化、长度规范化、标签重映射
 
 **`src/model.py`：**
-- `TransportationModeClassifier`: Bi-LSTM 分类器
-- `CNNLSTMModel`: CNN+LSTM 混合模型（可选）
+- `TransportationModeClassifier`: Bi-LSTM 分类器（主模型）
+- `CNNLSTMModel`: CNN+LSTM 混合模型（可选，未使用）
 
 **`train.py`：**
 - 主训练循环
+- 全局特征归一化
 - 模型保存和加载
 - 学习率调度
 
@@ -519,7 +630,7 @@ from src.model import TransportationModeClassifier
 ### 实验改进方向
 
 1. **模型架构**
-   - 尝试 CNN-LSTM 混合模型
+   - 尝试 CNN-LSTM 混合模型（已实现但未使用）
    - 添加注意力机制
    - 使用 Transformer 编码器
 
@@ -537,7 +648,6 @@ from src.model import TransportationModeClassifier
 
 - **Exp2**: 加入基础 OSM 知识图谱（准确率提升至 ~86%）
 - **Exp3**: 使用完整 OSM 知识图谱（准确率提升至 ~88%）
-- **Exp4**: 加入天气数据（准确率提升至 ~90%+）
 
 ---
 
@@ -546,9 +656,11 @@ from src.model import TransportationModeClassifier
 1. **GeoLife GPS Trajectories Dataset**
    - Microsoft Research Asia
    - 182 users, 17,621 trajectories
+   - [数据集链接](https://www.microsoft.com/en-us/research/publication/geolife-gps-trajectory-dataset-user-guide/)
 
 2. **Bi-LSTM for Sequential Data**
    - Hochreiter & Schmidhuber, 1997
+   - Long Short-Term Memory
 
 3. **Transportation Mode Detection**
    - Zheng et al., "Understanding Mobility Based on GPS Data"
@@ -563,4 +675,4 @@ from src.model import TransportationModeClassifier
 
 **Exp1 - 基线模型 - 仅轨迹特征**
 
-🎯 准确率: ~78% | 特征维度: 9维 | 模型: Bi-LSTM
+🎯 准确率: ~78% | 特征维度: 9维 | 模型: Bi-LSTM | 序列长度: 100

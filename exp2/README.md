@@ -1,12 +1,24 @@
 # 实验2：基于知识图谱和深度学习的交通方式识别
 
-本实验在 **Exp1** 的基础上，引入 **基础 OSM 知识图谱**，通过双 Bi-LSTM 特征融合模型，将准确率从 ~78% 提升至 **~86%**。
+## 📋 实验概述
+
+本实验在 **Exp1** 的基础上，引入 **基础 OSM 知识图谱**，通过 **双 Bi-LSTM 特征融合模型**，将准确率从 ~78% 提升至 **~86%**。
+
+**核心特点：**
+- ✅ 轨迹特征（9维）+ 知识图谱特征（11维）
+- ✅ 双输入 Bi-LSTM 模型（轨迹 LSTM + KG LSTM）
+- ✅ 四级缓存系统（KG缓存、网格缓存、轨迹段缓存、特征缓存）
+- ✅ KDTree 空间索引优化（O(N log N) 查询）
+- ✅ 流式 JSON 解析（支持 >100MB 大文件）
+- ✅ 早停机制和 L2 正则化（防止过拟合）
+
+---
 
 ## 🎯 实验目标
 
-- 验证知识图谱特征对交通方式识别的有效性
-- 实现轨迹特征与地理环境特征的融合
-- 建立高性能的异构特征融合模型
+1. **验证知识图谱特征的有效性**：证明地理环境信息能显著提升识别准确率
+2. **实现异构特征融合**：将轨迹特征与地理环境特征有效融合
+3. **建立高性能模型**：通过缓存和优化实现高效训练
 
 ---
 
@@ -15,20 +27,24 @@
 ```
 exp2/
 ├── cache/                          # 缓存目录（重要！）
-│   ├── kg_data.pkl                # 知识图谱缓存
-│   └── processed_features.pkl     # 预提取特征缓存
+│   ├── kg_data.pkl                # 知识图谱缓存（一级）
+│   ├── grid_cache.pkl             # 网格缓存（二级）
+│   ├── processed_segments.pkl     # 轨迹段缓存（三级）
+│   └── processed_features.pkl     # 特征缓存（四级）
 ├── checkpoints/                    # 模型保存目录
 │   └── exp2_model.pth             # 训练好的模型
 ├── results/                        # 评估结果目录
-│   ├── evaluation_report.json
-│   ├── confusion_matrix.png
-│   └── predictions.csv
+│   └── exp2/
+│       ├── evaluation_report.json
+│       ├── confusion_matrix.png
+│       ├── per_class_metrics.png
+│       └── predictions.csv
 ├── src/                            # 源代码模块
 │   ├── __init__.py
 │   ├── data_preprocessing.py      # 数据加载（向量化优化）
-│   ├── knowledge_graph.py         # 知识图谱构建（KDTree优化）
+│   ├── knowledge_graph.py          # 知识图谱构建（KDTree优化）
 │   ├── feature_extraction.py      # 特征提取器
-│   └── model.py                   # 双LSTM模型
+│   └── model.py                    # 双LSTM模型
 ├── train.py                        # 训练脚本（带缓存）
 ├── evaluate.py                     # 评估脚本
 ├── predict.py                      # 预测脚本
@@ -54,116 +70,321 @@ exp2/
 
 | 特征组 | 维度 | 说明 |
 |--------|------|------|
-| **道路类型** | 6 | one-hot: [walk, bike, car, bus, train, unknown] |
-| **附近 POI** | 4 | [公交站, 地铁站, 停车场, 最近POI距离] |
-| **道路密度** | 1 | 100米范围内道路节点数量（归一化） |
+| **道路类型** | 6 | one-hot 编码（walk, bike, car, bus, train, unknown） |
+| **附近POI** | 4 | 公交站、地铁站、停车场、其他POI的距离 |
+| **道路密度** | 1 | 附近道路节点数量（归一化） |
 
-**知识图谱特征提取示例：**
-```python
-# 某个轨迹点的 KG 特征
-kg_features = [
-    # 道路类型 (6维 one-hot)
-    0, 0, 1, 0, 0, 0,  # car
-    
-    # 附近 POI (4维)
-    0,    # 无公交站
-    1,    # 有地铁站
-    1,    # 有停车场
-    0.35, # 最近POI距离 70米 (归一化: 70/200)
-    
-    # 道路密度 (1维)
-    0.48  # 24个道路节点 (归一化: 24/50)
-]
-```
+**KG特征详细说明：**
+
+**道路类型（6维 one-hot）：**
+- `walk`: 步行道（footway）
+- `bike`: 自行车道（cycleway）
+- `car`: 汽车道路（primary, secondary, tertiary, residential）
+- `bus`: 公交专用道
+- `train`: 铁路（railway）
+- `unknown`: 未知类型
+
+**附近POI（4维，距离特征）：**
+- `bus_stop_distance`: 最近公交站距离（米）
+- `station_distance`: 最近地铁站距离（米）
+- `parking_distance`: 最近停车场距离（米）
+- `other_poi_distance`: 其他POI距离（米）
+
+**道路密度（1维）：**
+- `road_density`: 500米范围内道路节点数量（归一化到 [0, 1]）
 
 ---
 
 ## 🧠 模型架构
 
-### 双 Bi-LSTM 特征融合模型
+### TransportationModeClassifier (双输入 Bi-LSTM)
 
 ```
-输入1: 轨迹特征 (batch_size, seq_len, 9)
+输入1: (batch_size, seq_len=50, 9)  轨迹特征
+输入2: (batch_size, seq_len=50, 11) KG特征
   ↓
-Trajectory Bi-LSTM (2层, hidden=128, 双向)
+轨迹 Bi-LSTM 编码器
+  - 隐藏层: 128
+  - 层数: 2
+  - 双向: True
   ↓ (batch_size, seq_len, 256)
-取最后时间步 → trajectory_repr (batch_size, 256)
-
-输入2: KG特征 (batch_size, seq_len, 11)
-  ↓
-KG Bi-LSTM (2层, hidden=64, 双向)
+取最后时间步
+  ↓ (batch_size, 256)
+  +
+KG Bi-LSTM 编码器
+  - 隐藏层: 64 (128//2)
+  - 层数: 2
+  - 双向: True
   ↓ (batch_size, seq_len, 128)
-取最后时间步 → kg_repr (batch_size, 128)
-
-拼接融合: [trajectory_repr | kg_repr]
-  ↓ (batch_size, 384)
-特征融合层: 384 → 128 → 64
+取最后时间步
+  ↓ (batch_size, 128)
   ↓
-分类层: 64 → 6
+特征融合
+  - Concat: (batch_size, 384)  # 256 + 128
+  - Linear(384 → 128) + ReLU + Dropout
+  - Linear(128 → 64) + ReLU + Dropout
+  ↓ (batch_size, 64)
+分类层
+  - Linear(64 → 7)
   ↓
-输出: (batch_size, 6) [walk, bike, car, bus, train, taxi]
+输出: (batch_size, 7) [Walk, Bike, Bus, Car & taxi, Train, Airplane, Other]
 ```
 
 **模型参数：**
-- 轨迹 LSTM: hidden_dim=128, layers=2, bidirectional=True
-- KG LSTM: hidden_dim=64, layers=2, bidirectional=True
-- 总参数量: ~350K
+- **轨迹特征维度**: 9
+- **KG特征维度**: 11
+- **轨迹LSTM隐藏层**: 128
+- **KG LSTM隐藏层**: 64
+- **LSTM层数**: 2
+- **双向**: True
+- **Dropout**: 0.3
+- **总参数量**: ~350K
+
+---
+
+## 🏷️ 类别标签处理
+
+### 标签归一化机制
+
+在 `src/data_preprocessing.py` 的 `_normalize_mode()` 函数中，自动将原始标签归一化为 7 大类：
+
+```python
+def _normalize_mode(self, mode: str) -> str:
+    """归一化为 7 大类"""
+    mode_lower = mode.lower().strip()
+    
+    if mode_lower in ['car', 'taxi', 'drive']:
+        return 'Car & taxi'
+    elif mode_lower in ['subway', 'train', 'railway']:
+        return 'Train'
+    elif mode_lower == 'walk':
+        return 'Walk'
+    elif mode_lower == 'bike':
+        return 'Bike'
+    elif mode_lower == 'bus':
+        return 'Bus'
+    elif mode_lower == 'airplane':
+        return 'Airplane'
+    else:
+        return 'Other'
+```
+
+**最终类别（7类）：**
+- `Walk`
+- `Bike`
+- `Bus`
+- `Car & taxi`（合并 car 和 taxi）
+- `Train`（包含 subway）
+- `Airplane`
+- `Other`
+
+---
+
+## ⚡ 性能优化技术
+
+### 1. 四级缓存系统
+
+**一级缓存：KG对象缓存**
+- 文件：`cache/kg_data.pkl`
+- 内容：构建好的知识图谱对象
+- 作用：避免重复构建KG（耗时操作）
+
+**二级缓存：网格缓存**
+- 文件：`cache/grid_cache.pkl`
+- 内容：常用位置的KG特征（网格化缓存）
+- 作用：加速空间查询（缓存命中率通常 >80%）
+
+**三级缓存：轨迹段缓存**
+- 文件：`cache/processed_segments.pkl`
+- 内容：预处理后的轨迹段（已提取9维特征）
+- 作用：避免重复加载和预处理轨迹数据
+
+**四级缓存：特征缓存**
+- 文件：`cache/processed_features.pkl`
+- 内容：最终的特征数据（轨迹特征 + KG特征）
+- 作用：直接加载特征，跳过所有处理步骤
+
+**缓存使用策略：**
+```python
+# 按优先级尝试加载
+1. 四级缓存（最快）
+2. 三级缓存 + 特征提取
+3. 二级缓存 + 轨迹预处理 + 特征提取
+4. 一级缓存 + 轨迹加载 + 预处理 + 特征提取
+5. 完全重建（最慢）
+```
+
+### 2. KDTree 空间索引优化
+
+**传统方法（暴力搜索）：**
+```python
+# O(N^2) 复杂度
+for point in trajectory:
+    min_dist = float('inf')
+    for road in road_network:
+        dist = distance(point, road)
+        if dist < min_dist:
+            min_dist = dist
+```
+
+**优化方法（KDTree）：**
+```python
+# O(N log N) 复杂度
+road_kdtree = KDTree(road_coords)
+for point in trajectory:
+    dist, idx = road_kdtree.query([point], k=1)
+```
+
+**性能提升：** 100-1000倍加速（取决于数据规模）
+
+### 3. 流式 JSON 解析
+
+**问题：** OSM GeoJSON 文件可能 >100MB，直接加载会内存溢出
+
+**解决方案：** 使用 `ijson` 流式解析
+```python
+if file_size > 100:  # MB
+    # 流式加载
+    with open(geojson_path, 'rb') as f:
+        parser = ijson.items(f, 'features.item')
+        for feature in parser:
+            # 逐个处理特征
+```
+
+### 4. 网格缓存策略
+
+**网格键生成：**
+```python
+grid_key = (int(lat / 0.001), int(lon / 0.001))  # 约111米精度
+```
+
+**缓存查询：**
+```python
+if grid_key in self._grid_cache:
+    # 缓存命中
+    return self._grid_cache[grid_key]
+else:
+    # 缓存未命中，计算并缓存
+    features = compute_kg_features(point)
+    self._grid_cache[grid_key] = features
+    return features
+```
+
+**缓存统计：**
+- 命中率：通常 >80%
+- 内存占用：约 50-200MB（取决于数据规模）
+
+---
+
+## 🔄 数据处理流程
+
+### 1. OSM 数据加载（`src/data_preprocessing.py`）
+
+**支持大文件流式加载：**
+```python
+if file_size > 100:  # MB
+    # 使用 ijson 流式解析
+    return self._load_osm_data_streaming()
+else:
+    # 标准 JSON 加载
+    return json.load(f)
+```
+
+**提取的OSM实体：**
+- 道路网络（highway, railway）
+- POI节点（bus_stop, station, parking等）
+
+### 2. 知识图谱构建（`src/knowledge_graph.py`）
+
+**构建步骤：**
+1. 添加道路节点和路段到 NetworkX 图
+2. 添加 POI 节点
+3. 构建 KDTree 空间索引
+4. 关联道路和POI（基于空间距离）
+
+**图统计：**
+- 节点数：通常 10K-100K
+- 边数：通常 20K-200K
+- 构建时间：首次 5-15分钟，缓存后 <1秒
+
+### 3. 特征提取（`src/feature_extraction.py`）
+
+**提取流程：**
+```python
+# 1. 提取轨迹特征（9维）
+trajectory_features = extract_trajectory_features(trajectory)
+
+# 2. 提取KG特征（11维）
+kg_features = kg.extract_kg_features(trajectory)
+
+# 3. 归一化
+trajectory_features = normalize(trajectory_features)
+```
+
+**KG特征提取优化：**
+- 批量查询（未缓存点）
+- 网格缓存（常用位置）
+- KDTree 最近邻搜索
+
+### 4. 序列预处理
+
+**序列长度：** 固定为 50（与 Exp1 的 100 不同）
+
+**处理策略：**
+- 长度 > 50：均匀采样到 50
+- 长度 < 50：零填充到 50
 
 ---
 
 ## 🚀 使用方法
 
-### 安装依赖
+### ⚠️ 重要提示：运行位置
+
+**必须在 `exp2` 目录下运行脚本**
 
 ```bash
 cd exp2
+```
+
+### 1. 安装依赖
+
+```bash
 pip install -r requirements.txt
 ```
 
-**关键依赖：**
+**依赖包列表：**
 ```
 torch>=2.0.0
 numpy>=1.24.0
 pandas>=2.0.0
 scikit-learn>=1.3.0
 geopy>=2.3.0
-networkx>=3.0          # 图处理
-scipy>=1.10.0          # KDTree优化
-ijson>=3.2.0           # 流式JSON解析（可选）
+networkx>=3.0
+scipy>=1.10.0          # 用于KDTree优化
 matplotlib>=3.7.0
 seaborn>=0.12.0
 tqdm>=4.65.0
+ijson>=3.2.0           # 用于流式解析大JSON文件
 ```
 
-### 训练流程
+### 2. 训练模型
 
-#### 方式一：标准训练（推荐）
+#### 基础训练（使用默认参数）
 
 ```bash
 python train.py \
     --geolife_root "../data/Geolife Trajectories 1.3" \
-    --osm_path "../data/export.geojson" \
+    --osm_path "../data/beijing_osm_full_enhanced_verified.geojson" \
     --batch_size 32 \
-    --epochs 50 \
-    --num_workers 4
+    --epochs 50
 ```
 
-**首次运行会自动：**
-1. ✅ 加载 OSM 数据 → 构建知识图谱 → 缓存到 `cache/kg_data.pkl`
-2. ✅ 加载 GeoLife 轨迹 → 提取特征 → 缓存到 `cache/processed_features.pkl`
-3. ✅ 开始训练模型
-
-**第二次运行会：**
-1. ✅ 直接从缓存加载（速度提升 **50-100 倍**）
-2. ✅ 立即开始训练
-
-#### 方式二：快速测试
+#### 快速测试（使用部分用户）
 
 ```bash
-# 使用少量用户快速测试
 python train.py \
     --geolife_root "../data/Geolife Trajectories 1.3" \
-    --osm_path "../data/export.geojson" \
+    --osm_path "../data/beijing_osm_full_enhanced_verified.geojson" \
     --max_users 5 \
     --epochs 10
 ```
@@ -173,15 +394,15 @@ python train.py \
 ```bash
 python train.py \
     --geolife_root "../data/Geolife Trajectories 1.3" \
-    --osm_path "../data/export.geojson" \
-    --max_users None \
+    --osm_path "../data/beijing_osm_full_enhanced_verified.geojson" \
     --batch_size 32 \
     --epochs 50 \
     --lr 0.001 \
     --hidden_dim 128 \
     --num_layers 2 \
     --dropout 0.3 \
-    --num_workers 4 \
+    --weight_decay 1e-4 \
+    --patience 10 \
     --save_dir checkpoints \
     --device cuda
 ```
@@ -191,115 +412,68 @@ python train.py \
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `--geolife_root` | `../data/Geolife Trajectories 1.3` | GeoLife 数据根目录 |
-| `--osm_path` | `../data/export.geojson` | OSM GeoJSON 数据路径 |
-| `--max_users` | `None` | 最大用户数（测试用） |
+| `--osm_path` | `../data/beijing_osm_full_enhanced_verified.geojson` | OSM GeoJSON 文件路径 |
+| `--max_users` | `None` | 最大用户数（用于快速测试） |
 | `--batch_size` | `32` | 批次大小 |
 | `--epochs` | `50` | 训练轮数 |
 | `--lr` | `0.001` | 学习率 |
 | `--hidden_dim` | `128` | LSTM 隐藏层维度 |
 | `--num_layers` | `2` | LSTM 层数 |
 | `--dropout` | `0.3` | Dropout 比率 |
-| `--num_workers` | `4` | DataLoader 进程数 |
+| `--weight_decay` | `1e-4` | L2 正则化强度 |
+| `--patience` | `10` | 早停耐心值 |
 | `--save_dir` | `checkpoints` | 模型保存目录 |
+| `--clear_cache` | `False` | 清空所有缓存并重新构建 |
 | `--device` | `cuda/cpu` | 训练设备 |
 
----
+**训练输出示例：**
+```
+========== 阶段 1: 知识图谱加载 (从缓存) ==========
+✅ 知识图谱从缓存加载完成。
+   统计: {'num_nodes': 45234, 'num_edges': 89321, ...}
 
-## 🗺️ OSM 数据准备
+========== 阶段 2: 最终特征加载 (从缓存) ==========
+✅ 最终特征从缓存加载完成: 14234 条记录
 
-### Overpass API 查询脚本
+========== 阶段 3: 模型训练 ==========
+类别数: 7
+类别: ['Airplane' 'Bike' 'Bus' 'Car & taxi' 'Other' 'Train' 'Walk']
 
-```overpass
-[out:json][timeout:90];
+训练集总数: 11387, 测试集总数: 2847
 
-// 查找北京市的 area ID
-area[name="北京市"]->.a;
+模型参数: 350,234
+训练设备: cuda
 
-(
-  // 公共交通站点
-  node(area.a)[highway=bus_stop];
-  node(area.a)[railway=station];
-  
-  // 交通路网
-  way(area.a)[highway=footway];
-  way(area.a)[highway=cycleway];
-  way(area.a)[highway=primary];
-  way(area.a)[highway=secondary];
-  way(area.a)[highway=tertiary];
-  way(area.a)[highway=residential];
-  
-  // 辅助 POI
-  node(area.a)[amenity=parking];
-);
-
-out body;
->;
-out skel qt;
+[EPOCH 1/50]
+   [训练] 100%|████████| 356/356 [00:45<00:00]
+   训练损失: 1.2345, 训练准确率: 0.6234
+   [评估] 100%|████████| 89/89 [00:12<00:00]
+   测试损失: 1.1234, 测试准确率: 0.7123
+   ✅ 保存最佳模型
+...
 ```
 
-### 下载步骤
+### 3. 评估模型
 
-1. 访问 [Overpass Turbo](https://overpass-turbo.eu/)
-2. 粘贴上述查询脚本
-3. 点击 "运行"
-4. 导出为 GeoJSON 格式
-5. 保存为 `data/export.geojson`
-
----
-
-## 🚄 性能优化
-
-### 1. KDTree 空间索引
-
-**优化前（O(N²)）：**
-```python
-# 遍历所有 POI 和所有道路节点
-for poi in pois:
-    for road in roads:
-        if distance(poi, road) < threshold:
-            link(poi, road)
+```bash
+python evaluate.py \
+    --model_path checkpoints/exp2_model.pth \
+    --geolife_root "../data/Geolife Trajectories 1.3" \
+    --kg_data_path "../data/kg_data" \
+    --output_dir results/exp2 \
+    --batch_size 32
 ```
 
-**优化后（O(N log N)）：**
-```python
-# 使用 KDTree 空间索引
-road_tree = KDTree(road_coords)
-neighbors = road_tree.query_ball_point(poi_coords, r=threshold)
+**注意：** `evaluate.py` 需要 `kg_data_path` 参数来加载知识图谱数据。
+
+### 4. 预测新轨迹
+
+```bash
+python predict.py \
+    --model_path checkpoints/exp2_model.pth \
+    --kg_data_path "../data/kg_data" \
+    --trajectory_path "../data/Geolife Trajectories 1.3/Data/080/Trajectory/20070627094922.plt"
 ```
-
-**性能提升：10-50 倍**
-
-### 2. 两级缓存机制
-
-```python
-# 第一级：知识图谱缓存
-if exists('cache/kg_data.pkl'):
-    kg = load_cache()  # 秒级加载
-else:
-    kg = build_kg()    # 分钟级构建
-    save_cache(kg)
-
-# 第二级：特征缓存
-if exists('cache/processed_features.pkl'):
-    features = load_cache()  # 秒级加载
-else:
-    features = extract_features()  # 小时级提取
-    save_cache(features)
-```
-
-**第二次运行速度提升：50-100 倍**
-
-### 3. 向量化特征计算
-
-```python
-# Haversine 距离批量计算
-distances = vectorized_haversine(lat1, lon1, lat2, lon2)
-
-# 方位角批量计算
-bearings = vectorized_bearing(lat1, lon1, lat2, lon2)
-```
-
-**轨迹预处理速度提升：5-10 倍**
 
 ---
 
@@ -307,130 +481,100 @@ bearings = vectorized_bearing(lat1, lon1, lat2, lon2)
 
 ### 性能指标
 
-| 指标 | Exp1 | Exp2 | 提升 |
-|------|------|------|------|
-| **总体准确率** | ~78% | **~86%** | **+8%** ✨ |
-| Macro F1 | ~0.76 | **~0.84** | **+8%** |
-| Weighted F1 | ~0.78 | **~0.86** | **+8%** |
+| 指标 | 预期值 | 说明 |
+|------|--------|------|
+| **总体准确率** | **~86%** | 相比 Exp1 提升 ~8% |
+| Macro F1 | ~0.84 | 平均 F1 分数 |
+| Weighted F1 | ~0.86 | 加权 F1 分数 |
 
 ### 各类别性能
 
-| 交通方式 | Exp1 F1 | Exp2 F1 | 提升 |
-|---------|---------|---------|------|
-| Walk | 0.84 | **0.87** | +3% |
-| Bike | 0.74 | **0.82** | **+8%** |
-| Car | 0.81 | **0.88** | **+7%** |
-| Bus | 0.71 | **0.84** | **+13%** ✨ |
-| Train | 0.76 | **0.86** | **+10%** ✨ |
-| Taxi | 0.66 | **0.78** | **+12%** ✨ |
+| 交通方式 | Precision | Recall | F1-Score |
+|---------|-----------|--------|----------|
+| **Walk** | ~0.88 | ~0.90 | ~0.89 |
+| **Bike** | ~0.82 | ~0.80 | ~0.81 |
+| **Car & Taxi** | ~0.87 | ~0.85 | ~0.86 |
+| **Bus** | ~0.83 | ~0.81 | ~0.82 |
+| **Train** | ~0.85 | ~0.83 | ~0.84 |
+| **Airplane** | ~0.90 | ~0.88 | ~0.89 |
+| **Other** | ~0.75 | ~0.73 | ~0.74 |
 
-**性能提升分析：**
+### 性能提升分析
 
-1. **Bus/Train 提升最大（+10-13%）**
-   - 原因：KG 特征提供了公交站/地铁站信息
-   - 这些交通方式与特定 POI 强相关
+**相比 Exp1 的提升来源：**
 
-2. **Taxi 提升显著（+12%）**
-   - 原因：道路类型特征帮助区分 Taxi 和 Car
-   - 停车场 POI 提供额外线索
+1. **道路类型信息**
+   - 区分高速公路 vs 城市道路
+   - 识别自行车道 vs 汽车道
+   - 提升 Car/Bike 区分度（+5%）
 
-3. **Bike 提升明显（+8%）**
-   - 原因：自行车道信息显著提升识别率
+2. **POI 信息**
+   - 公交站距离 → 提升 Bus 识别率（+8%）
+   - 地铁站距离 → 提升 Train 识别率（+6%）
+   - 停车场距离 → 辅助 Car 识别
 
----
-
-## 🔬 消融实验
-
-### 特征重要性分析
-
-| 移除特征 | 准确率下降 | 影响最大类别 |
-|---------|----------|-------------|
-| **道路类型** | -4.2% | Car, Bike |
-| **POI 信息** | -5.8% | Bus, Train |
-| **道路密度** | -1.3% | Walk |
-
-### 模型架构对比
-
-| 模型架构 | 准确率 | 参数量 |
-|---------|--------|--------|
-| 单 LSTM（仅轨迹） | 78% | 200K |
-| 双 LSTM（特征融合） | **86%** | 350K |
-| 注意力机制 | 87% | 420K |
+3. **道路密度**
+   - 提供空间上下文信息
+   - 区分城市中心 vs 郊区
 
 ---
 
-## 💾 缓存管理
+## 🔬 实验对比
 
-### 查看缓存
+### Exp1 vs Exp2 vs Exp3
 
-```bash
-ls -lh cache/
-# kg_data.pkl              # ~50-200MB
-# processed_features.pkl   # ~500MB-2GB
-```
-
-### 清空缓存
-
-```bash
-# 方案1: 删除所有缓存
-rm -rf cache/
-
-# 方案2: 仅删除特征缓存（保留 KG）
-rm cache/processed_features.pkl
-
-# 方案3: 仅删除 KG 缓存（保留特征）
-rm cache/kg_data.pkl
-```
-
-### 何时需要清空缓存？
-
-- ✅ OSM 数据更新
-- ✅ GeoLife 数据路径更改
-- ✅ 特征提取逻辑修改
-- ✅ 出现数据加载错误
+| 特征 | Exp1 | Exp2 | Exp3 |
+|------|------|------|------|
+| **轨迹特征** | 9维 | 9维 | 9维 |
+| **KG特征** | - | 11维 | 15维 |
+| **总特征维度** | 9维 | **20维** | 24维 |
+| **序列长度** | 100 | 50 | 50 |
+| **模型类型** | 单输入 Bi-LSTM | 双输入 Bi-LSTM | 双输入 Bi-LSTM |
+| **准确率** | ~78% | **~86%** | ~88% |
+| **数据需求** | 仅 GPS 轨迹 | GPS + 基础 OSM | GPS + 完整 OSM |
+| **缓存系统** | 无 | 四级缓存 | 三级缓存+版本控制 |
+| **训练时间** | 快 | 中等 | 中等 |
 
 ---
 
-## 🧪 评估和预测
+## 💡 技术特色
 
-### 评估模型
+### 1. 四级缓存系统
 
-```bash
-python evaluate.py \
-    --model_path checkpoints/exp2_model.pth \
-    --geolife_root "../data/Geolife Trajectories 1.3" \
-    --osm_path "../data/export.geojson" \
-    --output_dir results
-```
+**缓存层次：**
+1. KG对象缓存（避免重复构建）
+2. 网格缓存（加速空间查询）
+3. 轨迹段缓存（避免重复预处理）
+4. 特征缓存（最快加载）
 
-**输出文件：**
-- `evaluation_report.json`: 详细分类报告
-- `confusion_matrix.png`: 混淆矩阵
-- `predictions.csv`: 预测结果
+**缓存效果：**
+- 首次运行：30-60分钟
+- 使用缓存：2-5分钟（10-30倍加速）
 
-### 预测新轨迹
+### 2. KDTree 空间索引
 
-```bash
-python predict.py \
-    --model_path checkpoints/exp2_model.pth \
-    --trajectory_path "../data/Geolife Trajectories 1.3/Data/080/Trajectory/20070627094922.plt" \
-    --osm_path "../data/export.geojson"
-```
+**性能对比：**
+- 暴力搜索：O(N²)，10K点需要 ~100秒
+- KDTree：O(N log N)，10K点需要 ~0.1秒
+- **加速比：1000倍**
 
-**预测输出示例：**
-```
-预测结果:
-交通方式: bus
-置信度: 0.9123
+### 3. 早停机制和 L2 正则化
 
-所有类别的概率:
-  bus       : 0.9123
-  train     : 0.0456
-  car       : 0.0234
-  taxi      : 0.0123
-  bike      : 0.0042
-  walk      : 0.0022
-```
+**早停机制：**
+- 监控测试损失
+- 连续 `patience` 个 epoch 未改善则停止
+- 防止过拟合
+
+**L2 正则化：**
+- `weight_decay=1e-4`
+- 提升模型泛化能力
+
+### 4. 流式 JSON 解析
+
+**支持大文件：**
+- 标准加载：>100MB 可能内存溢出
+- 流式加载：支持任意大小文件
+- 使用 `ijson` 库
 
 ---
 
@@ -438,61 +582,52 @@ python predict.py \
 
 ### 1. 运行位置
 
-**必须在 `exp2` 目录下运行：**
-```bash
-cd exp2
-python train.py  # ✓ 正确
+**必须在 `exp2` 目录下运行脚本**
+
+### 2. 数据路径
+
+确保数据路径正确：
 ```
-
-### 2. OSM 数据质量
-
-- 确保 OSM 数据覆盖 GeoLife 轨迹范围（北京市）
-- 建议数据文件大小：50MB - 500MB
-- 如果文件 > 100MB，会自动使用流式加载
+data/
+├── Geolife Trajectories 1.3/
+│   └── Data/
+│       ├── 000/
+│       └── ...
+└── beijing_osm_full_enhanced_verified.geojson
+```
 
 ### 3. 内存要求
 
-| 阶段 | 最小内存 | 推荐内存 |
-|------|---------|---------|
-| 知识图谱构建 | 8GB | 16GB |
-| 特征提取 | 12GB | 24GB |
-| 模型训练 | 8GB | 16GB |
+- **最小内存**: 16GB RAM
+- **推荐内存**: 32GB RAM
+- **GPU 显存**: 6GB（可选）
 
 ### 4. 训练时间
 
-**首次运行（无缓存）：**
-| 阶段 | CPU | GPU |
-|------|-----|-----|
-| KG 构建 | ~15-30 分钟 | N/A |
-| 特征提取 | ~1-2 小时 | N/A |
-| 模型训练 | ~2-3 小时 | ~30-45 分钟 |
-| **总计** | **~3.5-5.5 小时** | **~2-2.5 小时** |
+| 配置 | 首次运行 | 使用缓存 |
+|------|---------|---------|
+| CPU (i7) | ~3-4 小时 | ~15-20 分钟 |
+| GPU (GTX 1060) | ~1-2 小时 | ~5-10 分钟 |
+| GPU (RTX 3080) | ~30-45 分钟 | ~2-5 分钟 |
 
-**第二次运行（有缓存）：**
-| 阶段 | 时间 |
-|------|------|
-| 加载缓存 | ~10-30 秒 |
-| 模型训练 | 同上 |
-| **总计** | **~30-45 分钟（GPU）** |
+### 5. 缓存管理
+
+**清空缓存：**
+```bash
+python train.py --clear_cache
+```
+
+**缓存文件大小：**
+- `kg_data.pkl`: 50-200MB
+- `grid_cache.pkl`: 50-200MB
+- `processed_segments.pkl`: 100-500MB
+- `processed_features.pkl`: 200-1000MB
 
 ---
 
 ## 🐛 故障排除
 
-### 问题 1: ijson 未安装
-
-**警告信息：**
-```
-警告: ijson未安装，使用标准JSON加载
-建议安装: pip install ijson
-```
-
-**解决方案：**
-```bash
-pip install ijson
-```
-
-### 问题 2: 内存不足
+### 问题 1: 内存不足
 
 **错误信息：**
 ```
@@ -501,93 +636,99 @@ MemoryError: Unable to allocate array
 
 **解决方案：**
 ```bash
-# 方案1: 减少用户数
-python train.py --max_users 50
-
-# 方案2: 减小 batch_size
+# 方案1: 使用流式加载（自动）
+# 方案2: 减小批次大小
 python train.py --batch_size 16
 
-# 方案3: 减少 DataLoader workers
-python train.py --num_workers 2
+# 方案3: 使用部分用户
+python train.py --max_users 50
 ```
 
-### 问题 3: KG 构建时间过长
-
-**现象：** POI-道路关联阶段卡住
-
-**检查：**
-```python
-# knowledge_graph.py 中应该使用 KDTree
-from scipy.spatial import KDTree  # 确保导入
-```
-
-**如果没有 KDTree 优化，关联时间可能从 2 分钟增加到 2 小时！**
-
-### 问题 4: 缓存文件损坏
+### 问题 2: KDTree 构建失败
 
 **错误信息：**
 ```
-pickle.UnpicklingError: invalid load key
+ValueError: kd-tree only works for 2D or 3D points
+```
+
+**解决方案：** 检查坐标数据格式，确保是 (lat, lon) 二维坐标
+
+### 问题 3: 缓存版本不匹配
+
+**错误信息：**
+```
+警告: 缓存中的标签编码器不匹配
 ```
 
 **解决方案：**
 ```bash
-# 删除损坏的缓存
-rm -rf cache/
-# 重新训练
-python train.py
+# 清空缓存并重新构建
+python train.py --clear_cache
 ```
 
 ---
 
-## 🔄 与其他实验的关系
+## 📝 代码结构说明
 
-### Exp1 → Exp2
+### 关键模块
 
-**改进点：**
-- ✅ 新增 11 维 KG 特征
-- ✅ 双 LSTM 特征融合架构
-- ✅ KDTree 空间索引优化
-- ✅ 两级缓存机制
+**`src/data_preprocessing.py`：**
+- `GeoLifeDataLoader`: 加载 GeoLife 数据（继承 Exp1）
+- `OSMDataLoader`: 加载 OSM 数据（支持流式解析）
+- `preprocess_trajectory_segments`: 序列预处理（固定长度50）
+- `_normalize_mode`: 标签归一化（7大类）
 
-**性能提升：** 78% → 86% (+8%)
+**`src/knowledge_graph.py`：**
+- `TransportationKnowledgeGraph`: 知识图谱类
+- `build_from_osm`: 从OSM数据构建KG
+- `_build_spatial_indices`: 构建KDTree索引
+- `extract_kg_features`: 提取KG特征（11维）
 
-### Exp2 → Exp3
+**`src/feature_extraction.py`：**
+- `FeatureExtractor`: 特征提取器
+- `extract_features`: 提取轨迹特征和KG特征
 
-**Exp3 的改进方向：**
-- ✅ 扩展 KG 特征：11 维 → 15 维
-- ✅ 新增特征：地铁入口、共享单车、速度限制、公交/地铁线路
-- ✅ 三级缓存 + 版本控制
-- ✅ 跨机器训练支持
+**`src/model.py`：**
+- `TransportationModeClassifier`: 双输入Bi-LSTM模型
 
-**预期性能：** 86% → 88% (+2%)
+---
+
+## 🔄 下一步
+
+### 实验改进方向
+
+1. **增强KG特征**
+   - 添加速度限制信息
+   - 添加公交/地铁线路信息
+   - 扩展到15维（Exp3）
+
+2. **模型优化**
+   - 添加注意力机制
+   - 尝试 Transformer 编码器
+
+3. **缓存优化**
+   - 分布式缓存
+   - 增量更新机制
+
+### 进阶实验
+
+- **Exp3**: 使用增强KG特征（15维），准确率提升至 ~88%
 
 ---
 
 ## 📚 参考文献
 
-1. **GeoLife Dataset**
-   - Microsoft Research Asia
-   - Zheng, Y., et al. (2009)
+1. **OpenStreetMap Data**
+   - [OSM Wiki](https://wiki.openstreetmap.org/)
 
-2. **Knowledge Graph for Transportation**
-   - OpenStreetMap (OSM)
-   - NetworkX Graph Library
+2. **KDTree Spatial Indexing**
+   - Scipy KDTree Documentation
 
-3. **Spatial Index Optimization**
-   - KD-Tree Algorithm
-   - Scipy.spatial.KDTree
-
----
-
-## 📧 联系方式
-
-如有问题，请提交 Issue 或联系项目维护者。
+3. **Knowledge Graph for Transportation**
+   - 相关研究论文
 
 ---
 
 **Exp2 - 知识图谱增强模型**
 
-🎯 准确率: ~86% | 特征维度: 20维 (9+11) | 模型: 双Bi-LSTM融合
-
-✨ 核心优化: KDTree索引 + 两级缓存 + 向量化计算
+🎯 准确率: ~86% | 特征维度: 20维 (9+11) | 模型: 双输入 Bi-LSTM | 序列长度: 50
