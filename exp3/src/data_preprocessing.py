@@ -1,8 +1,6 @@
 """
 数据预处理模块 (Exp3)
-处理 GeoLife 轨迹数据和完整 OSM 数据
-- 继承 Exp2 的优化（向量化、鲁棒性）
-- 新增：处理公交/地铁线路数据
+继承 Exp2 的所有优化，新增公交/地铁线路提取
 """
 import os
 import pandas as pd
@@ -16,7 +14,7 @@ pd.options.mode.chained_assignment = None
 
 
 class GeoLifeDataLoader:
-    """GeoLife数据加载器 (继承自 Exp2)"""
+    """GeoLife数据加载器 (完全继承自 Exp2)"""
 
     def __init__(self, data_root: str):
         self.data_root = data_root
@@ -47,9 +45,6 @@ class GeoLifeDataLoader:
         else:
             raise ValueError(f"文件 {file_path} 列数为 {num_cols}，无法处理。")
 
-        # 删除 reserved 列
-        df = df.drop('reserved', axis=1, errors='ignore')
-
         # 合并日期时间
         df['datetime'] = pd.to_datetime(df['date'] + ' ' + df['time'])
         df = df.sort_values('datetime').reset_index(drop=True)
@@ -61,7 +56,6 @@ class GeoLifeDataLoader:
         if invalid_lat_mask.any() or invalid_lon_mask.any():
             warnings.warn(f"文件 {os.path.basename(file_path)} 发现无效坐标，正在删除。")
             df = df[~invalid_lat_mask & ~invalid_lon_mask].reset_index(drop=True)
-
             if len(df) < 2:
                 return pd.DataFrame()
 
@@ -69,12 +63,12 @@ class GeoLifeDataLoader:
         df = self._calculate_features_vectorized(df)
 
         # 清理不必要的列
-        df = df.drop(columns=['date', 'time', 'date_days', 'altitude'], errors='ignore')
+        df = df.drop(columns=['date', 'time', 'date_days'], errors='ignore')
 
         return df
 
     def _calculate_features_vectorized(self, df: pd.DataFrame) -> pd.DataFrame:
-        """向量化计算 9 维轨迹特征"""
+        """向量化计算 9 维轨迹特征 (完全继承自 Exp2)"""
         # 1. 时间差
         df['time_diff'] = df['datetime'].diff().dt.total_seconds().fillna(0)
 
@@ -173,7 +167,7 @@ class GeoLifeDataLoader:
 
 
 class OSMDataLoader:
-    """OSM数据加载器 (Exp3 - 支持完整 OSM 数据)"""
+    """OSM数据加载器 (Exp3 - 新增 transit_routes 提取)"""
 
     def __init__(self, geojson_path: str):
         self.geojson_path = geojson_path
@@ -238,7 +232,7 @@ class OSMDataLoader:
                     'id': props.get('@id', '') or props.get('id', ''),
                     'highway': highway,
                     'railway': railway,
-                    'maxspeed': maxspeed,  # 新增
+                    'maxspeed': maxspeed,
                     'geometry_type': geometry.get('type', ''),
                     'coordinates': geometry.get('coordinates', [])
                 }
@@ -268,7 +262,7 @@ class OSMDataLoader:
             highway = props.get('highway', '')
             railway = props.get('railway', '')
             amenity = props.get('amenity', '')
-            public_transport = props.get('public_transport', '')  # 新增
+            public_transport = props.get('public_transport', '')
 
             # 检查是否匹配 POI 类型
             poi_type = None
@@ -278,7 +272,7 @@ class OSMDataLoader:
                 poi_type = railway
             elif amenity in poi_types:
                 poi_type = amenity
-            elif public_transport == 'station':  # 新增：通用公共交通站
+            elif public_transport == 'station':
                 poi_type = 'station'
 
             if poi_type:
@@ -294,14 +288,18 @@ class OSMDataLoader:
         return pd.DataFrame(pois)
 
     def extract_transit_routes(self, osm_data: Dict) -> pd.DataFrame:
-        """提取公交和地铁线路信息 (新增)"""
+        """
+        提取公交和地铁线路信息 (Exp3 新增)
+
+        从 OSM Relations 中提取 route=bus 和 route=subway
+        """
         routes = []
 
         for feature in osm_data.get('features', []):
             props = feature.get('properties', {})
             geometry = feature.get('geometry', {})
 
-            # OSM relation 中的线路信息
+            # 检查是否为公交或地铁线路
             route = props.get('route', '')
 
             if route in ['bus', 'subway']:
@@ -321,8 +319,11 @@ class OSMDataLoader:
 
 def preprocess_trajectory_segments(segments: List[Tuple[pd.DataFrame, str]],
                                    min_length: int = 10) -> List[Tuple[np.ndarray, str]]:
-    """预处理轨迹段，提取 9 维特征"""
+    """
+    预处理轨迹段，提取 9 维特征 (完全继承自 Exp2)
+    """
     processed_segments = []
+    FIXED_SEQUENCE_LENGTH = 50
 
     feature_cols = [
         'latitude', 'longitude', 'speed', 'acceleration',
@@ -335,14 +336,14 @@ def preprocess_trajectory_segments(segments: List[Tuple[pd.DataFrame, str]],
             continue
 
         features = segment[feature_cols].values
+        current_length = len(features)
 
-        # 序列长度处理
-        if len(features) > 200:
-            indices = np.linspace(0, len(features) - 1, 200, dtype=int)
+        # 序列长度规范化
+        if current_length > FIXED_SEQUENCE_LENGTH:
+            indices = np.linspace(0, current_length - 1, FIXED_SEQUENCE_LENGTH, dtype=int)
             features = features[indices]
-
-        if len(features) < 50:
-            padding = np.zeros((50 - len(features), features.shape[1]))
+        elif current_length < FIXED_SEQUENCE_LENGTH:
+            padding = np.zeros((FIXED_SEQUENCE_LENGTH - current_length, features.shape[1]))
             features = np.vstack([features, padding])
 
         processed_segments.append((features, label))
