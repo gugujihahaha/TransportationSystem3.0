@@ -14,7 +14,7 @@ import json
 from tqdm import tqdm
 
 from src.data_preprocessing import GeoLifeDataLoader, OSMDataLoader, preprocess_trajectory_segments
-from src.knowledge_graph_enhanced import EnhancedTransportationKG
+from src.knowledge_graph import EnhancedTransportationKG
 from src.feature_extraction import FeatureExtractor
 from src.model import TransportationModeClassifier
 from train import TrajectoryDataset
