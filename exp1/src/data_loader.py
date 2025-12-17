@@ -87,7 +87,11 @@ class GeoLifeDataLoader:
 
         # 3. 合并日期时间
         # 针对您日志中的 UserWarning: Could not infer format，这里不进行修正，保留原样以减少非核心修改
-        df['datetime'] = pd.to_datetime(df['date'] + ' ' + df['time'])
+        # 速度快：告诉 Pandas 格式，跳过“猜测”阶段
+        df['datetime'] = pd.to_datetime(
+            df['date'] + ' ' + df['time'],
+            format='%Y-%m-%d %H:%M:%S'
+        )
         df = df.sort_values('datetime').reset_index(drop=True)
 
         # 4. 强制数据清洗：删除无效坐标点 (增强健壮性)

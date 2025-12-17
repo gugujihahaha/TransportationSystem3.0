@@ -59,7 +59,10 @@ class GeoLifeDataLoader:
             raise ValueError(f"文件 {file_path} 列数为 {num_cols}，既非 6 也非 7。无法处理。")
 
         # 3. 合并日期时间
-        df['datetime'] = pd.to_datetime(df['date'] + ' ' + df['time'])
+        df['datetime'] = pd.to_datetime(
+            df['date'] + ' ' + df['time'],
+            format='%Y-%m-%d %H:%M:%S'
+        )
         df = df.sort_values('datetime').reset_index(drop=True)
 
         # 4. 强制数据清洗：删除无效坐标点
