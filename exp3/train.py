@@ -230,7 +230,7 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None):
     print(f"剩余 {len(processed_segments)} 个可用轨迹段")
 
     # 2.3 过滤类别
-    valid_modes = {'walk', 'bike', 'bus', 'car', 'train', 'taxi'}
+    valid_modes = {'Walk', 'Bike', 'Bus', 'Car & taxi', 'Train', 'Subway', 'Airplane'}
     processed_segments = [
         (traj, label) for traj, label in processed_segments
         if label in valid_modes

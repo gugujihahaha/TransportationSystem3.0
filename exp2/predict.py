@@ -1,184 +1,99 @@
-# ============================================================
-# exp2/predict.py - 预测脚本 (双输入：轨迹特征 + 知识图谱特征)
-# ============================================================
-"""
-预测脚本 - 结合轨迹特征和知识图谱特征 (Exp2)
-
-使用方法:
-    python predict.py \\
-        --model_path checkpoints/exp2_model.pth \\
-        --kg_data_path "../data/kg_data" \\
-        --trajectory_path "../data/Geolife Trajectories 1.3/Data/080/Trajectory/20070627094922.plt"
-"""
-import os
-import argparse
 import torch
 import numpy as np
-from typing import Tuple, Optional
-
-# 假设模块路径
+import pickle
+import os
+from sklearn.preprocessing import LabelEncoder
 from src.model import TransportationModeClassifier
-from src.knowledge_graph import TransportationKnowledgeGraph
-from src.feature_extraction import FeatureExtractor
-from src.data_preprocessing import GeoLifeDataLoader, preprocess_trajectory_segments
 
 
-def predict_trajectory(model, trajectory, device, label_encoder, feature_extractor: FeatureExtractor):
-    """
-    预测单个轨迹的交通方式 (双输入)
+class TransportationPredictorExp2:
+    def __init__(self, checkpoint_path="checkpoints/exp2_model.pth", kg_cache_path="cache/kg_data.pkl"):
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    Args:
-        model: 训练好的模型
-        trajectory: DataFrame 格式的轨迹数据
-        device: 计算设备
-        label_encoder: 标签编码器
-        feature_extractor: 初始化好的特征提取器 (包含 KG)
+        # 1. 安全加载模型与配置
+        if not os.path.exists(checkpoint_path):
+            raise FileNotFoundError(f"❌ 未找到模型权重文件: {checkpoint_path}")
 
-    Returns:
-        pred_label: 预测的交通方式
-        pred_prob: 预测置信度
-        all_probs: 所有类别的概率分布
-    """
+        # 使用 torch 2.6+ 安全加载逻辑
+        with torch.serialization.safe_globals({LabelEncoder: LabelEncoder}):
+            ckpt = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
 
-    # 1. 预处理轨迹 (提取 9 维轨迹特征，长度规范化)
-    # 临时标签 'unknown' 不影响特征提取
-    segment = (trajectory, 'unknown')
+        self.label_encoder = ckpt['label_encoder']
+        self.class_names = self.label_encoder.classes_
+        config = ckpt['model_config']
 
-    # preprocess_trajectory_segments 会将轨迹 DataFrame 转换为 (N, 9) NumPy 数组
-    # 并进行长度规范化 (例如 (50, 9))
-    processed = preprocess_trajectory_segments([segment], min_length=10)
+        # 2. 初始化模型架构并加载权重
+        self.model = TransportationModeClassifier(
+            trajectory_feature_dim=config['trajectory_feature_dim'],
+            kg_feature_dim=config['kg_feature_dim'],
+            hidden_dim=config['hidden_dim'],
+            num_layers=config['num_layers'],
+            num_classes=config['num_classes'],
+            dropout=config.get('dropout', 0.3)
+        ).to(self.device)
 
-    if len(processed) == 0:
-        print("警告: 轨迹太短，无法预测。")
-        return None, None, None
+        self.model.load_state_dict(ckpt["model_state_dict"])
+        self.model.eval()
 
-    traj_features_raw, _ = processed[0]
+        # 3. 加载知识图谱（用于推理时的特征补全，可选）
+        self.kg = None
+        if os.path.exists(kg_cache_path):
+            with open(kg_cache_path, 'rb') as f:
+                with torch.serialization.safe_globals({LabelEncoder: LabelEncoder}):
+                    self.kg = pickle.load(f)
+            print(f"✅ 知识图谱加载成功")
 
-    # 2. 提取双特征 (包括轨迹归一化和 KG 特征提取)
-    # feature_extractor.extract_features 返回 (归一化轨迹特征, KG 特征)
-    normalized_traj_features, kg_features = feature_extractor.extract_features(traj_features_raw)
+        print(f"✅ Exp2 模型加载成功！类别: {list(self.class_names)}")
 
-    # 3. 转换为 Tensor
-    # 增加批次维度 (1, seq_len, dim)
-    traj_tensor = torch.FloatTensor(normalized_traj_features).unsqueeze(0).to(device)
-    kg_tensor = torch.FloatTensor(kg_features).unsqueeze(0).to(device)
+    def predict(self, traj_features, kg_features):
+        """
+        修复维度冲突后的预测方法 (Exp2)
+        """
+        # 1. 轨迹特征维度处理 (batch_size, seq_len, 9)
+        if traj_features.ndim == 2:
+            traj_features = np.expand_dims(traj_features, axis=0)
 
-    # 4. 预测
-    model.eval()
-    with torch.no_grad():
-        # 🔥 双输入模型调用
-        logits = model(traj_tensor, kg_tensor)
-        probs = torch.softmax(logits, dim=1).squeeze().cpu().numpy()
+        # 2. KG 特征维度处理 (batch_size, 1, 11)
+        # ⚠️ 关键修复：增加一个维度以满足模型内部 kg_out[:, -1, :] 的索引需求
+        if kg_features.ndim == 1:
+            # (11,) -> (1, 1, 11)
+            kg_features = np.expand_dims(np.expand_dims(kg_features, axis=0), axis=1)
+        elif kg_features.ndim == 2:
+            # (batch, 11) -> (batch, 1, 11)
+            kg_features = np.expand_dims(kg_features, axis=1)
 
-    # 5. 获取预测结果
-    pred_index = np.argmax(probs)
-    pred_prob = probs[pred_index]
-    pred_label = label_encoder.classes_[pred_index]
+        # 3. 转换为 Tensor 并移动到设备
+        traj_tensor = torch.FloatTensor(traj_features).to(self.device)
+        kg_tensor = torch.FloatTensor(kg_features).to(self.device)
 
-    return pred_label, pred_prob, probs
+        # 4. 执行推理
+        with torch.no_grad():
+            logits = self.model(traj_tensor, kg_tensor)
+            probs = torch.softmax(logits, dim=1)
+            confidence, pred_idx = torch.max(probs, dim=1)
 
+        # 5. 获取结果
+        pred_label = self.label_encoder.inverse_transform(pred_idx.cpu().numpy())[0]
+        score = confidence.cpu().item()
 
-def main():
-    parser = argparse.ArgumentParser(description='使用已训练的 Exp2 模型预测单个轨迹')
-    parser.add_argument('--model_path', type=str,
-                        default='checkpoints/exp2_model.pth',
-                        help='已训练模型的路径')
-    parser.add_argument('--kg_data_path', type=str,
-                        default='../data/kg_data',
-                        help='知识图谱数据目录 (包含 road_network.pkl/pois.pkl 等)')
-    parser.add_argument('--trajectory_path', type=str,
-                        required=True,
-                        help='待预测的 GeoLife .plt 轨迹文件路径')
-    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu',
-                        help='设备')
-
-    args = parser.parse_args()
-
-    # 1. 加载模型和 LabelEncoder
-    print("=" * 60)
-    print("加载模型和LabelEncoder...")
-    if not os.path.exists(args.model_path):
-        print(f"错误: 未找到模型文件 {args.model_path}")
-        return
-
-    checkpoint = torch.load(args.model_path, map_location=args.device)
-    label_encoder = checkpoint['label_encoder']
-    config = checkpoint['model_config']
-
-    # 实例化模型 (使用 Exp2 的参数)
-    model = TransportationModeClassifier(
-        trajectory_feature_dim=config.get('trajectory_feature_dim', 9),
-        kg_feature_dim=config.get('kg_feature_dim', 11),
-        hidden_dim=config['hidden_dim'],
-        num_layers=config['num_layers'],
-        num_classes=config['num_classes'],
-        dropout=config.get('dropout', 0.3)
-    ).to(args.device)
-    model.load_state_dict(checkpoint['model_state_dict'])
-    print(f"✓ 模型加载成功")
-    print("=" * 60)
-
-    # 2. 初始化知识图谱和特征提取器
-    print("初始化知识图谱...")
-    kg = TransportationKnowledgeGraph()
-    kg.load_data(data_root=args.kg_data_path)
-    feature_extractor = FeatureExtractor(kg)
-    print("✓ 知识图谱和特征提取器初始化完成")
-
-    # 3. 加载轨迹
-    print(f"\n加载轨迹: {args.trajectory_path}")
-    data_loader = GeoLifeDataLoader(data_root='.')  # 根目录不重要，因为我们只加载单个文件
-
-    try:
-        trajectory = data_loader.load_trajectory(args.trajectory_path)
-    except Exception as e:
-        print(f"错误: 加载轨迹失败 {e}")
-        return
-
-    if trajectory.empty:
-        print("错误: 轨迹文件为空或无效")
-        return
-
-    # 4. 预测
-    print("\n预测中...")
-    pred_label, pred_prob, all_probs = predict_trajectory(
-        model, trajectory, args.device, label_encoder, feature_extractor
-    )
-
-    if pred_label is None:
-        return
-
-    # ========== 输出结果 ==========
-    print("\n" + "=" * 60)
-    print("预测结果 (Exp2: 轨迹 + KG)")
-    print("=" * 60)
-    print(f"\n交通方式: {pred_label}")
-    print(f"置信度: {pred_prob:.4f} ({pred_prob * 100:.2f}%)")
-
-    print(f"\n所有类别的概率:")
-    print("-" * 60)
-
-    # 按概率排序
-    sorted_indices = np.argsort(all_probs)[::-1]
-
-    for rank, i in enumerate(sorted_indices, 1):
-        class_name = label_encoder.classes_[i]
-        prob = all_probs[i]
-        bar = '█' * int(prob * 50)
-
-        if rank == 1:
-            marker = '🥇'
-        elif rank == 2:
-            marker = '🥈'
-        elif rank == 3:
-            marker = '🥉'
-        else:
-            marker = f'{rank}.'
-
-        print(f"{marker} {class_name:10s}: {prob:.4f} ({prob * 100:.2f}%) {bar}")
-
-    print("-" * 60)
+        return pred_label, score
 
 
-if __name__ == '__main__':
-    main()
+# ==========================================
+# 示例用法
+# ==========================================
+if __name__ == "__main__":
+    # 初始化预测器
+    predictor = TransportationPredictorExp2()
+
+    # 模拟输入：
+    # 轨迹特征: 长度50, 维度9
+    dummy_traj = np.random.randn(50, 9)
+    # KG特征: 维度11 (通常包含POI密度、路网密度等)
+    dummy_kg = np.random.randn(11)
+
+    label, score = predictor.predict(dummy_traj, dummy_kg)
+
+    print("-" * 30)
+    print(f"Exp2 预测结果: {label}")
+    print(f"预测置信度: {score:.4f}")
