@@ -13,7 +13,7 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import classification_report, confusion_matrix
 import json
 from tqdm import tqdm
-from collections import Counter # 导入 Counter 用于统计
+from collections import Counter
 
 # 导入自定义模块
 from src.data_loader import GeoLifeDataLoader, preprocess_segments
@@ -96,7 +96,7 @@ def load_data(geolife_root: str, max_users: int = None):
 
     print(f"\n总共加载 {len(all_segments)} 个轨迹段")
 
-    # 预处理轨迹段
+    # 预处理轨迹段 (data_loader.py 中的 preprocess_segments 会在这里进行标签重映射)
     print("\n预处理轨迹段...")
     processed_segments = preprocess_segments(all_segments, min_length=10)
 
@@ -204,7 +204,7 @@ def main():
     # 创建保存目录
     os.makedirs(args.save_dir, exist_ok=True)
 
-    # 加载数据 (如果存在缓存，这里会加载 11 个类别的segments)
+    # 加载数据 (返回的 segments 标签已包含 'car & taxi'，不含 'taxi')
     segments = load_data(args.geolife_root, args.max_users)
 
     if len(segments) == 0:
@@ -212,20 +212,23 @@ def main():
         return
 
     # =================================================================
-    # 🔥 核心修改 1: 过滤掉样本数过少的稀疏类别
+    # 🔥 核心修改 1: 过滤掉样本数过少的稀疏类别 (使用 remap 后的最终标签)
     # =================================================================
     print("\n" + "=" * 60)
-    print("过滤稀疏类别：仅保留主要 7 种交通方式 (walk, bike, car, bus, train, taxi, subway)")
-    TARGET_MODES = ['walk', 'bike', 'car', 'bus', 'train', 'taxi', 'subway']
+    print("过滤稀疏类别：仅保留主要 6 种交通方式 (walk, bike, car & taxi, bus, train, subway)")
+    # 'taxi' 已被合并，类别列表需要更新
+    TARGET_MODES_FINAL = ['walk', 'bike', 'car & taxi', 'bus', 'train', 'subway']
 
     original_count = len(segments)
-    segments = [seg for seg in segments if seg[1] in TARGET_MODES]
+    segments = [seg for seg in segments if seg[1] in TARGET_MODES_FINAL]
 
     removed_count = original_count - len(segments)
     print(f"原始轨迹段总数: {original_count}")
     print(f"保留轨迹段总数: {len(segments)} (移除 {removed_count} 个稀疏类别)")
     print("=" * 60)
     # =================================================================
+
+    # 🔥 注意：原有的 '核心修改 2' 标签重映射逻辑已移除，现在 data_loader.py 负责。
 
     # 准备标签编码器
     all_labels = [label for _, label in segments]

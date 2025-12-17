@@ -220,11 +220,23 @@ def preprocess_segments(segments: List[Tuple[pd.DataFrame, str]],
                        max_length: int = 200,
                        target_length: int = 100) -> List[Tuple[np.ndarray, str]]:
     """
-    预处理轨迹段，转换为固定长度的序列。
+    预处理轨迹段，转换为固定长度的序列，并进行标签重映射。
     确保所有输出序列的长度都严格等于 target_length。
     注意：此函数不再进行归一化，归一化操作在 train.py 中使用全局统计量完成。
     """
     processed_segments = []
+
+    # =================================================================
+    # 🔥 核心修改：标签重映射逻辑定义 (统一 'taxi' 和 'car' 的标签)
+    # =================================================================
+    # 定义映射规则：将 'taxi' 归类到 'car'
+    MAPPING = {
+        'taxi': 'car',
+    }
+    # 定义合并后的最终标签名称
+    NEW_CLASS_NAME = 'car & taxi'
+    # =================================================================
+
 
     # 9 维特征列表：
     feature_cols = ['latitude', 'longitude', 'speed', 'acceleration',
@@ -236,11 +248,11 @@ def preprocess_segments(segments: List[Tuple[pd.DataFrame, str]],
         if len(segment) < min_length:
             continue
 
-        # 提取特征序列（9维特征）
+        # 1. 提取特征序列（9维特征）
         features = segment[feature_cols].values
         L = len(features)
 
-        # 序列长度处理 (确保最终长度为 target_length)
+        # 2. 序列长度处理 (确保最终长度为 target_length)
         if L >= target_length:
             # 序列长度大于等于 target_length，需要裁剪/采样
 
@@ -262,8 +274,15 @@ def preprocess_segments(segments: List[Tuple[pd.DataFrame, str]],
             features = np.vstack([features, padding])
 
 
-        # --- 移除序列独立归一化代码 (已于上一轮修正中移除) ---
+        # 3. 🔥 核心修改：应用标签重映射和重命名
+        mapped_label = MAPPING.get(label, label)
 
-        processed_segments.append((features, label))
+        if mapped_label == 'car':
+            final_label = NEW_CLASS_NAME
+        else:
+            final_label = mapped_label
 
+        processed_segments.append((features, final_label)) # 使用最终的标签
+
+    print(f"\n标签重映射完成: 'taxi' 已并入 '{NEW_CLASS_NAME}'")
     return processed_segments
