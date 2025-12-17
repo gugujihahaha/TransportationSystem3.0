@@ -46,7 +46,11 @@ class GeoLifeDataLoader:
             raise ValueError(f"文件 {file_path} 列数为 {num_cols}，无法处理。")
 
         # 合并日期时间
-        df['datetime'] = pd.to_datetime(df['date'] + ' ' + df['time'])
+        # 速度快：告诉 Pandas 格式，跳过“猜测”阶段
+        df['datetime'] = pd.to_datetime(
+            df['date'] + ' ' + df['time'],
+            format='%Y-%m-%d %H:%M:%S'
+        )
         df = df.sort_values('datetime').reset_index(drop=True)
 
         # 数据清洗：删除无效坐标
