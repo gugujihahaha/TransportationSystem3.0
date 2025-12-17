@@ -287,33 +287,55 @@ class OSMDataLoader:
         print(f"提取到 {len(pois)} 个POI")
         return pd.DataFrame(pois)
 
+    # data_preprocessing.py 内部修改
+
     def extract_transit_routes(self, osm_data: Dict) -> pd.DataFrame:
         """
-        提取公交和地铁线路信息 (Exp3 新增)
-
-        从 OSM Relations 中提取 route=bus 和 route=subway
+        提取公交和地铁线路信息 (Exp3 修复版)
+        支持从 properties 直接获取或从 @relations 嵌套结构中提取
         """
         routes = []
 
         for feature in osm_data.get('features', []):
             props = feature.get('properties', {})
-            geometry = feature.get('geometry', {})
 
-            # 检查是否为公交或地铁线路
-            route = props.get('route', '')
+            # 策略 1: 直接在 properties 中 (标准 Relation 导出)
+            route_type = props.get('route', '')
 
-            if route in ['bus', 'subway']:
-                route_info = {
-                    'id': props.get('@id', '') or props.get('id', ''),
-                    'route': route,
-                    'ref': props.get('ref', ''),  # 线路编号
-                    'name': props.get('name', ''),  # 线路名称
-                    'operator': props.get('operator', ''),
-                    'members': props.get('members', [])  # 线路经过的道路/站点
-                }
-                routes.append(route_info)
+            # 策略 2: 嵌套在 @relations 中 (如你提供的样本)
+            relations = props.get('@relations', [])
 
-        print(f"提取到 {len(routes)} 条公交/地铁线路")
+            # 整合所有可能的 route 信息
+            found_routes = []
+            if route_type in ['bus', 'subway']:
+                found_routes.append({
+                    'route': route_type,
+                    'ref': props.get('ref', '')
+                })
+
+            for rel in relations:
+                reltags = rel.get('reltags', {})
+                if reltags.get('route') in ['bus', 'subway']:
+                    found_routes.append({
+                        'route': reltags.get('route'),
+                        'ref': reltags.get('ref', '')
+                    })
+
+            # 如果找到线路，记录其成员 (道路ID)
+            if found_routes:
+                # 获取成员，通常在 properties 的 @members 或 feature 的 geometry 关联中
+                # 这里简化处理：将该 feature 本身的 ID 视为线路的一部分
+                members = props.get('@members', []) or [{"ref": props.get('@id')}]
+
+                for r in found_routes:
+                    routes.append({
+                        'id': props.get('@id', ''),
+                        'route': r['route'],
+                        'ref': r['ref'],
+                        'members': members
+                    })
+
+        print(f"提取到 {len(routes)} 条公交/地铁线路信息")
         return pd.DataFrame(routes)
 
 

@@ -197,7 +197,7 @@ class EnhancedTransportationKG:
             )
 
     def _add_transit_routes(self):
-        """添加公交和地铁线路信息"""
+        """优化后的线路添加逻辑"""
         if self.transit_routes is None:
             return
 
@@ -205,18 +205,40 @@ class EnhancedTransportationKG:
             route_type = route.get('route')
             members = route.get('members', [])
 
-            if not isinstance(members, list):
-                continue
-
-            # 提取线路经过的道路ID
             for member in members:
-                if isinstance(member, dict):
-                    member_id = member.get('ref')
-                    if member_id:
-                        if route_type == 'bus':
-                            self.bus_routes.add(member_id)
-                        elif route_type == 'subway':
-                            self.subway_routes.add(member_id)
+                # 这里的 ref 需要与 road_network 中的 id 格式对齐 (例如 'way/123')
+                m_id = member.get('ref')
+                if m_id:
+                    if route_type == 'bus':
+                        self.bus_routes.add(str(m_id))
+                    elif route_type == 'subway':
+                        self.subway_routes.add(str(m_id))
+
+    def _batch_query_road_attributes(self, coords: np.ndarray, max_distance: float = 50.0) -> np.ndarray:
+        N = coords.shape[0]
+        road_attr = np.zeros((N, 2), dtype=np.float32)
+
+        distances, indices = self.road_kdtree.query(coords, k=1)
+        distances = distances * 111300.0
+
+        # 获取图中所有节点的 key，用于快速索引
+        node_keys = list(self.graph.nodes())
+
+        for i in range(N):
+            if distances[i] < max_distance:
+                nearest_node_id = node_keys[indices[i]]
+                node_data = self.graph.nodes[nearest_node_id]
+                road_id = str(node_data.get('road_id', ''))
+
+                # 特征 1: 速度
+                speed = self.speed_limits.get(road_id, 60.0)
+                road_attr[i, 0] = min(speed / 120.0, 1.0)
+
+                # 特征 2: 线路匹配 (核心修复)
+                if road_id in self.bus_routes or road_id in self.subway_routes:
+                    road_attr[i, 1] = 1.0
+
+        return road_attr
 
     def _build_spatial_indices(self):
         """预构建 KDTree 空间索引 (继承自 Exp2)"""
@@ -397,35 +419,6 @@ class EnhancedTransportationKG:
                 poi_features[i, 5] = min(dists) / 200.0
 
         return poi_features
-
-    def _batch_query_road_attributes(self, coords: np.ndarray,
-                                      max_distance: float = 50.0) -> np.ndarray:
-        """
-        批量查询道路属性 (2维 - 新增)
-        [速度限制(归一化), 是否在公交/地铁线路上]
-        """
-        N = coords.shape[0]
-        road_attr = np.zeros((N, 2), dtype=np.float32)
-
-        distances, indices = self.road_kdtree.query(coords, k=1)
-        distances = distances * 111300.0
-
-        for i in range(N):
-            if distances[i] < max_distance:
-                # 获取最近道路节点
-                nearest_node = list(self.graph.nodes())[indices[i]]
-                node_data = self.graph.nodes[nearest_node]
-                road_id = node_data.get('road_id')
-
-                # 特征1: 速度限制 (归一化到 0-1, 假设最大 120 km/h)
-                speed = self.speed_limits.get(road_id, 60.0)
-                road_attr[i, 0] = min(speed / 120.0, 1.0)
-
-                # 特征2: 是否在公交/地铁线路上
-                if road_id in self.bus_routes or road_id in self.subway_routes:
-                    road_attr[i, 1] = 1.0
-
-        return road_attr
 
     def _batch_query_road_density(self, coords: np.ndarray,
                                    radius: float = 100.0) -> np.ndarray:

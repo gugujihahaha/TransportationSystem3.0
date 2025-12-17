@@ -217,7 +217,7 @@ def main():
     # 1. 加载模型和 LabelEncoder
     print("=" * 60)
     print("加载模型和LabelEncoder...")
-    checkpoint = torch.load(args.model_path, map_location=args.device)
+    checkpoint = torch.load(args.model_path, map_location=args.device, weights_only=False)
     label_encoder = checkpoint['label_encoder']
     config = checkpoint['model_config']
 
