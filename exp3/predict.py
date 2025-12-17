@@ -1,172 +1,144 @@
+# ============================================================
+# exp3/predict.py - 预测脚本 (双输入：轨迹特征 + 增强知识图谱特征)
+# ============================================================
 """
-预测脚本 (Exp3)
-用于对新轨迹进行交通方式识别
+预测脚本 - 结合轨迹特征和增强知识图谱特征 (Exp3)
+
+使用方法:
+    python predict.py \\
+        --model_path checkpoints/exp3_model.pth \\
+        --kg_data_path "../data/kg_data" \\
+        --trajectory_path "../data/Geolife Trajectories 1.3/Data/080/Trajectory/20070627094922.plt"
 """
 import os
 import argparse
 import torch
 import numpy as np
 
-from src.data_preprocessing import GeoLifeDataLoader, OSMDataLoader, preprocess_trajectory_segments
-from src.knowledge_graph_enhanced import EnhancedTransportationKG
-from src.feature_extraction import FeatureExtractor
+# 导入 Exp3 模块
 from src.model import TransportationModeClassifier
+from src.knowledge_graph import EnhancedTransportationKG # 🔥 Exp3 核心修改
+from src.feature_extraction import FeatureExtractor
+from src.data_preprocessing import GeoLifeDataLoader, preprocess_trajectory_segments
 
 
-def predict_trajectory(model, trajectory_features, kg_features, device, label_encoder):
+def predict_trajectory(model, trajectory, device, label_encoder, feature_extractor: FeatureExtractor):
     """
-    预测单个轨迹的交通方式
-
-    Args:
-        model: 训练好的模型
-        trajectory_features: (N, 9) 轨迹特征
-        kg_features: (N, 15) KG特征
-        device: 设备
-        label_encoder: 标签编码器
-
-    Returns:
-        pred_label: 预测的交通方式
-        pred_prob: 预测概率
-        all_probs: 所有类别的概率
+    预测单个轨迹的交通方式 (双输入: 9维轨迹 + 15维 KG)
     """
-    # 转换为 tensor
-    trajectory_tensor = torch.FloatTensor(trajectory_features).unsqueeze(0).to(device)
-    kg_tensor = torch.FloatTensor(kg_features).unsqueeze(0).to(device)
 
-    # 预测
+    # 1. 预处理轨迹 (提取 9 维轨迹特征，长度规范化)
+    segment = (trajectory, 'unknown')
+    processed = preprocess_trajectory_segments([segment], min_length=10)
+
+    if len(processed) == 0:
+        print("警告: 轨迹太短，无法预测。")
+        return None, None, None
+
+    traj_features_raw, _ = processed[0]
+
+    # 2. 提取双特征
+    # feature_extractor.extract_features 返回 (归一化轨迹特征 (N, 9), 增强 KG 特征 (N, 15))
+    normalized_traj_features, kg_features = feature_extractor.extract_features(traj_features_raw)
+
+    # 3. 转换为 Tensor
+    # 增加批次维度 (1, seq_len, dim)
+    traj_tensor = torch.FloatTensor(normalized_traj_features).unsqueeze(0).to(device) # (1, 50, 9)
+    kg_tensor = torch.FloatTensor(kg_features).unsqueeze(0).to(device)             # (1, 50, 15) 🔥 维度变化
+
+    # 4. 预测
     model.eval()
     with torch.no_grad():
-        logits = model(trajectory_tensor, kg_tensor)
-        probs = torch.softmax(logits, dim=1)
-        pred_idx = torch.argmax(probs, dim=1).item()
-        pred_prob = probs[0][pred_idx].item()
+        # 双输入模型调用
+        logits = model(traj_tensor, kg_tensor)
+        probs = torch.softmax(logits, dim=1).squeeze().cpu().numpy()
 
-    pred_label = label_encoder.inverse_transform([pred_idx])[0]
-    all_probs = probs[0].cpu().numpy()
+    # 5. 获取预测结果
+    pred_index = np.argmax(probs)
+    pred_prob = probs[pred_index]
+    pred_label = label_encoder.classes_[pred_index]
 
-    return pred_label, pred_prob, all_probs
+    return pred_label, pred_prob, probs
 
 
 def main():
-    parser = argparse.ArgumentParser(description='预测轨迹的交通方式 (Exp3)')
-    parser.add_argument('--model_path', type=str, required=True,
-                        help='模型路径')
-    parser.add_argument('--trajectory_path', type=str, required=True,
-                        help='轨迹文件路径（.plt格式）')
-    parser.add_argument('--osm_path', type=str,
-                        default='../data/beijing_complete.geojson',
-                        help='OSM数据路径')
-    parser.add_argument('--device', type=str,
-                        default='cuda' if torch.cuda.is_available() else 'cpu',
-                        help='设备')
+    parser = argparse.ArgumentParser(description='使用已训练的 Exp3 模型预测单个轨迹')
+    parser.add_argument('--model_path', type=str,
+                       default='checkpoints/exp3_model.pth',
+                       help='已训练模型的路径')
+    parser.add_argument('--kg_data_path', type=str,
+                       default='../data/kg_data',
+                       help='知识图谱数据目录')
+    parser.add_argument('--trajectory_path', type=str,
+                       required=True,
+                       help='待预测的 GeoLife .plt 轨迹文件路径')
+    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu',
+                       help='设备')
 
     args = parser.parse_args()
 
-    # 加载模型
-    print("\n" + "=" * 60)
-    print("加载模型")
+    # 1. 加载模型和 LabelEncoder
     print("=" * 60)
+    print("加载模型和LabelEncoder...")
+    if not os.path.exists(args.model_path):
+        print(f"错误: 未找到模型文件 {args.model_path}")
+        return
+
     checkpoint = torch.load(args.model_path, map_location=args.device)
     label_encoder = checkpoint['label_encoder']
-    model_config = checkpoint.get('model_config', {})
+    config = checkpoint['model_config']
 
-    print(f"模型配置:")
-    print(f"  - 轨迹特征维度: {model_config.get('trajectory_feature_dim', 9)}")
-    print(f"  - KG特征维度: {model_config.get('kg_feature_dim', 15)}")
-    print(f"  - 分类类别: {label_encoder.classes_}")
-
-    # 加载 OSM 数据并构建知识图谱
-    print("\n" + "=" * 60)
-    print("加载 OSM 数据并构建知识图谱")
+    # 实例化模型 (使用 Exp3 的参数)
+    model = TransportationModeClassifier(
+        trajectory_feature_dim=config.get('trajectory_feature_dim', 9),
+        # 🔥 核心修改：确保 KG 维度为 15
+        kg_feature_dim=config.get('kg_feature_dim', 15),
+        hidden_dim=config['hidden_dim'],
+        num_layers=config['num_layers'],
+        num_classes=config['num_classes'],
+        dropout=config.get('dropout', 0.3)
+    ).to(args.device)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    print(f"✓ 模型加载成功")
     print("=" * 60)
-    osm_loader = OSMDataLoader(args.osm_path)
-    osm_data = osm_loader.load_osm_data()
-    road_network = osm_loader.extract_road_network(osm_data)
-    pois = osm_loader.extract_pois(osm_data)
-    transit_routes = osm_loader.extract_transit_routes(osm_data)
 
+    # 2. 初始化知识图谱和特征提取器
+    print("初始化增强知识图谱 (Exp3)...")
+    # 🔥 核心修改：使用 EnhancedTransportationKG
     kg = EnhancedTransportationKG()
-    kg.build_from_osm(road_network, pois, transit_routes)
-
-    stats = kg.get_graph_statistics()
-    print(f"知识图谱统计:")
-    print(f"  - 节点数: {stats['num_nodes']}")
-    print(f"  - 边数: {stats['num_edges']}")
-    print(f"  - 道路节点: {stats['road_nodes']}")
-    print(f"  - POI节点: {stats['poi_nodes']}")
-    print(f"  - 速度限制记录: {stats['speed_limits']}")
-    print(f"  - 公交线路: {stats['bus_routes']}")
-    print(f"  - 地铁线路: {stats['subway_routes']}")
-
-    # 创建特征提取器
+    kg.load_data(data_root=args.kg_data_path)
     feature_extractor = FeatureExtractor(kg)
+    print("✓ 知识图谱和特征提取器初始化完成")
 
-    # 加载轨迹
-    print("\n" + "=" * 60)
-    print("加载轨迹")
-    print("=" * 60)
-    geolife_loader = GeoLifeDataLoader('')
-    trajectory = geolife_loader.load_trajectory(args.trajectory_path)
+    # 3. 加载轨迹
+    print(f"\n加载轨迹: {args.trajectory_path}")
+    data_loader = GeoLifeDataLoader(data_root='.')
+
+    try:
+        trajectory = data_loader.load_trajectory(args.trajectory_path)
+    except Exception as e:
+        print(f"错误: 加载轨迹失败 {e}")
+        return
 
     if trajectory.empty:
         print("错误: 轨迹文件为空或无效")
         return
 
-    print(f"轨迹点数: {len(trajectory)}")
-    print(f"时间范围: {trajectory['datetime'].min()} 到 {trajectory['datetime'].max()}")
-    print(f"总距离: {trajectory['total_distance'].max():.2f} 米")
-    print(f"总时长: {trajectory['total_time'].max():.2f} 秒")
-
-    # 预处理轨迹
-    print("\n预处理轨迹...")
-    segment = (trajectory, 'unknown')  # 临时标签
-    processed = preprocess_trajectory_segments([segment], min_length=10)
-
-    if len(processed) == 0:
-        print("错误: 轨迹太短，无法预测")
-        return
-
-    trajectory_array, _ = processed[0]
-    print(f"预处理后序列长度: {trajectory_array.shape[0]}")
-
-    # 提取特征
-    print("\n" + "=" * 60)
-    print("提取特征")
-    print("=" * 60)
-    print("正在提取轨迹特征和增强KG特征...")
-    trajectory_features, kg_features = feature_extractor.extract_features(trajectory_array)
-
-    print(f"轨迹特征维度: {trajectory_features.shape}")
-    print(f"KG特征维度: {kg_features.shape}")
-
-    # 创建模型
-    print("\n创建模型...")
-    num_classes = len(label_encoder.classes_)
-    model = TransportationModeClassifier(
-        trajectory_feature_dim=model_config.get('trajectory_feature_dim', 9),
-        kg_feature_dim=model_config.get('kg_feature_dim', 15),
-        hidden_dim=model_config.get('hidden_dim', 128),
-        num_layers=model_config.get('num_layers', 2),
-        num_classes=num_classes,
-        dropout=model_config.get('dropout', 0.3)
-    ).to(args.device)
-
-    model.load_state_dict(checkpoint['model_state_dict'])
-
-    # 预测
-    print("\n" + "=" * 60)
-    print("预测中...")
-    print("=" * 60)
+    # 4. 预测
+    print("\n预测中...")
     pred_label, pred_prob, all_probs = predict_trajectory(
-        model, trajectory_features, kg_features, args.device, label_encoder
+        model, trajectory, args.device, label_encoder, feature_extractor
     )
 
-    # 输出结果
+    if pred_label is None:
+        return
+
+    # ========== 输出结果 ==========
     print("\n" + "=" * 60)
-    print("预测结果")
+    print("预测结果 (Exp3: 轨迹 + 增强 KG)")
     print("=" * 60)
     print(f"\n交通方式: {pred_label}")
-    print(f"置信度: {pred_prob:.4f} ({pred_prob * 100:.2f}%)")
+    print(f"置信度: {pred_prob:.4f} ({pred_prob*100:.2f}%)")
 
     print(f"\n所有类别的概率:")
     print("-" * 60)
@@ -177,12 +149,8 @@ def main():
     for rank, i in enumerate(sorted_indices, 1):
         class_name = label_encoder.classes_[i]
         prob = all_probs[i]
+        bar = '█' * int(prob * 50)
 
-        # 绘制概率条
-        bar_length = int(prob * 50)
-        bar = '█' * bar_length
-
-        # 添加排名标记
         if rank == 1:
             marker = '🥇'
         elif rank == 2:
@@ -192,37 +160,9 @@ def main():
         else:
             marker = f'{rank}.'
 
-        print(f"{marker} {class_name:10s}: {prob:.4f} ({prob * 100:5.2f}%) {bar}")
+        print(f"{marker} {class_name:10s}: {prob:.4f} ({prob*100:.2f}%) {bar}")
 
-    print("=" * 60)
-
-    # 输出轨迹统计信息
-    print("\n轨迹统计:")
-    print(f"  - 平均速度: {trajectory['speed'].mean():.2f} m/s ({trajectory['speed'].mean() * 3.6:.2f} km/h)")
-    print(f"  - 最大速度: {trajectory['speed'].max():.2f} m/s ({trajectory['speed'].max() * 3.6:.2f} km/h)")
-    print(f"  - 平均加速度: {trajectory['acceleration'].mean():.4f} m/s²")
-    print(f"  - 平均方向变化: {trajectory['bearing_change'].mean():.2f} 度")
-
-    # 根据预测结果给出解释
-    print("\n预测依据分析:")
-    speed_kmh = trajectory['speed'].mean() * 3.6
-
-    if pred_label == 'walk':
-        print("  ✓ 速度较低，符合步行特征")
-    elif pred_label == 'bike':
-        print("  ✓ 速度适中，符合骑行特征")
-    elif pred_label in ['car', 'taxi']:
-        print("  ✓ 速度较高，符合汽车特征")
-    elif pred_label == 'bus':
-        print("  ✓ 速度适中且可能经过公交站点")
-    elif pred_label == 'train':
-        print("  ✓ 速度较快且可能沿铁路线路运行")
-
-    # 提示可能的误判
-    if pred_prob < 0.5:
-        print("\n⚠️  注意: 预测置信度较低，建议人工核查")
-    elif pred_prob < 0.7:
-        print("\n⚠️  注意: 预测置信度中等，存在一定不确定性")
+    print("-" * 60)
 
 
 if __name__ == '__main__':
