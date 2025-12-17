@@ -187,7 +187,7 @@ def plot_per_class_metrics(report, class_names, save_path):
 def main():
     parser = argparse.ArgumentParser(description='评估 Exp2 双输入模型')
     parser.add_argument('--model_path', type=str, default='checkpoints/exp2_model.pth')
-    parser.add_argument('--output_dir', type=str, default='evaluation_results_exp2')
+    parser.add_argument('--output_dir', type=str, default='evaluation_results')
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--device', type=str,
                         default='cuda' if torch.cuda.is_available() else 'cpu')
