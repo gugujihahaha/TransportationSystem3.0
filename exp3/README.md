@@ -203,7 +203,7 @@ exp3/
 ```bash
 # 主机
 cd exp3
-python train.py \
+python train_maso.py \
     --geolife_root "../data/Geolife Trajectories 1.3" \
     --osm_path "../data/exp3.geojson" \
     --generate_cache_only
@@ -224,7 +224,7 @@ tar -xzf exp3_cache.tar.gz
 ```bash
 # 游戏本
 cd exp3
-python train.py \
+python train_maso.py \
     --use_cached_data \
     --device cuda \
     --epochs 50 \
@@ -278,7 +278,7 @@ ijson>=3.2.0           # 用于流式解析大JSON文件
 #### 主机模式：生成缓存并训练
 
 ```bash
-python train.py \
+python train_maso.py \
     --geolife_root "../data/Geolife Trajectories 1.3" \
     --osm_path "../data/exp3.geojson" \
     --batch_size 32 \
@@ -288,7 +288,7 @@ python train.py \
 #### 主机模式：仅生成缓存
 
 ```bash
-python train.py \
+python train_maso.py \
     --geolife_root "../data/Geolife Trajectories 1.3" \
     --osm_path "../data/exp3.geojson" \
     --generate_cache_only
@@ -297,7 +297,7 @@ python train.py \
 #### 游戏本模式：使用缓存训练
 
 ```bash
-python train.py \
+python train_maso.py \
     --use_cached_data \
     --device cuda \
     --epochs 50 \
@@ -307,7 +307,7 @@ python train.py \
 #### 完整训练参数
 
 ```bash
-python train.py \
+python train_maso.py \
     --geolife_root "../data/Geolife Trajectories 1.3" \
     --osm_path "../data/exp3.geojson" \
     --batch_size 32 \
@@ -336,7 +336,7 @@ python train.py \
 ### 3. 评估模型
 
 ```bash
-python evaluate.py \
+python evaluate_maso.py \
     --model_path checkpoints/exp3_model.pth \
     --geolife_root "../data/Geolife Trajectories 1.3" \
     --kg_data_path "../data/kg_data" \
@@ -524,7 +524,7 @@ data/
 
 **清空缓存：**
 ```bash
-python train.py --clear_cache
+python train_maso.py --clear_cache
 ```
 
 **缓存文件大小：**
@@ -559,7 +559,7 @@ python train.py --clear_cache
 **解决方案：**
 ```bash
 # 重新生成缓存
-python train.py --clear_cache
+python train_maso.py --clear_cache
 ```
 
 ### 问题 2: 跨机器训练失败

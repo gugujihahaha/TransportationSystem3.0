@@ -234,7 +234,7 @@ tqdm>=4.65.0
 #### 基础训练（使用默认参数）
 
 ```bash
-python train.py \
+python train_maso.py \
     --geolife_root "../data/Geolife Trajectories 1.3" \
     --batch_size 32 \
     --epochs 50 \
@@ -245,7 +245,7 @@ python train.py \
 #### 快速测试（使用部分用户）
 
 ```bash
-python train.py \
+python train_maso.py \
     --geolife_root "../data/Geolife Trajectories 1.3" \
     --max_users 5 \
     --epochs 10
@@ -254,7 +254,7 @@ python train.py \
 #### 完整训练参数
 
 ```bash
-python train.py \
+python train_maso.py \
     --geolife_root "../data/Geolife Trajectories 1.3" \
     --batch_size 32 \
     --epochs 50 \
@@ -328,7 +328,7 @@ Epoch 1/50
 ### 3. 评估模型
 
 ```bash
-python evaluate.py \
+python evaluate_maso.py \
     --model_path checkpoints/exp1_model.pth \
     --geolife_root "../data/Geolife Trajectories 1.3" \
     --output_dir results/exp1 \
@@ -492,13 +492,13 @@ distances = haversine_vectorized(lat1_rad, lon1_rad, lat2_rad, lon2_rad)
 ❌ **错误**：在项目根目录运行
 ```bash
 # 项目根目录
-python exp1/train.py  # 会报错：ModuleNotFoundError: No module named 'src'
+python exp1/train_maso.py  # 会报错：ModuleNotFoundError: No module named 'src'
 ```
 
 ✅ **正确**：在 exp1 目录下运行
 ```bash
 cd exp1
-python train.py  # 正确
+python train_maso.py  # 正确
 ```
 
 ### 2. 数据路径
@@ -546,7 +546,7 @@ ModuleNotFoundError: No module named 'src'
 ```bash
 # 确保在 exp1 目录下运行
 cd exp1
-python train.py
+python train_maso.py
 ```
 
 ### 问题 2: 数据加载失败
@@ -562,7 +562,7 @@ python train.py
 ls -la "../data/Geolife Trajectories 1.3/Data"
 
 # 或使用绝对路径
-python train.py --geolife_root "/absolute/path/to/Geolife Trajectories 1.3"
+python train_maso.py --geolife_root "/absolute/path/to/Geolife Trajectories 1.3"
 ```
 
 ### 问题 3: CUDA out of memory
@@ -575,10 +575,10 @@ RuntimeError: CUDA out of memory
 **解决方案：**
 ```bash
 # 方案1: 减小 batch_size
-python train.py --batch_size 16
+python train_maso.py --batch_size 16
 
 # 方案2: 使用 CPU
-python train.py --device cpu
+python train_maso.py --device cpu
 ```
 
 ### 问题 4: 无效坐标警告

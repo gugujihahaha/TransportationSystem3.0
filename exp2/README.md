@@ -372,7 +372,7 @@ ijson>=3.2.0           # 用于流式解析大JSON文件
 #### 基础训练（使用默认参数）
 
 ```bash
-python train.py \
+python train_maso.py \
     --geolife_root "../data/Geolife Trajectories 1.3" \
     --osm_path "../data/beijing_osm_full_enhanced_verified.geojson" \
     --batch_size 32 \
@@ -382,7 +382,7 @@ python train.py \
 #### 快速测试（使用部分用户）
 
 ```bash
-python train.py \
+python train_maso.py \
     --geolife_root "../data/Geolife Trajectories 1.3" \
     --osm_path "../data/beijing_osm_full_enhanced_verified.geojson" \
     --max_users 5 \
@@ -392,7 +392,7 @@ python train.py \
 #### 完整训练参数
 
 ```bash
-python train.py \
+python train_maso.py \
     --geolife_root "../data/Geolife Trajectories 1.3" \
     --osm_path "../data/beijing_osm_full_enhanced_verified.geojson" \
     --batch_size 32 \
@@ -456,7 +456,7 @@ python train.py \
 ### 3. 评估模型
 
 ```bash
-python evaluate.py \
+python evaluate_maso.py \
     --model_path checkpoints/exp2_model.pth \
     --geolife_root "../data/Geolife Trajectories 1.3" \
     --kg_data_path "../data/kg_data" \
@@ -614,7 +614,7 @@ data/
 
 **清空缓存：**
 ```bash
-python train.py --clear_cache
+python train_maso.py --clear_cache
 ```
 
 **缓存文件大小：**
@@ -638,10 +638,10 @@ MemoryError: Unable to allocate array
 ```bash
 # 方案1: 使用流式加载（自动）
 # 方案2: 减小批次大小
-python train.py --batch_size 16
+python train_maso.py --batch_size 16
 
 # 方案3: 使用部分用户
-python train.py --max_users 50
+python train_maso.py --max_users 50
 ```
 
 ### 问题 2: KDTree 构建失败
@@ -663,7 +663,7 @@ ValueError: kd-tree only works for 2D or 3D points
 **解决方案：**
 ```bash
 # 清空缓存并重新构建
-python train.py --clear_cache
+python train_maso.py --clear_cache
 ```
 
 ---
