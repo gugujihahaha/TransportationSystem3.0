@@ -17,9 +17,10 @@ from sklearn.metrics import classification_report
 from tqdm import tqdm
 from collections import Counter
 
+from src.model_msf import FullMSFModel
 from src.data_loader import GeoLifeDataLoader, preprocess_segments
 from src.maso import MASOConfig, MASOFeatureOrganizer
-from src.model_msf import MSFModel
+
 
 
 # ============================================================
@@ -43,6 +44,8 @@ class MASOTrajectoryDataset(Dataset):
         # 提取MASO特征
         maso_features = self.organizer.extract_maso_features(segment)
         x = torch.FloatTensor(maso_features)
+
+        assert x.ndim == 4, f"MASO feature shape error: {x.shape}"
 
         # 转换标签
         y = self.label_encoder.transform([label])[0]
@@ -254,10 +257,10 @@ def main():
     maso_feat_dim = maso_config.K * maso_config.L * maso_config.N * maso_config.M
     img_size = maso_config.image_sizes[0]
 
-    model = MSFModel(
-        input_channels=maso_feat_dim // maso_config.K,  # L*N*M 作为单个对象的通道
+    model = FullMSFModel(
+        input_channels=maso_feat_dim // maso_config.K,
         num_objects=maso_config.K,
-        num_scales=maso_config.N * maso_config.M,
+        num_scales=maso_config.N,  # ⚠️ 见问题2
         num_classes=len(label_encoder.classes_),
         img_size=img_size
     ).to(args.device)
