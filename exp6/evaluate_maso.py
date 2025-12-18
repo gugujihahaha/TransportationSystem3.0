@@ -1,5 +1,5 @@
 """
-MASO-MSF 模型评估脚本 (Exp6)
+MASO-MSF 模型评估脚本 (Exp6) - 修复版
 """
 
 import os
@@ -16,7 +16,7 @@ import seaborn as sns
 
 from src.data_loader import GeoLifeDataLoader, preprocess_segments
 from src.maso import MASOConfig, MASOFeatureOrganizer
-from src.model_msf import MSFModel, SimpleMSFModel
+from src.model_msf import SimpleMSFModel
 from train_maso import MASOTrajectoryDataset, load_geolife_data
 
 
@@ -84,7 +84,7 @@ def main():
     # ========================================================
     dataset = MASOTrajectoryDataset(segments, label_encoder, maso_config)
 
-    # 为了简化，使用全部数据进行评估
+    # 为了简化,使用全部数据进行评估
     loader = DataLoader(
         dataset,
         batch_size=args.batch_size,
