@@ -7,6 +7,7 @@ import os
 import argparse
 import pickle
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -17,10 +18,9 @@ from sklearn.metrics import classification_report
 from tqdm import tqdm
 from collections import Counter
 
-from src.model_msf import FullMSFModel
 from src.data_loader import GeoLifeDataLoader, preprocess_segments
 from src.maso import MASOConfig, MASOFeatureOrganizer
-
+from src.model_msf import SimpleMSFModel
 
 
 # ============================================================
@@ -39,13 +39,21 @@ class MASOTrajectoryDataset(Dataset):
         return len(self.segments)
 
     def __getitem__(self, idx):
-        segment, label = self.segments[idx]
+        # segments中的元素是 (pd.DataFrame, label)
+        segment_data, label = self.segments[idx]
+
+        # 转换为DataFrame (如果是numpy数组的话)
+        if isinstance(segment_data, np.ndarray):
+            feature_cols = ['latitude', 'longitude', 'speed', 'acceleration',
+                           'bearing_change', 'distance', 'time_diff',
+                           'total_distance', 'total_time']
+            segment = pd.DataFrame(segment_data, columns=feature_cols)
+        else:
+            segment = segment_data
 
         # 提取MASO特征
         maso_features = self.organizer.extract_maso_features(segment)
         x = torch.FloatTensor(maso_features)
-
-        assert x.ndim == 4, f"MASO feature shape error: {x.shape}"
 
         # 转换标签
         y = self.label_encoder.transform([label])[0]
@@ -253,21 +261,22 @@ def main():
     # ========================================================
     # 4. 创建模型
     # ========================================================
-    # MASO特征维度: K * L * N * M = 6 * 9 * 3 * 1 = 162
-    maso_feat_dim = maso_config.K * maso_config.L * maso_config.N * maso_config.M
+    # 修复: 使用SimpleMSFModel
+    # input_channels = L * N * M = 9 * 3 * 1 = 27
+    input_channels = maso_config.L * maso_config.N * maso_config.M
     img_size = maso_config.image_sizes[0]
 
-    model = FullMSFModel(
-        input_channels=maso_feat_dim // maso_config.K,
+    model = SimpleMSFModel(
+        input_channels=input_channels,
         num_objects=maso_config.K,
-        num_scales=maso_config.N,  # ⚠️ 见问题2
         num_classes=len(label_encoder.classes_),
         img_size=img_size
     ).to(args.device)
 
-    print(f"\nMSF模型:")
-    print(f"  输入通道: {maso_feat_dim // maso_config.K}")
+    print(f"\nSimpleMSF模型:")
+    print(f"  输入通道: {input_channels}")
     print(f"  对象数: {maso_config.K}")
+    print(f"  类别数: {len(label_encoder.classes_)}")
     print(f"  图像尺寸: {img_size}x{img_size}")
     print(f"  总参数量: {sum(p.numel() for p in model.parameters()):,}")
 
@@ -322,9 +331,8 @@ def main():
                 'label_encoder': label_encoder,
                 'maso_config': maso_config,
                 'model_config': {
-                    'input_channels': maso_feat_dim // maso_config.K,
+                    'input_channels': input_channels,
                     'num_objects': maso_config.K,
-                    'num_scales': maso_config.N * maso_config.M,
                     'num_classes': len(label_encoder.classes_),
                     'img_size': img_size
                 }
