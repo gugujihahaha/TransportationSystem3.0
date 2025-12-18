@@ -388,7 +388,7 @@ def main():
 
         if not validate_cache(args.osm_path):
             print("错误：缓存无效，请在主机上重新生成")
-            print("主机命令: python train.py --generate_cache_only")
+            print("主机命令: python train_maso.py --generate_cache_only")
             return
 
         with open(PROCESSED_FEATURE_CACHE_PATH, 'rb') as f:
@@ -416,7 +416,7 @@ def main():
         print("\n可以打包并传输到游戏本:")
         print("  tar -czf exp3_cache.tar.gz cache/")
         print("  # 复制到游戏本后解压")
-        print("  python train.py --use_cached_data --device cuda --epochs 50")
+        print("  python train_maso.py --use_cached_data --device cuda --epochs 50")
         return
 
     # ========== 步骤2: 训练模型 ==========
