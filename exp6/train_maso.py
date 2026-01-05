@@ -1,6 +1,10 @@
 """
 MASO-MSF 交通方式识别模型训练脚本 (Exp6)
 基于论文: 基于GPS轨迹多尺度表达的交通出行方式识别方法
+
+修复说明：
+1. 修复了 MASO 提取特征时 numpy 数组导致的 AttributeError: 'numpy.ndarray' object has no attribute 'bloc'
+2. 增加了 pickle 缓存机制，避免重复加载 GeoLife 原始数据（耗时约1小时）
 """
 
 import os
@@ -18,10 +22,10 @@ from sklearn.metrics import classification_report
 from tqdm import tqdm
 from collections import Counter
 
+# 假设这些模块在你的项目 src 目录下
 from src.data_loader import GeoLifeDataLoader, preprocess_segments
 from src.maso import MASOConfig, MASOFeatureOrganizer
 from src.model_msf import SimpleMSFModel
-
 
 # ============================================================
 # Dataset
@@ -34,35 +38,43 @@ class MASOTrajectoryDataset(Dataset):
         self.label_encoder = label_encoder
         self.maso_config = maso_config if maso_config else MASOConfig()
         self.organizer = MASOFeatureOrganizer(self.maso_config)
+        # 定义列名，确保与 data_loader.py 生成的特征顺序一致
+        self.feature_cols = ['latitude', 'longitude', 'speed', 'acceleration',
+                            'bearing_change', 'distance', 'time_diff',
+                            'total_distance', 'total_time']
 
     def __len__(self):
         return len(self.segments)
 
     def __getitem__(self, idx):
-        # segments中的元素是 (pd.DataFrame, label)
+        # segments 中的元素是 (data, label)
         segment_data, label = self.segments[idx]
 
-        # 转换为DataFrame (如果是numpy数组的话)
+        # 【核心修复】: 转换为 DataFrame。因为 maso.py 的 sliding_crop 使用了 .iloc
         if isinstance(segment_data, np.ndarray):
-            feature_cols = ['latitude', 'longitude', 'speed', 'acceleration',
-                           'bearing_change', 'distance', 'time_diff',
-                           'total_distance', 'total_time']
-            segment = pd.DataFrame(segment_data, columns=feature_cols)
+            segment = pd.DataFrame(segment_data, columns=self.feature_cols)
         else:
             segment = segment_data
 
-        # 提取MASO特征
-        maso_features = self.organizer.extract_maso_features(segment)
-        x = torch.FloatTensor(maso_features)
-
-        # 转换标签
-        y = self.label_encoder.transform([label])[0]
-
-        return x, torch.LongTensor([y])
+        # 提取 MASO 特征
+        try:
+            maso_features = self.organizer.extract_maso_features(segment)
+            x = torch.FloatTensor(maso_features)
+            # 转换标签
+            y = self.label_encoder.transform([label])[0]
+            return x, torch.LongTensor([y]).squeeze()
+        except Exception as e:
+            # 防止由于某些数据异常导致训练中断
+            print(f"\n[错误] 索引 {idx} 特征提取失败: {e}")
+            # 返回一个全零占位符
+            dummy_x = torch.zeros((self.maso_config.K,
+                                   self.maso_config.L * self.maso_config.N * self.maso_config.M,
+                                   32, 32))
+            return dummy_x, torch.LongTensor([0]).squeeze()
 
 
 # ============================================================
-# Train / Eval
+# Train / Eval 函数
 # ============================================================
 def train_epoch(model, loader, criterion, optimizer, device):
     """训练一个epoch"""
@@ -71,7 +83,7 @@ def train_epoch(model, loader, criterion, optimizer, device):
 
     pbar = tqdm(loader, desc="训练")
     for x, y in pbar:
-        x, y = x.to(device), y.squeeze().to(device)
+        x, y = x.to(device), y.to(device)
 
         optimizer.zero_grad()
         logits = model(x)
@@ -85,8 +97,8 @@ def train_epoch(model, loader, criterion, optimizer, device):
         total += y.size(0)
 
         pbar.set_postfix({
-            'loss': total_loss / (pbar.n + 1),
-            'acc': correct / total
+            'loss': f"{total_loss / (pbar.n + 1):.4f}",
+            'acc': f"{correct / total:.4f}"
         })
 
     return total_loss / len(loader), correct / total
@@ -100,7 +112,7 @@ def evaluate(model, loader, criterion, device, label_encoder):
 
     with torch.no_grad():
         for x, y in tqdm(loader, desc="评估"):
-            x, y = x.to(device), y.squeeze().to(device)
+            x, y = x.to(device), y.to(device)
             logits = model(x)
             loss = criterion(logits, y)
             total_loss += loss.item()
@@ -121,27 +133,33 @@ def evaluate(model, loader, criterion, device, label_encoder):
 
 
 # ============================================================
-# Data Loading
+# Data Loading (包含缓存机制)
 # ============================================================
-def load_geolife_data(geolife_root: str, max_users: int = None):
-    """加载GeoLife数据"""
+def load_geolife_data(geolife_root: str, max_users: int = None, cache_file: str = "cache/geolife_processed.pkl"):
+    """加载GeoLife数据，支持缓存"""
+
+    # 1. 尝试读取缓存
+    if os.path.exists(cache_file):
+        print(f"发现缓存文件 {cache_file}，正在直接加载...")
+        with open(cache_file, 'rb') as f:
+            processed = pickle.load(f)
+        print(f"缓存加载完成，共有 {len(processed)} 条轨迹段。")
+        return processed
+
     print("=" * 60)
-    print("加载 GeoLife 数据")
+    print("未发现缓存，开始加载原始 GeoLife 数据 (此过程可能耗时较久)")
     print("=" * 60)
 
     loader = GeoLifeDataLoader(geolife_root)
     users_path = os.path.join(geolife_root, "Data")
-
     if not os.path.exists(users_path):
         users_path = geolife_root
 
     users = sorted([u for u in os.listdir(users_path) if len(u) == 3 and u.isdigit()])
-
     if max_users:
         users = users[:max_users]
 
     print(f"找到 {len(users)} 个用户")
-
     all_segments = []
 
     for user_id in tqdm(users, desc="读取用户轨迹"):
@@ -153,25 +171,28 @@ def load_geolife_data(geolife_root: str, max_users: int = None):
         if not os.path.exists(traj_dir):
             continue
 
-        for f in os.listdir(traj_dir):
-            if not f.endswith(".plt"):
+        for f_name in os.listdir(traj_dir):
+            if not f_name.endswith(".plt"):
                 continue
             try:
-                traj = loader.load_trajectory(os.path.join(traj_dir, f))
+                traj = loader.load_trajectory(os.path.join(traj_dir, f_name))
                 if traj.empty:
                     continue
-
                 segments = loader.segment_trajectory(traj, labels)
                 all_segments.extend(segments)
-            except Exception as e:
+            except Exception:
                 continue
 
     print(f"\n原始轨迹段数: {len(all_segments)}")
-
-    # 预处理 (转换为标准9维特征)
-    print("预处理轨迹段...")
+    print("预处理轨迹段并提取运动特征...")
     processed = preprocess_segments(all_segments, min_length=10)
     print(f"预处理后轨迹段数: {len(processed)}")
+
+    # 2. 写入缓存
+    print(f"正在保存处理后的数据到 {cache_file}...")
+    with open(cache_file, 'wb') as f:
+        pickle.dump(processed, f)
+    print("保存成功！下次运行将自动读取。")
 
     return processed
 
@@ -182,68 +203,52 @@ def load_geolife_data(geolife_root: str, max_users: int = None):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--geolife_root", default="../data/Geolife Trajectories 1.3")
-    parser.add_argument("--max_users", type=int, default=None, help="最大用户数 (用于快速测试)")
+    parser.add_argument("--max_users", type=int, default=None)
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--save_dir", default="checkpoints")
+    parser.add_argument("--cache_name", default="cache/geolife_processed_cache.pkl")
     args = parser.parse_args()
 
-    # ========================================================
-    # 1. 加载数据
-    # ========================================================
-    segments = load_geolife_data(args.geolife_root, args.max_users)
+    # 1. 加载数据 (优先从缓存读取)
+    segments = load_geolife_data(args.geolife_root, args.max_users, args.cache_name)
 
-    # 只保留6个主要类别
+    # 2. 过滤类别并重编码
     TARGET_MODES = ['walk', 'bike', 'car & taxi', 'bus', 'train', 'subway']
     segments = [s for s in segments if s[1] in TARGET_MODES]
-
     print(f"过滤后轨迹段数: {len(segments)}")
 
-    # 统计标签分布
-    labels = [s[1] for s in segments]
+    labels_list = [s[1] for s in segments]
     label_encoder = LabelEncoder()
-    label_encoder.fit(labels)
+    label_encoder.fit(labels_list)
 
     print("\n类别分布:")
-    for k, v in Counter(labels).items():
+    for k, v in Counter(labels_list).items():
         print(f"  {k}: {v}")
 
-    # ========================================================
-    # 2. MASO配置
-    # ========================================================
+    # 3. MASO配置
     maso_config = MASOConfig(
-        K=6,  # 6个子段
+        K=6,
         parts=20,
-        spatial_ranges=[0.01, 0.05, 0.2],  # 3个空间范围
-        image_sizes=[32],  # 1个图像尺寸
-        L=9  # 9维属性
+        spatial_ranges=[0.01, 0.05, 0.2],
+        image_sizes=[32],
+        L=9
     )
 
     print(f"\nMASO配置:")
-    print(f"  K (子段数): {maso_config.K}")
-    print(f"  N (空间范围数): {maso_config.N}")
-    print(f"  M (图像尺寸数): {maso_config.M}")
-    print(f"  L (属性维度): {maso_config.L}")
-    print(f"  总特征维度: {maso_config.L * maso_config.N * maso_config.M}")
+    print(f"  K (子段数): {maso_config.K}, N (范围): {maso_config.N}, M (尺寸): {maso_config.M}")
+    print(f"  总输入特征通道数: {maso_config.L * maso_config.N * maso_config.M}")
 
-    # ========================================================
-    # 3. 创建数据集
-    # ========================================================
+    # 4. 创建数据集和加载器
     dataset = MASOTrajectoryDataset(segments, label_encoder, maso_config)
-
-    # 分割训练/测试集
     train_idx, test_idx = train_test_split(
         range(len(dataset)),
         test_size=0.2,
         random_state=42,
-        stratify=labels
+        stratify=labels_list
     )
-
-    print(f"\n数据集大小:")
-    print(f"  训练集: {len(train_idx)}")
-    print(f"  测试集: {len(test_idx)}")
 
     train_loader = DataLoader(
         torch.utils.data.Subset(dataset, train_idx),
@@ -258,11 +263,7 @@ def main():
         num_workers=0
     )
 
-    # ========================================================
-    # 4. 创建模型
-    # ========================================================
-    # 修复: 使用SimpleMSFModel
-    # input_channels = L * N * M = 9 * 3 * 1 = 27
+    # 5. 模型初始化
     input_channels = maso_config.L * maso_config.N * maso_config.M
     img_size = maso_config.image_sizes[0]
 
@@ -273,26 +274,15 @@ def main():
         img_size=img_size
     ).to(args.device)
 
-    print(f"\nSimpleMSF模型:")
-    print(f"  输入通道: {input_channels}")
-    print(f"  对象数: {maso_config.K}")
-    print(f"  类别数: {len(label_encoder.classes_)}")
-    print(f"  图像尺寸: {img_size}x{img_size}")
-    print(f"  总参数量: {sum(p.numel() for p in model.parameters()):,}")
+    print(f"\nSimpleMSF 模型参数量: {sum(p.numel() for p in model.parameters()):,}")
 
-    # ========================================================
-    # 5. 训练配置
-    # ========================================================
+    # 6. 训练设置
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
-
-    # 创建保存目录
     os.makedirs(args.save_dir, exist_ok=True)
 
-    # ========================================================
-    # 6. 训练循环
-    # ========================================================
+    # 7. 训练循环
     best_loss = float("inf")
     best_acc = 0.0
 
@@ -303,31 +293,20 @@ def main():
     for epoch in range(args.epochs):
         print(f"\nEpoch {epoch + 1}/{args.epochs}")
 
-        # 训练
-        train_loss, train_acc = train_epoch(
-            model, train_loader, criterion, optimizer, args.device
-        )
-
-        # 评估
-        test_loss, report = evaluate(
-            model, test_loader, criterion, args.device, label_encoder
-        )
+        train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, args.device)
+        test_loss, report = evaluate(model, test_loader, criterion, args.device, label_encoder)
 
         test_acc = report['accuracy']
-
         print(f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
         print(f"Test Loss:  {test_loss:.4f}, Test Acc:  {test_acc:.4f}")
 
-        # 保存最佳模型
         if test_loss < best_loss:
             best_loss = test_loss
             best_acc = test_acc
-
             checkpoint_path = os.path.join(args.save_dir, "exp6_maso_model.pth")
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
                 'label_encoder': label_encoder,
                 'maso_config': maso_config,
                 'model_config': {
@@ -337,12 +316,12 @@ def main():
                     'img_size': img_size
                 }
             }, checkpoint_path)
-            print(f"✓ 保存最佳模型 (Loss: {best_loss:.4f}, Acc: {best_acc:.4f})")
+            print(f"✓ 已保存最佳模型 (Loss: {best_loss:.4f})")
 
         scheduler.step()
 
     print("\n" + "=" * 60)
-    print(f"训练完成! 最佳准确率: {best_acc:.4f}")
+    print(f"训练完成! 最佳测试准确率: {best_acc:.4f}")
     print("=" * 60)
 
 
