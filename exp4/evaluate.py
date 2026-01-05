@@ -313,7 +313,7 @@ def main():
                         default='cache/processed_features_weather_v1.pkl',
                         help='测试数据路径（缓存文件）')
     parser.add_argument('--output_dir', type=str,
-                        default='results',
+                        default='evaluation_results',
                         help='输出目录')
     parser.add_argument('--batch_size', type=int,
                         default=32,
