@@ -1,20 +1,10 @@
-# ============================================================
-# exp2/evaluate_maso.py - 评估脚本 (双输入：轨迹特征 + 知识图谱特征)
-# ============================================================
 """
-评估脚本 - 结合轨迹特征和知识图谱特征 (Exp2)
-
+评估脚本 (Exp2) - 基础知识图谱版 (9+11维)
 功能：
-- Accuracy / Precision / Recall / F1
-- Confusion Matrix
-- Per-class metrics
-- 预测结果 CSV
-
-兼容：
-- PyTorch >= 2.6
-- 安全加载 LabelEncoder（safe_globals）
+1. 自动适配 11 维 KG 特征
+2. 修复标签映射逻辑，合并 Car & Taxi
+3. 支持从缓存快速加载，避免冗长的路网匹配过程
 """
-
 import os
 import argparse
 import json
@@ -24,27 +14,18 @@ import pandas as pd
 import pickle
 from torch.utils.data import Dataset, DataLoader
 from sklearn.metrics import classification_report, confusion_matrix
-from sklearn.preprocessing import LabelEncoder
-import torch.serialization
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-# 模型与数据处理模块
+# 假设模型类定义在 src.model 中
 from src.model import TransportationModeClassifier
 
-# ============================================================
-# 双输入数据集（与 Exp2 train_maso.py 完全一致）
-# ============================================================
-class DualFeatureDataset(Dataset):
-    """
-    segments: List[
-        (traj_features_np, kg_features_np, label_encoded)
-        or
-        (traj_features_np, kg_features_np, label_str)
-    ]
-    """
 
+# ------------------------------------------------------------
+# 1. 数据集定义
+# ------------------------------------------------------------
+class DualFeatureDataset(Dataset):
     def __init__(self, segments, label_encoder):
         self.segments = segments
         self.label_encoder = label_encoder
@@ -53,166 +34,70 @@ class DualFeatureDataset(Dataset):
         return len(self.segments)
 
     def __getitem__(self, idx):
+        # 适配训练脚本保存的格式: (traj_feat, kg_feat, label)
         traj_features, kg_features, label = self.segments[idx]
-
-        # 兼容字符串或已编码标签
-        if isinstance(label, str):
-            label = self.label_encoder.transform([label])[0]
 
         traj_tensor = torch.FloatTensor(traj_features)
         kg_tensor = torch.FloatTensor(kg_features)
-        label_tensor = torch.LongTensor([label])
+
+        # 标签处理：如果是字符串则转换，如果是数字则直接读取
+        if isinstance(label, (int, np.integer)):
+            label_tensor = torch.LongTensor([label])[0]
+        else:
+            label_encoded = self.label_encoder.transform([label])[0]
+            label_tensor = torch.LongTensor([label_encoded])[0]
 
         return traj_tensor, kg_tensor, label_tensor
 
 
-# ============================================================
-# 加载评估数据（从缓存，保证与训练完全一致）
-# ============================================================
-CACHE_DIR = 'cache'
-PROCESSED_FEATURE_CACHE_PATH = os.path.join(CACHE_DIR, 'processed_features.pkl')
-
-
-def load_evaluation_data():
-    if not os.path.exists(PROCESSED_FEATURE_CACHE_PATH):
-        raise FileNotFoundError(
-            f"❌ 未找到特征缓存文件: {PROCESSED_FEATURE_CACHE_PATH}\n"
-            f"请先运行 Exp2 的 train.py 生成缓存。"
-        )
-
-    print("\n========== 加载评估特征（缓存） ==========")
-
-    with open(PROCESSED_FEATURE_CACHE_PATH, 'rb') as f:
-        # ✅ PyTorch 2.6 正确用法：只传一个 dict
-        with torch.serialization.safe_globals({
-            LabelEncoder: LabelEncoder
-        }):
-            all_features_and_labels, label_encoder = pickle.load(f)
-
-    print(f"✓ 加载完成，共 {len(all_features_and_labels)} 条样本")
-
-    # 最终类别（car & taxi 已合并）
-    TARGET_MODES_FINAL = [
-        'Walk', 'Bike', 'Bus',
-        'Car & taxi', 'Train',
-        'Airplane', 'Other'
-    ]
-
-    # 只保留目标类别
-    valid_segments = [
-        seg for seg in all_features_and_labels
-        if label_encoder.classes_[seg[2]] in TARGET_MODES_FINAL
-    ]
-
-    print(f"✓ 有效评估样本数: {len(valid_segments)}")
-    return valid_segments, label_encoder
-
-
-# ============================================================
-# 模型评估
-# ============================================================
-def evaluate_model(model, dataloader, device):
+# ------------------------------------------------------------
+# 2. 推理逻辑
+# ------------------------------------------------------------
+def run_inference(model, dataloader, device):
     model.eval()
     all_preds = []
     all_labels = []
-    all_probs = []
+    all_confidences = []
 
     with torch.no_grad():
-        for traj_features, kg_features, labels in tqdm(dataloader, desc="评估中"):
-            traj_features = traj_features.to(device)
-            kg_features = kg_features.to(device)
-            labels = labels.squeeze().to(device)
+        for traj, kg, labels in tqdm(dataloader, desc="推理中"):
+            traj, kg, labels = traj.to(device), kg.to(device), labels.to(device)
 
-            logits = model(traj_features, kg_features)
+            logits = model(traj, kg)
             probs = torch.softmax(logits, dim=1)
             preds = torch.argmax(probs, dim=1)
 
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
-            all_probs.extend(probs.cpu().numpy())
 
-    return all_preds, all_labels, all_probs
+            # 记录预测概率
+            p_np = probs.cpu().numpy()
+            all_confidences.extend([p_np[i, p] for i, p in enumerate(preds.cpu().numpy())])
 
-
-# ============================================================
-# 可视化
-# ============================================================
-def plot_confusion_matrix(y_true, y_pred, class_names, save_path):
-    cm = confusion_matrix(y_true, y_pred)
-
-    plt.figure(figsize=(10, 8))
-    sns.heatmap(
-        cm,
-        annot=True,
-        fmt='d',
-        cmap='Blues',
-        xticklabels=class_names,
-        yticklabels=class_names
-    )
-    plt.title('Confusion Matrix (Exp2)', fontsize=14)
-    plt.xlabel('Predicted')
-    plt.ylabel('True')
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=300)
-    plt.close()
+    return all_preds, all_labels, all_confidences
 
 
-def plot_per_class_metrics(report, class_names, save_path):
-    metrics = ['precision', 'recall', 'f1-score']
-    data = {m: [] for m in metrics}
-
-    for cls in class_names:
-        for m in metrics:
-            data[m].append(report[cls][m])
-
-    x = np.arange(len(class_names))
-    width = 0.25
-
-    plt.figure(figsize=(12, 6))
-    for i, m in enumerate(metrics):
-        plt.bar(x + i * width, data[m], width, label=m)
-
-    plt.xticks(x + width, class_names, rotation=30)
-    plt.ylim(0, 1.0)
-    plt.legend()
-    plt.grid(axis='y', alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=300)
-    plt.close()
-
-
-# ============================================================
-# 主函数
-# ============================================================
+# ------------------------------------------------------------
+# 3. 主函数
+# ------------------------------------------------------------
 def main():
-    parser = argparse.ArgumentParser(description='评估 Exp2 双输入模型')
+    parser = argparse.ArgumentParser(description='Exp2 评估脚本')
     parser.add_argument('--model_path', type=str, default='checkpoints/exp2_model.pth')
+    parser.add_argument('--cache_path', type=str, default='cache/processed_features.pkl')
     parser.add_argument('--output_dir', type=str, default='evaluation_results')
-    parser.add_argument('--batch_size', type=int, default=128)
-    parser.add_argument('--device', type=str,
-                        default='cuda' if torch.cuda.is_available() else 'cpu')
-
+    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
     args = parser.parse_args()
+
     os.makedirs(args.output_dir, exist_ok=True)
 
-    # ========================================================
-    # 加载模型
-    # ========================================================
-    print("=" * 60)
-    print("加载模型和 LabelEncoder")
-
-    with torch.serialization.safe_globals({
-        LabelEncoder: LabelEncoder
-    }):
-        checkpoint = torch.load(
-            args.model_path,
-            map_location=args.device,
-            weights_only=False
-        )
-
+    # 1. 加载模型及配置
+    print(f"正在加载模型: {args.model_path}")
+    # 使用 weights_only=False 因为包含 LabelEncoder 对象
+    checkpoint = torch.load(args.model_path, map_location=args.device, weights_only=False)
     label_encoder = checkpoint['label_encoder']
     config = checkpoint['model_config']
 
+    # 动态初始化模型 (Exp2: 9 + 11 维)
     model = TransportationModeClassifier(
         trajectory_feature_dim=config['trajectory_feature_dim'],
         kg_feature_dim=config['kg_feature_dim'],
@@ -221,76 +106,53 @@ def main():
         num_classes=config['num_classes'],
         dropout=config.get('dropout', 0.3)
     ).to(args.device)
-
     model.load_state_dict(checkpoint['model_state_dict'])
-    model.eval()
 
-    print(f"✓ 模型加载成功（Epoch {checkpoint.get('epoch', '?')}）")
-    print(f"类别: {list(label_encoder.classes_)}")
+    # 2. 加载数据
+    if not os.path.exists(args.cache_path):
+        print(f"❌ 错误: 未找到缓存文件 {args.cache_path}。请确保 train.py 已运行并生成了特征缓存。")
+        return
 
-    # ========================================================
-    # 加载评估数据
-    # ========================================================
-    segments, label_encoder = load_evaluation_data()
-    dataset = DualFeatureDataset(segments, label_encoder)
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
+    print(f"✓ 正在从缓存加载特征: {args.cache_path}")
+    with open(args.cache_path, 'rb') as f:
+        # 训练脚本保存的是 (processed_segments, label_encoder)
+        cached_data, _ = pickle.load(f)
 
+    dataset = DualFeatureDataset(cached_data, label_encoder)
+    dataloader = DataLoader(dataset, batch_size=64, shuffle=False)
+
+    # 3. 执行评估
+    preds, labels, confs = run_inference(model, dataloader, args.device)
+
+    # 4. 生成报告
     class_names = label_encoder.classes_
-    num_classes = len(class_names)
+    print("\n" + "=" * 40)
+    print("      Exp2 分类报告 (9轨迹 + 11知识图谱)")
+    print("=" * 40)
+    print(classification_report(labels, preds, target_names=class_names, zero_division=0))
 
-    # ========================================================
-    # 评估
-    # ========================================================
-    preds, labels, probs_raw = evaluate_model(model, dataloader, args.device)
+    # 保存 JSON 报告
+    report = classification_report(labels, preds, target_names=class_names, output_dict=True, zero_division=0)
+    with open(os.path.join(args.output_dir, 'evaluation_report.json'), 'w') as f:
+        json.dump(report, f, indent=4)
 
-    report = classification_report(
-        labels, preds,
-        target_names=class_names,
-        labels=np.arange(num_classes),
-        output_dict=True,
-        zero_division=0
-    )
+    # 5. 可视化混淆矩阵
+    cm = confusion_matrix(labels, preds)
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Greens', xticklabels=class_names, yticklabels=class_names)
+    plt.title('Confusion Matrix - Exp2 (Base KG)')
+    plt.xlabel('Predicted')
+    plt.ylabel('True')
+    plt.savefig(os.path.join(args.output_dir, 'confusion_matrix.png'))
 
-    print("\n" + "=" * 60)
-    print("分类报告")
-    print("=" * 60)
-    print(classification_report(
-        labels, preds,
-        target_names=class_names,
-        labels=np.arange(num_classes),
-        zero_division=0
-    ))
-
-    # ========================================================
-    # 保存结果
-    # ========================================================
-    with open(os.path.join(args.output_dir, 'evaluation_report.json'), 'w', encoding='utf-8') as f:
-        json.dump(report, f, indent=2, ensure_ascii=False)
-
-    plot_confusion_matrix(
-        labels, preds, class_names,
-        os.path.join(args.output_dir, 'confusion_matrix.png')
-    )
-
-    plot_per_class_metrics(
-        report, class_names,
-        os.path.join(args.output_dir, 'per_class_metrics.png')
-    )
-
-    confidences = [p[pred] for p, pred in zip(probs_raw, preds)]
+    # 6. 保存详细预测 CSV
     df = pd.DataFrame({
         'true_label': [class_names[i] for i in labels],
         'pred_label': [class_names[i] for i in preds],
-        'confidence': confidences
+        'confidence': confs
     })
-
-    df.to_csv(
-        os.path.join(args.output_dir, 'predictions.csv'),
-        index=False,
-        encoding='utf-8-sig'
-    )
-
-    print(f"\n✓ 所有评估结果已保存至: {args.output_dir}")
+    df.to_csv(os.path.join(args.output_dir, 'predictions_exp2.csv'), index=False)
+    print(f"\n✅ 评估完成！结果已保存至: {args.output_dir}")
 
 
 if __name__ == '__main__':
