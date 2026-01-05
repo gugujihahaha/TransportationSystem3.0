@@ -93,7 +93,7 @@ def main():
     # 1. 加载模型及配置
     print(f"正在加载模型: {args.model_path}")
     # 使用 weights_only=False 因为包含 LabelEncoder 对象
-    checkpoint = torch.load(args.model_path, map_location=args.device, weights_only=False)
+    checkpoint = torch.load(args.model_path, map_location=args.device)
     label_encoder = checkpoint['label_encoder']
     config = checkpoint['model_config']
 
