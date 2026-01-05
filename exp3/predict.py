@@ -1,169 +1,104 @@
-# ============================================================
-# exp3/predict.py - 预测脚本 (双输入：轨迹特征 + 增强知识图谱特征)
-# ============================================================
-"""
-预测脚本 - 结合轨迹特征和增强知识图谱特征 (Exp3)
-
-使用方法:
-    python predict.py \\
-        --model_path checkpoints/exp3_model.pth \\
-        --kg_data_path "../data/kg_data" \\
-        --trajectory_path "../data/Geolife Trajectories 1.3/Data/080/Trajectory/20070627094922.plt"
-"""
-import os
-import argparse
 import torch
 import numpy as np
-
-# 导入 Exp3 模块
+import pickle
+import os
+from sklearn.preprocessing import LabelEncoder
 from src.model import TransportationModeClassifier
-from src.knowledge_graph import EnhancedTransportationKG # 🔥 Exp3 核心修改
-from src.feature_extraction import FeatureExtractor
-from src.data_preprocessing import GeoLifeDataLoader, preprocess_trajectory_segments
 
 
-def predict_trajectory(model, trajectory, device, label_encoder, feature_extractor: FeatureExtractor):
-    """
-    预测单个轨迹的交通方式 (双输入: 9维轨迹 + 15维 KG)
-    """
+class TransportationPredictorExp3:
+    def __init__(self, checkpoint_path="checkpoints/exp3_model.pth", kg_cache_path="cache/kg_data_v1.pkl"):
+        """
+        初始化实验三预测器
+        :param checkpoint_path: 训练好的模型权重路径
+        :param kg_cache_path: 增强知识图谱缓存路径 (Exp3 默认为 v1 版本)
+        """
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # 1. 预处理轨迹 (提取 9 维轨迹特征，长度规范化)
-    segment = (trajectory, 'unknown')
-    processed = preprocess_trajectory_segments([segment], min_length=10)
+        # 1. 加载模型 Checkpoint
+        if not os.path.exists(checkpoint_path):
+            raise FileNotFoundError(f"❌ 未找到 Exp3 模型权重: {checkpoint_path}")
 
-    if len(processed) == 0:
-        print("警告: 轨迹太短，无法预测。")
-        return None, None, None
+        # 使用 safe_globals 确保在 PyTorch 2.6+ 下安全加载 LabelEncoder
+        with torch.serialization.safe_globals({LabelEncoder: LabelEncoder, np.str_: np.str_}):
+            ckpt = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
 
-    traj_features_raw, _ = processed[0]
+        self.label_encoder = ckpt['label_encoder']
+        self.class_names = self.label_encoder.classes_
+        config = ckpt['model_config']
 
-    # 2. 提取双特征
-    # feature_extractor.extract_features 返回 (归一化轨迹特征 (N, 9), 增强 KG 特征 (N, 15))
-    normalized_traj_features, kg_features = feature_extractor.extract_features(traj_features_raw)
+        # 2. 初始化模型架构 (自动适配 15 维 KG 特征)
+        self.model = TransportationModeClassifier(
+            trajectory_feature_dim=config['trajectory_feature_dim'],  # 通常为 9
+            kg_feature_dim=config['kg_feature_dim'],  # Exp3 应为 15
+            hidden_dim=config['hidden_dim'],
+            num_layers=config['num_layers'],
+            num_classes=config['num_classes'],
+            dropout=config.get('dropout', 0.3)
+        ).to(self.device)
 
-    # 3. 转换为 Tensor
-    # 增加批次维度 (1, seq_len, dim)
-    traj_tensor = torch.FloatTensor(normalized_traj_features).unsqueeze(0).to(device) # (1, 50, 9)
-    kg_tensor = torch.FloatTensor(kg_features).unsqueeze(0).to(device)             # (1, 50, 15) 🔥 维度变化
+        self.model.load_state_dict(ckpt["model_state_dict"])
+        self.model.eval()
 
-    # 4. 预测
-    model.eval()
-    with torch.no_grad():
-        # 双输入模型调用
-        logits = model(traj_tensor, kg_tensor)
-        probs = torch.softmax(logits, dim=1).squeeze().cpu().numpy()
+        print(f"✅ Exp3 模型加载成功！")
+        print(f"📊 特征配置: 轨迹维度={config['trajectory_feature_dim']}, KG维度={config['kg_feature_dim']}")
+        print(f"🏷️  支持类别: {list(self.class_names)}")
 
-    # 5. 获取预测结果
-    pred_index = np.argmax(probs)
-    pred_prob = probs[pred_index]
-    pred_label = label_encoder.classes_[pred_index]
+    def predict(self, traj_features, kg_features):
+        """
+        输入参数:
+            traj_features: (seq_len, 9) 的轨迹特征矩阵
+            kg_features: (15,) 的增强知识图谱特征向量
+        返回:
+            pred_label: 预测的交通方式字符串
+            confidence: 置信度分数
+        """
+        # 1. 轨迹特征维度处理 -> (1, seq_len, 9)
+        if traj_features.ndim == 2:
+            traj_features = np.expand_dims(traj_features, axis=0)
 
-    return pred_label, pred_prob, probs
+        # 2. KG 特征维度处理 -> (1, 1, 15)
+        # ⚠️ 针对实验二遇到的 IndexError 进行了预先修复：
+        # 实验三的模型 forward 同样预期 KG 具有时间维度 [batch, 1, dim]
+        if kg_features.ndim == 1:
+            kg_features = np.expand_dims(np.expand_dims(kg_features, axis=0), axis=1)
+        elif kg_features.ndim == 2:
+            kg_features = np.expand_dims(kg_features, axis=1)
 
+        # 3. 转换为 Tensor
+        traj_tensor = torch.FloatTensor(traj_features).to(self.device)
+        kg_tensor = torch.FloatTensor(kg_features).to(self.device)
 
-def main():
-    parser = argparse.ArgumentParser(description='使用已训练的 Exp3 模型预测单个轨迹')
-    parser.add_argument('--model_path', type=str,
-                       default='checkpoints/exp3_model.pth',
-                       help='已训练模型的路径')
-    parser.add_argument('--kg_data_path', type=str,
-                       default='../data/kg_data',
-                       help='知识图谱数据目录')
-    parser.add_argument('--trajectory_path', type=str,
-                       required=True,
-                       help='待预测的 GeoLife .plt 轨迹文件路径')
-    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu',
-                       help='设备')
+        # 4. 推理
+        with torch.no_grad():
+            logits = self.model(traj_tensor, kg_tensor)
+            probs = torch.softmax(logits, dim=1)
+            confidence, pred_idx = torch.max(probs, dim=1)
 
-    args = parser.parse_args()
+        # 5. 映射回标签
+        pred_label = self.label_encoder.inverse_transform(pred_idx.cpu().numpy())[0]
+        score = confidence.cpu().item()
 
-    # 1. 加载模型和 LabelEncoder
-    print("=" * 60)
-    print("加载模型和LabelEncoder...")
-    if not os.path.exists(args.model_path):
-        print(f"错误: 未找到模型文件 {args.model_path}")
-        return
-
-    checkpoint = torch.load(args.model_path, map_location=args.device)
-    label_encoder = checkpoint['label_encoder']
-    config = checkpoint['model_config']
-
-    # 实例化模型 (使用 Exp3 的参数)
-    model = TransportationModeClassifier(
-        trajectory_feature_dim=config.get('trajectory_feature_dim', 9),
-        # 🔥 核心修改：确保 KG 维度为 15
-        kg_feature_dim=config.get('kg_feature_dim', 15),
-        hidden_dim=config['hidden_dim'],
-        num_layers=config['num_layers'],
-        num_classes=config['num_classes'],
-        dropout=config.get('dropout', 0.3)
-    ).to(args.device)
-    model.load_state_dict(checkpoint['model_state_dict'])
-    print(f"✓ 模型加载成功")
-    print("=" * 60)
-
-    # 2. 初始化知识图谱和特征提取器
-    print("初始化增强知识图谱 (Exp3)...")
-    # 🔥 核心修改：使用 EnhancedTransportationKG
-    kg = EnhancedTransportationKG()
-    kg.load_data(data_root=args.kg_data_path)
-    feature_extractor = FeatureExtractor(kg)
-    print("✓ 知识图谱和特征提取器初始化完成")
-
-    # 3. 加载轨迹
-    print(f"\n加载轨迹: {args.trajectory_path}")
-    data_loader = GeoLifeDataLoader(data_root='.')
-
-    try:
-        trajectory = data_loader.load_trajectory(args.trajectory_path)
-    except Exception as e:
-        print(f"错误: 加载轨迹失败 {e}")
-        return
-
-    if trajectory.empty:
-        print("错误: 轨迹文件为空或无效")
-        return
-
-    # 4. 预测
-    print("\n预测中...")
-    pred_label, pred_prob, all_probs = predict_trajectory(
-        model, trajectory, args.device, label_encoder, feature_extractor
-    )
-
-    if pred_label is None:
-        return
-
-    # ========== 输出结果 ==========
-    print("\n" + "=" * 60)
-    print("预测结果 (Exp3: 轨迹 + 增强 KG)")
-    print("=" * 60)
-    print(f"\n交通方式: {pred_label}")
-    print(f"置信度: {pred_prob:.4f} ({pred_prob*100:.2f}%)")
-
-    print(f"\n所有类别的概率:")
-    print("-" * 60)
-
-    # 按概率排序
-    sorted_indices = np.argsort(all_probs)[::-1]
-
-    for rank, i in enumerate(sorted_indices, 1):
-        class_name = label_encoder.classes_[i]
-        prob = all_probs[i]
-        bar = '█' * int(prob * 50)
-
-        if rank == 1:
-            marker = '🥇'
-        elif rank == 2:
-            marker = '🥈'
-        elif rank == 3:
-            marker = '🥉'
-        else:
-            marker = f'{rank}.'
-
-        print(f"{marker} {class_name:10s}: {prob:.4f} ({prob*100:.2f}%) {bar}")
-
-    print("-" * 60)
+        return pred_label, score
 
 
-if __name__ == '__main__':
-    main()
+# ==========================================
+# 示例用法
+# ==========================================
+if __name__ == "__main__":
+    # 初始化 Exp3 预测器
+    predictor = TransportationPredictorExp3()
+
+    # 模拟输入：
+    # 轨迹特征 (9维)
+    dummy_traj = np.random.randn(50, 9)
+    # 实验三增强 KG 特征 (15维：包含更多的 POI 类型和空间关系)
+    dummy_kg = np.random.randn(15)
+
+    label, score = predictor.predict(dummy_traj, dummy_kg)
+
+    print("\n" + "=" * 40)
+    print(f"【实验三预测结论】")
+    print(f"识别模式: {label}")
+    print(f"置信水平: {score:.4%}")
+    print("=" * 40)

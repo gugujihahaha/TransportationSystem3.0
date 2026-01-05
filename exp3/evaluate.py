@@ -1,104 +1,162 @@
+"""
+评估脚本 (Exp3) - 增强知识图谱版
+功能：
+1. 支持从缓存直接加载特征（快速模式）
+2. 自动处理标签映射（修复 Exp2 中的标签不匹配问题）
+3. 生成详细的分类报告、混淆矩阵和预测详情
+"""
+import os
+import argparse
+import json
 import torch
 import numpy as np
+import pandas as pd
 import pickle
-import os
-from sklearn.preprocessing import LabelEncoder
+from torch.utils.data import Dataset, DataLoader
+from sklearn.metrics import classification_report, confusion_matrix
+from tqdm import tqdm
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# 导入与训练一致的模块
 from src.model import TransportationModeClassifier
 
 
-class TransportationPredictorExp3:
-    def __init__(self, checkpoint_path="checkpoints/exp3_model.pth", kg_cache_path="cache/kg_data_v1.pkl"):
-        """
-        初始化实验三预测器
-        :param checkpoint_path: 训练好的模型权重路径
-        :param kg_cache_path: 增强知识图谱缓存路径 (Exp3 默认为 v1 版本)
-        """
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+# ------------------------------------------------------------
+# 1. 数据集定义 (适配 Exp3 15维特征)
+# ------------------------------------------------------------
+class DualFeatureDataset(Dataset):
+    def __init__(self, segments, label_encoder):
+        self.segments = segments
+        self.label_encoder = label_encoder
 
-        # 1. 加载模型 Checkpoint
-        if not os.path.exists(checkpoint_path):
-            raise FileNotFoundError(f"❌ 未找到 Exp3 模型权重: {checkpoint_path}")
+    def __len__(self):
+        return len(self.segments)
 
-        # 使用 safe_globals 确保在 PyTorch 2.6+ 下安全加载 LabelEncoder
-        with torch.serialization.safe_globals({LabelEncoder: LabelEncoder, np.str_: np.str_}):
-            ckpt = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
+    def __getitem__(self, idx):
+        # 兼容性处理：根据训练脚本，特征可能是 (traj, kg, label)
+        traj_features, kg_features, label = self.segments[idx]
 
-        self.label_encoder = ckpt['label_encoder']
-        self.class_names = self.label_encoder.classes_
-        config = ckpt['model_config']
+        traj_tensor = torch.FloatTensor(traj_features)
+        kg_tensor = torch.FloatTensor(kg_features)
 
-        # 2. 初始化模型架构 (自动适配 15 维 KG 特征)
-        self.model = TransportationModeClassifier(
-            trajectory_feature_dim=config['trajectory_feature_dim'],  # 通常为 9
-            kg_feature_dim=config['kg_feature_dim'],  # Exp3 应为 15
-            hidden_dim=config['hidden_dim'],
-            num_layers=config['num_layers'],
-            num_classes=config['num_classes'],
-            dropout=config.get('dropout', 0.3)
-        ).to(self.device)
+        # 标签编码
+        if isinstance(label, (int, np.integer)):
+            label_tensor = torch.LongTensor([label])[0]
+        else:
+            label_encoded = self.label_encoder.transform([label])[0]
+            label_tensor = torch.LongTensor([label_encoded])[0]
 
-        self.model.load_state_dict(ckpt["model_state_dict"])
-        self.model.eval()
+        return traj_tensor, kg_tensor, label_tensor
 
-        print(f"✅ Exp3 模型加载成功！")
-        print(f"📊 特征配置: 轨迹维度={config['trajectory_feature_dim']}, KG维度={config['kg_feature_dim']}")
-        print(f"🏷️  支持类别: {list(self.class_names)}")
 
-    def predict(self, traj_features, kg_features):
-        """
-        输入参数:
-            traj_features: (seq_len, 9) 的轨迹特征矩阵
-            kg_features: (15,) 的增强知识图谱特征向量
-        返回:
-            pred_label: 预测的交通方式字符串
-            confidence: 置信度分数
-        """
-        # 1. 轨迹特征维度处理 -> (1, seq_len, 9)
-        if traj_features.ndim == 2:
-            traj_features = np.expand_dims(traj_features, axis=0)
+# ------------------------------------------------------------
+# 2. 评估核心逻辑
+# ------------------------------------------------------------
+def run_evaluation(model, dataloader, device):
+    model.eval()
+    all_preds = []
+    all_labels = []
+    all_probs = []
 
-        # 2. KG 特征维度处理 -> (1, 1, 15)
-        # ⚠️ 针对实验二遇到的 IndexError 进行了预先修复：
-        # 实验三的模型 forward 同样预期 KG 具有时间维度 [batch, 1, dim]
-        if kg_features.ndim == 1:
-            kg_features = np.expand_dims(np.expand_dims(kg_features, axis=0), axis=1)
-        elif kg_features.ndim == 2:
-            kg_features = np.expand_dims(kg_features, axis=1)
+    with torch.no_grad():
+        for traj_f, kg_f, labels in tqdm(dataloader, desc="正在进行模型推理"):
+            traj_f, kg_f, labels = traj_f.to(device), kg_f.to(device), labels.to(device)
 
-        # 3. 转换为 Tensor
-        traj_tensor = torch.FloatTensor(traj_features).to(self.device)
-        kg_tensor = torch.FloatTensor(kg_features).to(self.device)
-
-        # 4. 推理
-        with torch.no_grad():
-            logits = self.model(traj_tensor, kg_tensor)
+            logits = model(traj_f, kg_f)
             probs = torch.softmax(logits, dim=1)
-            confidence, pred_idx = torch.max(probs, dim=1)
+            preds = torch.argmax(probs, dim=1)
 
-        # 5. 映射回标签
-        pred_label = self.label_encoder.inverse_transform(pred_idx.cpu().numpy())[0]
-        score = confidence.cpu().item()
+            all_preds.extend(preds.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
+            # 记录预测对应类别的置信度
+            batch_probs = probs.cpu().numpy()
+            all_probs.extend([batch_probs[i, p] for i, p in enumerate(preds.cpu().numpy())])
 
-        return pred_label, score
+    return all_preds, all_labels, all_probs
 
 
-# ==========================================
-# 示例用法
-# ==========================================
-if __name__ == "__main__":
-    # 初始化 Exp3 预测器
-    predictor = TransportationPredictorExp3()
+# ------------------------------------------------------------
+# 3. 可视化函数
+# ------------------------------------------------------------
+def save_visualizations(y_true, y_pred, class_names, output_dir):
+    # 混淆矩阵
+    cm = confusion_matrix(y_true, y_pred)
+    plt.figure(figsize=(12, 10))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+                xticklabels=class_names, yticklabels=class_names)
+    plt.title('Confusion Matrix - Exp3 (Enhanced KG)')
+    plt.ylabel('True Label')
+    plt.xlabel('Predicted Label')
+    plt.savefig(os.path.join(output_dir, 'confusion_matrix.png'))
+    plt.close()
 
-    # 模拟输入：
-    # 轨迹特征 (9维)
-    dummy_traj = np.random.randn(50, 9)
-    # 实验三增强 KG 特征 (15维：包含更多的 POI 类型和空间关系)
-    dummy_kg = np.random.randn(15)
 
-    label, score = predictor.predict(dummy_traj, dummy_kg)
+# ------------------------------------------------------------
+# 4. 主函数
+# ------------------------------------------------------------
+def main():
+    parser = argparse.ArgumentParser(description='Exp3 评估脚本')
+    parser.add_argument('--model_path', type=str, default='checkpoints/exp3_model.pth')
+    parser.add_argument('--feature_cache', type=str, default='cache/processed_features_v1.pkl')
+    parser.add_argument('--output_dir', type=str, default='evaluation_results')
+    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
+    args = parser.parse_args()
 
-    print("\n" + "=" * 40)
-    print(f"【实验三预测结论】")
-    print(f"识别模式: {label}")
-    print(f"置信水平: {score:.4%}")
-    print("=" * 40)
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    # 1. 加载模型存档
+    print(f"正在加载模型: {args.model_path}")
+    checkpoint = torch.load(args.model_path, map_location=args.device, weights_only=False)
+    label_encoder = checkpoint['label_encoder']
+    config = checkpoint['model_config']
+
+    model = TransportationModeClassifier(
+        trajectory_feature_dim=config['trajectory_feature_dim'],
+        kg_feature_dim=config['kg_feature_dim'],
+        hidden_dim=config['hidden_dim'],
+        num_layers=config['num_layers'],
+        num_classes=config['num_classes'],
+        dropout=config['dropout']
+    ).to(args.device)
+    model.load_state_dict(checkpoint['model_state_dict'])
+
+    # 2. 加载评估数据 (优先从 Exp3 训练产生的缓存加载)
+    if os.path.exists(args.feature_cache):
+        print(f"✓ 发现特征缓存，正在快速加载: {args.feature_cache}")
+        with open(args.feature_cache, 'rb') as f:
+            # 训练脚本保存格式为 (all_features, label_encoder)
+            all_data, _ = pickle.load(f)
+    else:
+        print(f"❌ 未找到缓存文件 {args.feature_cache}。请先运行 train.py 生成缓存。")
+        return
+
+    dataset = DualFeatureDataset(all_data, label_encoder)
+    dataloader = DataLoader(dataset, batch_size=64, shuffle=False)
+
+    # 3. 执行推理
+    preds, labels, confidences = run_evaluation(model, dataloader, args.device)
+
+    # 4. 生成报告
+    class_names = label_encoder.classes_
+    report = classification_report(labels, preds, target_names=class_names, output_dict=True, zero_division=0)
+    print("\n评估完成！分类报告如下:")
+    print(classification_report(labels, preds, target_names=class_names, zero_division=0))
+
+    # 5. 保存结果文件
+    with open(os.path.join(args.output_dir, 'evaluation_report.json'), 'w') as f:
+        json.dump(report, f, indent=4)
+
+    save_visualizations(labels, preds, class_names, args.output_dir)
+
+    df_results = pd.DataFrame({
+        'true_label': [class_names[i] for i in labels],
+        'pred_label': [class_names[i] for i in preds],
+        'confidence': confidences
+    })
+    df_results.to_csv(os.path.join(args.output_dir, 'predictions_exp3.csv'), index=False)
+    print(f"✅ 结果已保存至: {args.output_dir}")
+
+
+if __name__ == '__main__':
+    main()
