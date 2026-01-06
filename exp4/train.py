@@ -813,7 +813,7 @@ def main():
     # 优化器和学习率调度器
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=5, verbose=True
+        optimizer, mode='min', factor=0.5, patience=5
     )
 
     # 损失函数
@@ -884,7 +884,7 @@ def main():
                 }
             }
 
-            save_path = os.path.join(args.save_dir, 'exp4_model_stable.pth')
+            save_path = os.path.join(args.save_dir, 'exp4_model.pth')
             torch.save(checkpoint, save_path)
             print(f"   ✓ 保存最佳模型 (Loss: {test_loss:.4f}, Acc: {test_acc:.4f})")
         else:
@@ -909,7 +909,7 @@ def main():
     print("=" * 80)
     print(f"最佳测试 Loss: {best_test_loss:.4f}")
     print(f"最佳测试 Accuracy: {best_accuracy:.4f}")
-    print(f"模型已保存到: {os.path.join(args.save_dir, 'exp4_model_stable.pth')}")
+    print(f"模型已保存到: {os.path.join(args.save_dir, 'exp4_model.pth')}")
 
     # 打印 KG 和天气统计
     if kg is not None:
