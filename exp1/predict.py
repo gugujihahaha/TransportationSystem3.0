@@ -1,42 +1,57 @@
+"""
+Exp1 预测器 (独立版)
+只需要模型文件，不需要任何额外的 pkl 缓存
+"""
 import torch
 import numpy as np
-import pickle
 import os
 from src.model import TransportationModeClassifier
 
 
 class TrajectoryPredictor:
-    def __init__(self, checkpoint_path="checkpoints/exp1_model.pth", cache_path="cache/exp1_processed_features.pkl"):
+    def __init__(self, checkpoint_path="checkpoints/exp1_model.pth"):
+        """
+        初始化实验一预测器
+        :param checkpoint_path: 训练好的模型权重路径（包含 label_encoder）
+        """
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        # 1. 加载标签映射器 (LabelEncoder)
-        if not os.path.exists(cache_path):
-            raise FileNotFoundError(f"❌ 未找到缓存文件 {cache_path}，请先运行 train.py")
-
-        with open(cache_path, "rb") as f:
-            cache = pickle.load(f)
-            self.label_encoder = cache["label_encoder"]
-            self.class_names = self.label_encoder.classes_
-
-        # 2. 加载模型架构与权重
+        # 加载模型 Checkpoint（包含 label_encoder）
         if not os.path.exists(checkpoint_path):
-            raise FileNotFoundError(f"❌ 未找到模型权重 {checkpoint_path}")
+            raise FileNotFoundError(f"❌ 未找到模型文件: {checkpoint_path}")
 
         ckpt = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
-        self.model = TransportationModeClassifier(**ckpt["model_config"]).to(self.device)
+
+        # 从 checkpoint 中获取 label_encoder
+        self.label_encoder = ckpt['label_encoder']
+        self.class_names = self.label_encoder.classes_
+        config = ckpt['model_config']
+
+        # 初始化模型架构
+        self.model = TransportationModeClassifier(
+            input_dim=config['input_dim'],
+            hidden_dim=config['hidden_dim'],
+            num_layers=config['num_layers'],
+            num_classes=config['num_classes'],
+            dropout=config.get('dropout', 0.3)
+        ).to(self.device)
+
         self.model.load_state_dict(ckpt["model_state_dict"])
         self.model.eval()
 
-        print(f"✅ 模型加载成功！支持识别的类别: {list(self.class_names)}")
+        print(f"✅ Exp1 模型加载成功！")
+        print(f"📊 特征配置: 轨迹维度={config['input_dim']}")
+        print(f"🏷️  支持类别: {list(self.class_names)}")
 
     def predict(self, trajectory_features):
         """
         输入:
             trajectory_features: np.ndarray, 形状为 (seq_len, 9) 或 (batch, seq_len, 9)
         输出:
-            预测标签字符串, 置信度分数
+            pred_labels: 预测标签字符串数组
+            confidences: 置信度分数数组
         """
-        # 转换数据维度
+        # 转换数据类型
         if isinstance(trajectory_features, list):
             trajectory_features = np.array(trajectory_features)
 
@@ -65,11 +80,12 @@ if __name__ == "__main__":
     predictor = TrajectoryPredictor()
 
     # 模拟输入一条 9 维特征的轨迹段 (假设长度为 50)
-    # 在实际应用中，这里应该是你从 .plt 文件提取并经过 preprocess_segments 处理后的特征
     dummy_input = np.random.randn(50, 9)
 
-    label, score = predictor.predict(dummy_input)
+    labels, scores = predictor.predict(dummy_input)
 
-    print("-" * 30)
-    print(f"预测结果: {label[0]}")
-    print(f"置信度: {score[0]:.4f}")
+    print("\n" + "=" * 40)
+    print(f"【实验一预测结论】")
+    print(f"识别模式: {labels[0]}")
+    print(f"置信水平: {scores[0]:.4%}")
+    print("=" * 40)
