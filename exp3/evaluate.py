@@ -1,25 +1,30 @@
 """
-评估脚本 (Exp3) - 增强知识图谱版
+Exp3 评估脚本 (标准版)
+按照 Exp4 标准修复：只在测试集上评估，避免数据泄露
 功能：
 1. 支持从缓存直接加载特征（快速模式）
 2. 自动处理标签映射（修复 Exp2 中的标签不匹配问题）
 3. 生成详细的分类报告、混淆矩阵和预测详情
 """
 import os
-import argparse
 import json
 import torch
 import numpy as np
 import pandas as pd
 import pickle
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Subset
 from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import seaborn as sns
 
 # 导入与训练一致的模块
 from src.model import TransportationModeClassifier
+
+# 设置中文字体 (防止图片乱码)
+plt.rcParams['font.sans-serif'] = ['SimHei', 'DejaVu Sans', 'Arial Unicode MS']
+plt.rcParams['axes.unicode_minus'] = False
 
 
 # ------------------------------------------------------------
@@ -50,66 +55,37 @@ class DualFeatureDataset(Dataset):
         return traj_tensor, kg_tensor, label_tensor
 
 
-# ------------------------------------------------------------
-# 2. 评估核心逻辑
-# ------------------------------------------------------------
-def run_evaluation(model, dataloader, device):
-    model.eval()
-    all_preds = []
-    all_labels = []
-    all_probs = []
-
-    with torch.no_grad():
-        for traj_f, kg_f, labels in tqdm(dataloader, desc="正在进行模型推理"):
-            traj_f, kg_f, labels = traj_f.to(device), kg_f.to(device), labels.to(device)
-
-            logits = model(traj_f, kg_f)
-            probs = torch.softmax(logits, dim=1)
-            preds = torch.argmax(probs, dim=1)
-
-            all_preds.extend(preds.cpu().numpy())
-            all_labels.extend(labels.cpu().numpy())
-            # 记录预测对应类别的置信度
-            batch_probs = probs.cpu().numpy()
-            all_probs.extend([batch_probs[i, p] for i, p in enumerate(preds.cpu().numpy())])
-
-    return all_preds, all_labels, all_probs
-
-
-# ------------------------------------------------------------
-# 3. 可视化函数
-# ------------------------------------------------------------
-def save_visualizations(y_true, y_pred, class_names, output_dir):
-    # 混淆矩阵
-    cm = confusion_matrix(y_true, y_pred)
-    plt.figure(figsize=(12, 10))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-                xticklabels=class_names, yticklabels=class_names)
-    plt.title('Confusion Matrix - Exp3 (Enhanced KG)')
-    plt.ylabel('True Label')
-    plt.xlabel('Predicted Label')
-    plt.savefig(os.path.join(output_dir, 'confusion_matrix.png'))
-    plt.close()
-
-
-# ------------------------------------------------------------
-# 4. 主函数
-# ------------------------------------------------------------
 def main():
-    parser = argparse.ArgumentParser(description='Exp3 评估脚本')
-    parser.add_argument('--model_path', type=str, default='checkpoints/exp3_model.pth')
-    parser.add_argument('--feature_cache', type=str, default='cache/processed_features_v1.pkl')
-    parser.add_argument('--output_dir', type=str, default='evaluation_results')
-    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
-    args = parser.parse_args()
+    # 配置参数
+    MODEL_PATH = 'checkpoints/exp3_model.pth'
+    CACHE_PATH = 'cache/processed_features_v1.pkl'
+    OUTPUT_DIR = 'evaluation_results'
+    DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    os.makedirs(args.output_dir, exist_ok=True)
+    print("\n" + "=" * 60)
+    print("Exp3 模型评估 (轨迹 + 增强知识图谱)")
+    print("=" * 60)
+    print(f"设备: {DEVICE}")
 
-    # 1. 加载模型存档
-    print(f"正在加载模型: {args.model_path}")
-    checkpoint = torch.load(args.model_path, map_location=args.device, weights_only=False)
+    # 1. 加载模型
+    print(f"\n[1/5] 正在加载模型: {MODEL_PATH}")
+    
+    if not os.path.exists(MODEL_PATH):
+        print(f"❌ 错误: 找不到模型文件 {MODEL_PATH}")
+        return
+
+    checkpoint = torch.load(MODEL_PATH, map_location=DEVICE, weights_only=False)
     label_encoder = checkpoint['label_encoder']
     config = checkpoint['model_config']
+    class_names = label_encoder.classes_
+
+    print(f"   模型配置:")
+    print(f"     - 轨迹特征维度: {config['trajectory_feature_dim']}")
+    print(f"     - KG特征维度: {config['kg_feature_dim']}")
+    print(f"     - 隐藏层维度: {config['hidden_dim']}")
+    print(f"     - 层数: {config['num_layers']}")
+    print(f"     - 类别数: {config['num_classes']}")
+    print(f"     - 类别: {list(class_names)}")
 
     model = TransportationModeClassifier(
         trajectory_feature_dim=config['trajectory_feature_dim'],
@@ -118,44 +94,172 @@ def main():
         num_layers=config['num_layers'],
         num_classes=config['num_classes'],
         dropout=config['dropout']
-    ).to(args.device)
+    ).to(DEVICE)
     model.load_state_dict(checkpoint['model_state_dict'])
+    model.eval()
+    print("   ✓ 模型加载完成")
 
-    # 2. 加载评估数据 (优先从 Exp3 训练产生的缓存加载)
-    if os.path.exists(args.feature_cache):
-        print(f"✓ 发现特征缓存，正在快速加载: {args.feature_cache}")
-        with open(args.feature_cache, 'rb') as f:
-            # 训练脚本保存格式为 (all_features, label_encoder)
-            all_data, _ = pickle.load(f)
-    else:
-        print(f"❌ 未找到缓存文件 {args.feature_cache}。请先运行 train.py 生成缓存。")
+    # 2. 加载特征缓存
+    print(f"\n[2/5] 正在加载特征缓存: {CACHE_PATH}")
+    
+    if not os.path.exists(CACHE_PATH):
+        print(f"❌ 错误: 找不到特征缓存 {CACHE_PATH}")
+        print("请先运行 train.py 生成特征缓存。")
         return
 
+    with open(CACHE_PATH, 'rb') as f:
+        # 训练脚本保存格式为 (all_features, label_encoder)
+        all_data, _ = pickle.load(f)
+
+    print(f"   ✓ 加载完成: {len(all_data)} 个样本")
+
+    # 3. 准备测试数据
+    print(f"\n[3/5] 正在准备测试数据...")
     dataset = DualFeatureDataset(all_data, label_encoder)
-    dataloader = DataLoader(dataset, batch_size=64, shuffle=False)
+    labels_for_stratify = [item[2] for item in all_data]
 
-    # 3. 执行推理
-    preds, labels, confidences = run_evaluation(model, dataloader, args.device)
+    _, test_indices = train_test_split(
+        range(len(dataset)),
+        test_size=0.2,
+        random_state=42,
+        stratify=labels_for_stratify
+    )
 
-    # 4. 生成报告
-    class_names = label_encoder.classes_
-    report = classification_report(labels, preds, target_names=class_names, output_dict=True, zero_division=0)
-    print("\n评估完成！分类报告如下:")
-    print(classification_report(labels, preds, target_names=class_names, zero_division=0))
+    test_loader = DataLoader(
+        Subset(dataset, test_indices),
+        batch_size=64,
+        shuffle=False,
+        num_workers=0  # Windows 兼容
+    )
+    print(f"   ✓ 测试集大小: {len(test_indices)} 个样本")
 
-    # 5. 保存结果文件
-    with open(os.path.join(args.output_dir, 'evaluation_report.json'), 'w') as f:
-        json.dump(report, f, indent=4)
+    # 4. 执行推理
+    print(f"\n[4/5] 正在进行模型推理...")
+    y_true, y_pred, y_probs = [], [], []
 
-    save_visualizations(labels, preds, class_names, args.output_dir)
+    with torch.no_grad():
+        for traj_f, kg_f, labels in tqdm(test_loader, desc="   推理进度"):
+            traj_f, kg_f, labels = traj_f.to(DEVICE), kg_f.to(DEVICE), labels.to(DEVICE)
 
-    df_results = pd.DataFrame({
-        'true_label': [class_names[i] for i in labels],
-        'pred_label': [class_names[i] for i in preds],
-        'confidence': confidences
-    })
-    df_results.to_csv(os.path.join(args.output_dir, 'predictions_exp3.csv'), index=False)
-    print(f"✅ 结果已保存至: {args.output_dir}")
+            logits = model(traj_f, kg_f)
+            probs = torch.softmax(logits, dim=1)
+            preds = torch.argmax(logits, dim=1)
+
+            y_true.extend(labels.cpu().numpy())
+            y_pred.extend(preds.cpu().numpy())
+            y_probs.extend(probs.cpu().numpy())
+
+    # 转换为 Numpy 数组
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+    y_probs = np.array(y_probs)
+
+    # 5. 生成评估报告
+    print(f"\n[5/5] 正在生成评估报告...")
+
+    # 打印分类报告
+    print("\n" + "=" * 60)
+    print("分类报告")
+    print("=" * 60)
+    report_text = classification_report(
+        y_true, y_pred,
+        target_names=class_names,
+        zero_division=0,
+        digits=4
+    )
+    print(report_text)
+
+    # 创建输出目录
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    # 文件 1: JSON 报告
+    report_dict = classification_report(
+        y_true, y_pred,
+        target_names=class_names,
+        output_dict=True,
+        zero_division=0
+    )
+    json_path = os.path.join(OUTPUT_DIR, 'evaluation_report.json')
+    with open(json_path, 'w', encoding='utf-8') as f:
+        json.dump(report_dict, f, indent=4, ensure_ascii=False)
+    print(f"   ✓ 保存: {json_path}")
+
+    # 文件 2: CSV 预测结果
+    conf_list = [float(y_probs[i, p]) for i, p in enumerate(y_pred)]
+    csv_path = os.path.join(OUTPUT_DIR, 'predictions_exp3.csv')
+    pd.DataFrame({
+        'true_label': [class_names[i] for i in y_true],
+        'pred_label': [class_names[i] for i in y_pred],
+        'confidence': conf_list,
+        'correct': y_true == y_pred
+    }).to_csv(csv_path, index=False, encoding='utf-8-sig')
+    print(f"   ✓ 保存: {csv_path}")
+
+    # 文件 3: 混淆矩阵图
+    try:
+        plt.figure(figsize=(12, 10))
+        cm = confusion_matrix(y_true, y_pred)
+        sns.heatmap(
+            cm, annot=True, fmt='d', cmap='Blues',
+            xticklabels=class_names, yticklabels=class_names
+        )
+        plt.title('Exp3 Confusion Matrix (Trajectory + Enhanced KG)', fontsize=14)
+        plt.ylabel('True Label')
+        plt.xlabel('Predicted Label')
+        plt.tight_layout()
+        cm_path = os.path.join(OUTPUT_DIR, 'confusion_matrix.png')
+        plt.savefig(cm_path, dpi=300)
+        plt.close()
+        print(f"   ✓ 保存: {cm_path}")
+    except Exception as e:
+        print(f"   ⚠️ 混淆矩阵图生成失败: {e}")
+
+    # 文件 4: 各类别 F1-Score 图
+    try:
+        f1_scores = [report_dict[cls]['f1-score'] for cls in class_names]
+        plt.figure(figsize=(12, 6))
+        bars = sns.barplot(x=list(class_names), y=f1_scores, color='mediumslateblue')
+        plt.title('Exp3 F1-Score by Transportation Mode', fontsize=14)
+        plt.xlabel('Transportation Mode')
+        plt.ylabel('F1-Score')
+        plt.ylim(0, 1.0)
+        for i, v in enumerate(f1_scores):
+            plt.text(i, v + 0.02, f"{v:.3f}", ha='center', fontsize=10)
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        f1_path = os.path.join(OUTPUT_DIR, 'per_class_f1_scores.png')
+        plt.savefig(f1_path, dpi=300)
+        plt.close()
+        print(f"   ✓ 保存: {f1_path}")
+    except Exception as e:
+        print(f"   ⚠️ F1-Score 图生成失败: {e}")
+
+    # 文件 5: 错误分析
+    try:
+        errors_df = pd.DataFrame({
+            'true_label': [class_names[i] for i in y_true],
+            'pred_label': [class_names[i] for i in y_pred],
+            'confidence': conf_list
+        })
+        errors_df = errors_df[errors_df['true_label'] != errors_df['pred_label']]
+        errors_path = os.path.join(OUTPUT_DIR, 'error_analysis.csv')
+        errors_df.to_csv(errors_path, index=False, encoding='utf-8-sig')
+        print(f"   ✓ 保存: {errors_path} ({len(errors_df)} 个错误样本)")
+    except Exception as e:
+        print(f"   ⚠️ 错误分析保存失败: {e}")
+
+    # 汇总统计
+    print("\n" + "=" * 60)
+    print("评估汇总")
+    print("=" * 60)
+    print(f"总样本数: {len(y_true)}")
+    print(f"正确预测: {(y_true == y_pred).sum()}")
+    print(f"错误预测: {(y_true != y_pred).sum()}")
+    print(f"准确率: {report_dict['accuracy']:.4f}")
+    print(f"加权 F1: {report_dict['weighted avg']['f1-score']:.4f}")
+    print(f"宏平均 F1: {report_dict['macro avg']['f1-score']:.4f}")
+
+    print(f"\n✅ 所有评估结果已保存至: {os.path.abspath(OUTPUT_DIR)}")
 
 
 if __name__ == '__main__':
