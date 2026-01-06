@@ -1,6 +1,5 @@
 """
-数据预处理模块 (Exp3)
-继承 Exp2 的所有优化，新增公交/地铁线路提取
+数据预处理模块 (Exp4)
 """
 import os
 import pandas as pd
@@ -46,7 +45,7 @@ class GeoLifeDataLoader:
             raise ValueError(f"文件 {file_path} 列数为 {num_cols}，无法处理。")
 
         # 合并日期时间
-        # 速度快：告诉 Pandas 格式，跳过“猜测”阶段
+        # 速度快：告诉 Pandas 格式，跳过"猜测"阶段
         df['datetime'] = pd.to_datetime(
             df['date'] + ' ' + df['time'],
             format='%Y-%m-%d %H:%M:%S'
@@ -292,8 +291,6 @@ class OSMDataLoader:
 
         print(f"提取到 {len(pois)} 个POI")
         return pd.DataFrame(pois)
-
-    # data_preprocessing.py 内部修改
 
     def extract_transit_routes(self, osm_data: Dict) -> pd.DataFrame:
         """
