@@ -28,8 +28,20 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
-# 路径设置
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# ========================== 路径设置 (PyCharm 兼容) ==========================
+# 获取当前脚本所在目录
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# 将 exp4 目录添加到 Python 路径
+sys.path.insert(0, SCRIPT_DIR)
+
+# 将上级目录也添加到路径（用于 common 模块）
+PARENT_DIR = os.path.dirname(SCRIPT_DIR)
+sys.path.insert(0, PARENT_DIR)
+
+# 切换工作目录到脚本所在目录（确保相对路径正确）
+os.chdir(SCRIPT_DIR)
+# ==============================================================================
 
 # 尝试导入 common 模块（可选）
 try:
@@ -650,36 +662,75 @@ def evaluate(model, dataloader, criterion, device, label_encoder):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='训练交通方式识别模型 (Exp4 - 稳定版)')
-    parser.add_argument('--geolife_root', type=str, default='../data/Geolife Trajectories 1.3')
-    parser.add_argument('--osm_path', type=str, default='../data/exp3.geojson')
-    parser.add_argument('--weather_path', type=str, default='../data/beijing_weather_hourly_2007_2012.csv')
+    # ========================================================================
+    # PyCharm 直接运行配置区域
+    # 如果在 PyCharm 中点击运行按钮，请修改下面的路径为你的实际路径
+    # ========================================================================
+    PYCHARM_MODE = True  # 设为 True 使用下面的硬编码路径，设为 False 使用命令行参数
 
-    # 数据加载选项
-    parser.add_argument('--use_base_data', action='store_true',
-                        help='使用预处理的基础数据（推荐）')
-    parser.add_argument('--max_users', type=int, default=None)
+    if PYCHARM_MODE:
+        class Args:
+            # ============ 请根据你的实际路径修改以下三行 ============
+            geolife_root = '../data/Geolife Trajectories 1.3'  # GeoLife 数据集路径
+            osm_path = '../data/exp3.geojson'                   # OSM GeoJSON 路径
+            weather_path = '../data/beijing_weather_hourly_2007_2012.csv'  # 天气数据路径
+            # ========================================================
 
-    # 训练参数（调整默认值以提高稳定性）
-    parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--epochs', type=int, default=50)
-    parser.add_argument('--lr', type=float, default=5e-5,  # 降低学习率
-                        help='学习率（建议 1e-4 或 5e-5）')
-    parser.add_argument('--hidden_dim', type=int, default=128)
-    parser.add_argument('--num_layers', type=int, default=2)
-    parser.add_argument('--dropout', type=float, default=0.3)
-    parser.add_argument('--max_grad_norm', type=float, default=1.0,
-                        help='梯度裁剪阈值')
+            # 数据加载选项
+            use_base_data = True   # 使用预处理的基础数据（更快）
+            max_users = None       # 最大用户数（None = 全部）
 
-    # 系统参数
-    parser.add_argument('--save_dir', type=str, default='checkpoints')
-    parser.add_argument('--num_workers', type=int, default=4)
-    parser.add_argument('--device', type=str,
-                        default='cuda' if torch.cuda.is_available() else 'cpu')
-    parser.add_argument('--clear_cache', action='store_true')
-    parser.add_argument('--seed', type=int, default=42)
+            # 训练参数
+            batch_size = 32
+            epochs = 50
+            lr = 5e-5              # 学习率
+            hidden_dim = 128
+            num_layers = 2
+            dropout = 0.3
+            max_grad_norm = 1.0    # 梯度裁剪
 
-    args = parser.parse_args()
+            # 系统参数
+            save_dir = 'checkpoints'
+            num_workers = 0        # Windows 建议设为 0，Linux/Mac 可以设为 4
+            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            clear_cache = False    # 是否清除缓存
+            seed = 42
+
+        args = Args()
+        print("📌 使用 PyCharm 模式（硬编码配置）")
+    else:
+        parser = argparse.ArgumentParser(description='训练交通方式识别模型 (Exp4 - 稳定版)')
+        parser.add_argument('--geolife_root', type=str, default='../data/Geolife Trajectories 1.3')
+        parser.add_argument('--osm_path', type=str, default='../data/exp3.geojson')
+        parser.add_argument('--weather_path', type=str, default='../data/beijing_weather_hourly_2007_2012.csv')
+
+        # 数据加载选项
+        parser.add_argument('--use_base_data', action='store_true',
+                            help='使用预处理的基础数据（推荐）')
+        parser.add_argument('--max_users', type=int, default=None)
+
+        # 训练参数（调整默认值以提高稳定性）
+        parser.add_argument('--batch_size', type=int, default=32)
+        parser.add_argument('--epochs', type=int, default=50)
+        parser.add_argument('--lr', type=float, default=5e-5,
+                            help='学习率（建议 1e-4 或 5e-5）')
+        parser.add_argument('--hidden_dim', type=int, default=128)
+        parser.add_argument('--num_layers', type=int, default=2)
+        parser.add_argument('--dropout', type=float, default=0.3)
+        parser.add_argument('--max_grad_norm', type=float, default=1.0,
+                            help='梯度裁剪阈值')
+
+        # 系统参数
+        parser.add_argument('--save_dir', type=str, default='checkpoints')
+        parser.add_argument('--num_workers', type=int, default=4)
+        parser.add_argument('--device', type=str,
+                            default='cuda' if torch.cuda.is_available() else 'cpu')
+        parser.add_argument('--clear_cache', action='store_true')
+        parser.add_argument('--seed', type=int, default=42)
+
+        args = parser.parse_args()
+
+    # ========================================================================
 
     # 设置随机种子
     torch.manual_seed(args.seed)
