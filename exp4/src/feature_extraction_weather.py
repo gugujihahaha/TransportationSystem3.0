@@ -48,12 +48,13 @@ class FeatureExtractorWithWeather:
             print(f"警告: KG 特征提取失败 ({e}). 使用零填充代替。")
             kg_features = np.zeros((trajectory.shape[0], 15), dtype=np.float32)
 
-        # 3. 验证KG特征维度
+        # 3. 验证KG特征维度 - KG is treated as a soft modality
         if kg_features.ndim != 2 or kg_features.shape[1] != 15:
             if kg_features.size == trajectory.shape[0] * 15:
                 kg_features = kg_features.reshape(trajectory.shape[0], 15)
             else:
-                raise ValueError(f"KG 特征维度错误：预期末尾维度 15，实际 shape 为 {kg_features.shape}")
+                print(f"警告: KG特征维度异常 {kg_features.shape}，使用零填充")
+                kg_features = np.zeros((trajectory.shape[0], 15), dtype=np.float32)
 
         # 4. 提取天气特征（新增）
         try:
@@ -64,9 +65,10 @@ class FeatureExtractorWithWeather:
             print(f"警告: 天气特征提取失败 ({e}). 使用零填充代替。")
             weather_features = np.zeros((trajectory.shape[0], 12), dtype=np.float32)
 
-        # 5. 验证天气特征维度
+        # 5. 验证天气特征维度 - Weather is treated as a soft modality
         if weather_features.shape != (trajectory.shape[0], 12):
-            raise ValueError(f"天气特征维度错误：预期 ({trajectory.shape[0]}, 12)，实际 {weather_features.shape}")
+            print(f"警告: 天气特征维度异常 {weather_features.shape}，使用零填充")
+            weather_features = np.zeros((trajectory.shape[0], 12), dtype=np.float32)
 
         return trajectory_features, kg_features, weather_features
 

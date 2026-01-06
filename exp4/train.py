@@ -290,7 +290,13 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str, max_users: in
             label_encoded = label_encoder.transform([label_str])[0]
             all_features_and_labels.append((trajectory_features, kg_features, weather_features, label_encoded))
         except Exception as e:
-            continue
+            # Trajectory is the primary modality; retain sample with degraded features
+            print(f"警告: 特征提取异常 ({e})，使用退化特征保留样本")
+            trajectory_features = feature_extractor._normalize_features(trajectory)
+            kg_features = np.zeros((trajectory.shape[0], KG_FEATURE_DIM), dtype=np.float32)
+            weather_features = np.zeros((trajectory.shape[0], WEATHER_FEATURE_DIM), dtype=np.float32)
+            label_encoded = label_encoder.transform([label_str])[0]
+            all_features_and_labels.append((trajectory_features, kg_features, weather_features, label_encoded))
 
     with open(PROCESSED_FEATURE_CACHE_PATH, 'wb') as f:
         pickle.dump((all_features_and_labels, label_encoder), f, protocol=pickle.HIGHEST_PROTOCOL)
