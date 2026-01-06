@@ -322,6 +322,11 @@ class EnhancedTransportationKG:
                 self._grid_cache[grid_key] = uncached_features[i]
                 kg_features[idx] = uncached_features[i]
 
+        # Final validation - ensure shape consistency
+        if kg_features.shape != (N, 15):
+            print(f"警告: KG特征维度异常 {kg_features.shape}，使用零填充")
+            kg_features = np.zeros((N, 15), dtype=np.float32)
+
         return kg_features.astype(np.float32)
 
     def _get_grid_key(self, lat: float, lon: float) -> Tuple[int, int]:

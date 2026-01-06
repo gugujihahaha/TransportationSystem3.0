@@ -193,7 +193,11 @@ class WeatherDataProcessor:
         weather_features = np.zeros((N, 12), dtype=np.float32)
 
         for i, date in enumerate(trajectory_dates):
-            weather_features[i] = self.get_weather_features_for_date(date)
+            try:
+                weather_features[i] = self.get_weather_features_for_date(date)
+            except Exception as e:
+                # Soft modality: missing weather data defaults to zero vector
+                weather_features[i] = np.zeros(12, dtype=np.float32)
 
         return weather_features
 
