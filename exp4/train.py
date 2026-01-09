@@ -197,7 +197,7 @@ def normalize_features_safe(features: np.ndarray) -> np.ndarray:
 
 
 def load_data(geolife_root: str, osm_path: str, weather_path: str,
-              max_users: int = None, use_base_data: bool = False):
+              max_users: int = None, use_base_data: bool = True):
     """
     加载所有数据 - 稳定版
 
@@ -705,7 +705,7 @@ def main():
         parser.add_argument('--weather_path', type=str, default='../data/beijing_weather_hourly_2007_2012.csv')
 
         # 数据加载选项
-        parser.add_argument('--use_base_data', action='store_true',
+        parser.add_argument('--use_base_data', action='store_true', default=True,
                             help='使用预处理的基础数据（推荐）')
         parser.add_argument('--max_users', type=int, default=None)
 

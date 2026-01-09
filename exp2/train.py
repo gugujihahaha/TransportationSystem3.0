@@ -52,7 +52,7 @@ class TrajectoryDataset(Dataset):
         return torch.FloatTensor(trajectory_features), torch.FloatTensor(kg_features), torch.LongTensor([label_encoded])[0]
 
 # ===== ✅ 修改 2：load_data 函数完整更新 =====
-def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_data: bool = False):
+def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_data: bool = True):
     """加载所有数据，实现快速模式与传统模式切换"""
 
     BASE_DATA_PATH = os.path.join(os.path.dirname(geolife_root), 'processed/base_segments.pkl')
@@ -192,7 +192,7 @@ def main():
     parser.add_argument('--osm_path', type=str, default='../data/exp2.geojson')
 
     # 新增参数
-    parser.add_argument('--use_base_data', action='store_true', help='使用预处理的基础数据')
+    parser.add_argument('--use_base_data', action='store_true', default=True, help='使用预处理的基础数据')
 
     parser.add_argument('--max_users', type=int, default=None)
     parser.add_argument('--batch_size', type=int, default=32)

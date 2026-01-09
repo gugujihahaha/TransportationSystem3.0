@@ -134,7 +134,7 @@ class TrajectoryDataset(Dataset):
 # ============================================================
 # Data loading (✅ 修改 2: 更新 load_data 函数集成快速模式)
 # ============================================================
-def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_data: bool = False):
+def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_data: bool = True):
     """加载所有数据 (支持快速模式与三级缓存)"""
 
     BASE_DATA_PATH = os.path.join(
@@ -294,7 +294,7 @@ def main():
     parser.add_argument('--osm_path', type=str, default='../data/exp3.geojson')
 
     # ===== ✅ 新增参数 =====
-    parser.add_argument('--use_base_data', action='store_true', help='使用预处理的基础数据（推荐）')
+    parser.add_argument('--use_base_data', action='store_true', default=True, help='使用预处理的基础数据（推荐）')
     # ===== 新增结束 =====
 
     parser.add_argument('--max_users', type=int, default=None)
