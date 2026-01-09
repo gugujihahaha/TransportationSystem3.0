@@ -54,7 +54,7 @@ class TrajectoryDataset(Dataset):
 # ============================================================
 # Data loading (✅ 修改 2: 完整替换 load_data 函数)
 # ============================================================
-def load_data(geolife_root: str, max_users: int = None, use_base_data: bool = False):
+def load_data(geolife_root: str, max_users: int = None, use_base_data: bool = True):
     """
     加载数据（支持使用基础数据）
 
@@ -187,7 +187,7 @@ def main():
     parser.add_argument("--geolife_root", default="../data/Geolife Trajectories 1.3")
 
     # ===== ✅ 修改 3: main 函数添加参数 =====
-    parser.add_argument("--use_base_data", action="store_true",
+    parser.add_argument("--use_base_data", action="store_true", default=True,
                        help="使用预处理的基础数据（推荐，大幅加速）")
     # ===== 修改结束 =====
 
