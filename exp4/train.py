@@ -822,11 +822,12 @@ def main():
     # 损失函数
     criterion = nn.CrossEntropyLoss()
 
-    # 训练循环
-    best_test_loss = float('inf')
-    best_accuracy = 0.0
-    patience_counter = 0
-    early_stop_patience = 15
+    # ========================================================
+    # ✅ Early Stopping 配置
+    # ========================================================
+    patience = 10
+    best_val_loss = float("inf")
+    epochs_no_improve = 0
 
     print("\n" + "=" * 80)
     print("开始训练")
@@ -841,41 +842,32 @@ def main():
             max_grad_norm=args.max_grad_norm
         )
 
-        # 评估
-        test_loss, report, test_preds, test_labels = evaluate(
-            model, test_loader, criterion, args.device, label_encoder
+        # 在验证集上评估
+        val_loss, report, _, _ = evaluate(
+            model, val_loader, criterion, args.device, label_encoder
         )
-
-        test_acc = report.get('accuracy', 0.0)
+        val_acc = report.get('accuracy', 0.0)
 
         # 打印结果
         print(f"   Train Loss: {train_loss:.4f}, Acc: {train_acc:.4f}")
-        print(f"   Test  Loss: {test_loss:.4f}, Acc: {test_acc:.4f}")
+        print(f"   Val   Loss: {val_loss:.4f}, Acc: {val_acc:.4f}")
         print(f"   LR: {optimizer.param_groups[0]['lr']:.2e}")
 
-        # 检查 NaN
-        if np.isnan(train_loss) or np.isnan(test_loss):
-            print("   ⚠️ 检测到 NaN，降低学习率重试")
-            for param_group in optimizer.param_groups:
-                param_group['lr'] *= 0.1
-            continue
-
         # 学习率调度
-        scheduler.step(test_loss)
+        scheduler.step(val_loss)
 
-        # 保存最佳模型
-        if test_loss < best_test_loss:
-            best_test_loss = test_loss
-            best_accuracy = test_acc
-            patience_counter = 0
+        # Early Stopping 检查
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            epochs_no_improve = 0
 
             checkpoint = {
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'label_encoder': label_encoder,
-                'test_loss': test_loss,
-                'test_accuracy': test_acc,
+                'val_loss': val_loss,
+                'val_accuracy': val_acc,
                 'model_config': {
                     'trajectory_feature_dim': TRAJECTORY_FEATURE_DIM,
                     'kg_feature_dim': KG_FEATURE_DIM,
@@ -886,32 +878,41 @@ def main():
                     'dropout': args.dropout
                 }
             }
-
-            save_path = os.path.join(args.save_dir, 'exp4_model.pth')
-            torch.save(checkpoint, save_path)
-            print(f"   ✓ 保存最佳模型 (Loss: {test_loss:.4f}, Acc: {test_acc:.4f})")
+            torch.save(checkpoint, os.path.join(args.save_dir, 'exp4_model.pth'))
+            print("   ✓ 保存最佳模型（基于验证集）")
         else:
-            patience_counter += 1
-            if patience_counter >= early_stop_patience:
-                print(f"\n早停：{early_stop_patience} epochs 无改善")
+            epochs_no_improve += 1
+            print(f"   ⏳ 验证损失未改善: {epochs_no_improve}/{patience}")
+
+            if epochs_no_improve >= patience:
+                print(f"\n   🛑 Early stopping 触发（patience={patience}）")
                 break
 
-        # 打印详细报告（每 10 epoch）
-        if (epoch + 1) % 10 == 0:
-            print("\n   分类详情:")
-            for cls in label_encoder.classes_:
-                if cls in report:
-                    cls_report = report[cls]
-                    print(f"     {cls}: P={cls_report['precision']:.3f}, "
-                          f"R={cls_report['recall']:.3f}, "
-                          f"F1={cls_report['f1-score']:.3f}")
+    # ========================================================
+    # ✅ 在测试集上进行最终评估
+    # ========================================================
+    print("\n" + "=" * 80)
+    print("最终测试集评估")
+    print("=" * 80)
+
+    test_loss, test_report, _, _ = evaluate(
+        model, test_loader, criterion, args.device, label_encoder
+    )
+    test_acc = test_report.get('accuracy', 0.0)
+
+    print(f"\nTest Loss: {test_loss:.4f} | Test Acc: {test_acc:.4f}")
+    print("\n各类别详细指标:")
+    for cls in label_encoder.classes_:
+        if cls in test_report:
+            metrics = test_report[cls]
+            print(f"  {cls:15s}: P={metrics['precision']:.4f}, R={metrics['recall']:.4f}, F1={metrics['f1-score']:.4f}")
 
     # 训练完成
     print("\n" + "=" * 80)
     print("训练完成!")
     print("=" * 80)
-    print(f"最佳测试 Loss: {best_test_loss:.4f}")
-    print(f"最佳测试 Accuracy: {best_accuracy:.4f}")
+    print(f"最佳验证 Loss: {best_val_loss:.4f}")
+    print(f"最终测试 Accuracy: {test_acc:.4f}")
     print(f"模型已保存到: {os.path.join(args.save_dir, 'exp4_model.pth')}")
 
     # 打印 KG 和天气统计
