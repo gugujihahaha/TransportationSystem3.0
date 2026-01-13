@@ -9,15 +9,15 @@ from typing import Tuple
 
 
 class TransportationModeClassifierWithWeather(nn.Module):
-    """交通方式分类器 (Exp4 - 含天气特征)"""
+    """交通方式分类器 (Exp4 - 含天气特征) - 任务定义统一 num_classes = 7"""
 
     def __init__(self,
                  trajectory_feature_dim: int = 9,
                  kg_feature_dim: int = 15,
-                 weather_feature_dim: int = 12,  # 新增
+                 weather_feature_dim: int = 12,
                  hidden_dim: int = 128,
                  num_layers: int = 2,
-                 num_classes: int = 6,
+                 num_classes: int = 7,
                  dropout: float = 0.3):
         super(TransportationModeClassifierWithWeather, self).__init__()
 

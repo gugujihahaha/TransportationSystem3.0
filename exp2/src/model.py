@@ -9,14 +9,14 @@ from typing import Tuple
 
 
 class TransportationModeClassifier(nn.Module):
-    """交通方式分类器 - 基于 GeoLife 7 大类修正 num_classes = 7""" # MODIFIED
+    """交通方式分类器 - 任务定义统一 num_classes = 7"""
 
     def __init__(self,
                  trajectory_feature_dim: int = 9,
                  kg_feature_dim: int = 11,
                  hidden_dim: int = 128,
                  num_layers: int = 2,
-                 num_classes: int = 7, # MODIFIED: 6 -> 7
+                 num_classes: int = 7,
                  dropout: float = 0.3):
         """
         Args:
@@ -24,7 +24,7 @@ class TransportationModeClassifier(nn.Module):
             kg_feature_dim: 知识图谱特征维度
             hidden_dim: LSTM隐藏层维度
             num_layers: LSTM层数
-            num_classes: 分类类别数（修正为 7 类：Walk, Bike, Bus, Car&taxi, Train, Airplane, Other） # MODIFIED
+            num_classes: 分类类别数（任务定义统一：Walk, Bike, Bus, Car&taxi, Train, Subway, Airplane）
             dropout: Dropout比率
         """
         super(TransportationModeClassifier, self).__init__()

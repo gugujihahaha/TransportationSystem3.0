@@ -165,16 +165,18 @@ class GeoLifeDataLoader:
 
     def _normalize_mode(self, mode: str) -> str:
         """
-        根据 7 大类标准合并交通方式标签。
-        7 大类: Walk, Bike, Bus, Car & taxi, Train, Airplane, Other
+        根据 7 大类标准合并交通方式标签（任务定义统一）。
+        7 大类: Walk, Bike, Bus, Car & taxi, Train, Subway, Airplane
         """
         mode_lower = mode.lower().strip()
 
         # 类别合并
         if mode_lower in ['car', 'taxi', 'drive']:
             return 'Car & taxi'
-        elif mode_lower in ['subway', 'train', 'railway', 'high-speed-rail']:
+        elif mode_lower in ['train', 'railway', 'high-speed-rail']:
             return 'Train'
+        elif mode_lower == 'subway':
+            return 'Subway'
         elif mode_lower == 'walk':
             return 'Walk'
         elif mode_lower == 'bike':
@@ -184,8 +186,8 @@ class GeoLifeDataLoader:
         elif mode_lower == 'airplane':
             return 'Airplane'
         else:
-            # 将 GeoLife 数据集中其他不常见或不一致的标签归入 'Other'
-            return 'Other'
+            # 不在7类中的标签，返回None，后续过滤
+            return None
 
 
     def load_labels(self, user_id: str) -> pd.DataFrame:
@@ -200,7 +202,7 @@ class GeoLifeDataLoader:
         return df
 
     def segment_trajectory(self, trajectory: pd.DataFrame, labels: pd.DataFrame) -> List[Tuple[pd.DataFrame, str]]:
-        """根据标签分割轨迹，并进行标签归一化/合并为 7 大类"""
+        """根据标签分割轨迹，并进行标签归一化/合并为 7 大类（任务定义统一）"""
         segments = []
 
         for _, label_row in labels.iterrows():
@@ -209,7 +211,11 @@ class GeoLifeDataLoader:
             mode = label_row['Transportation Mode']
 
             # 标签归一化/合并步骤
-            normalized_mode = self._normalize_mode(mode) # <-- 调用归一化函数
+            normalized_mode = self._normalize_mode(mode)
+
+            # 过滤不在7类中的标签
+            if normalized_mode is None:
+                continue
 
             mask = (trajectory['datetime'] >= start_time) & (trajectory['datetime'] <= end_time)
             segment = trajectory[mask].copy()

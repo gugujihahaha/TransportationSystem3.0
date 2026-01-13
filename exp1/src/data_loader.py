@@ -233,12 +233,12 @@ def preprocess_segments(segments: List[Tuple[pd.DataFrame, str]],
     # =================================================================
     # 🔥 核心修改：标签重映射逻辑定义 (统一 'taxi' 和 'car' 的标签)
     # =================================================================
-    # 定义映射规则：将 'taxi' 归类到 'car'
+    # 定义映射规则：将 'taxi' 归类到 'car'，统一首字母大写
     MAPPING = {
-        'taxi': 'car',
+        'taxi': 'Car',
     }
     # 定义合并后的最终标签名称
-    NEW_CLASS_NAME = 'car & taxi'
+    NEW_CLASS_NAME = 'Car & taxi'
     # =================================================================
 
 
@@ -278,13 +278,14 @@ def preprocess_segments(segments: List[Tuple[pd.DataFrame, str]],
             features = np.vstack([features, padding])
 
 
-        # 3. 🔥 核心修改：应用标签重映射和重命名
+        # 3. 🔥 核心修改：应用标签重映射和重命名，统一首字母大写
         mapped_label = MAPPING.get(label, label)
 
-        if mapped_label == 'car':
+        if mapped_label == 'Car':
             final_label = NEW_CLASS_NAME
         else:
-            final_label = mapped_label
+            # 统一首字母大写
+            final_label = mapped_label.capitalize() if mapped_label else mapped_label
 
         processed_segments.append((features, final_label)) # 使用最终的标签
 

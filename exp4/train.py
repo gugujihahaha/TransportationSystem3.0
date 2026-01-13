@@ -46,6 +46,7 @@ os.chdir(SCRIPT_DIR)
 # 尝试导入 common 模块（可选）
 try:
     from common import BaseGeoLifePreprocessor, Exp4DataAdapter
+    from common.data_split import load_split
     HAS_COMMON = True
 except ImportError:
     HAS_COMMON = False
@@ -769,33 +770,35 @@ def main():
     print(f"类别列表: {label_encoder.classes_}")
 
     dataset = TrajectoryDatasetWithWeather(all_features_and_labels)
-    labels_stratify = [l for _, _, _, l in all_features_and_labels]
 
-    train_idx, test_idx = train_test_split(
-        range(len(dataset)),
-        test_size=0.2,
-        random_state=args.seed,
-        stratify=labels_stratify
-    )
+    # ========================================================
+    # ✅ 加载统一数据划分（Train/Val/Test = 0.7/0.15/0.15）
+    # ========================================================
+    splits = load_split("common/splits.json")
 
-    print(f"\n训练集: {len(train_idx)} 样本")
-    print(f"测试集: {len(test_idx)} 样本")
-
-    # 数据加载器
     train_loader = DataLoader(
-        torch.utils.data.Subset(dataset, train_idx),
+        torch.utils.data.Subset(dataset, splits["train"]),
         batch_size=args.batch_size,
         shuffle=True,
-        num_workers=args.num_workers,
-        pin_memory=True if args.device == 'cuda' else False
+        num_workers=args.num_workers
     )
-    test_loader = DataLoader(
-        torch.utils.data.Subset(dataset, test_idx),
+    val_loader = DataLoader(
+        torch.utils.data.Subset(dataset, splits["val"]),
         batch_size=args.batch_size,
         shuffle=False,
-        num_workers=args.num_workers,
-        pin_memory=True if args.device == 'cuda' else False
+        num_workers=args.num_workers
     )
+    test_loader = DataLoader(
+        torch.utils.data.Subset(dataset, splits["test"]),
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.num_workers
+    )
+
+    print(f"\n✅ 数据加载完成:")
+    print(f"  Train: {len(splits['train'])} 样本")
+    print(f"  Val:   {len(splits['val'])} 样本")
+    print(f"  Test:  {len(splits['test'])} 样本")
 
     # 构建模型
     model = TransportationModeClassifierWithWeather(
