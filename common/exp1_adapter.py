@@ -13,14 +13,21 @@ class Exp1DataAdapter:
     def __init__(self, target_length: int = 100):
         self.target_length = target_length
 
-        # Exp1特定的标签映射（car & taxi合并）
+        # 统一7类标签（任务定义统一）
+        self.valid_labels = {
+            'Walk', 'Bike', 'Bus', 'Car & taxi',
+            'Train', 'Subway', 'Airplane'
+        }
+
+        # 标签映射（car & taxi合并）
         self.label_mapping = {
-            'Car & taxi': 'car & taxi',
-            'Walk': 'walk',
-            'Bike': 'bike',
-            'Bus': 'bus',
-            'Train': 'train',
-            'Subway': 'subway'
+            'Car & taxi': 'Car & taxi',
+            'Walk': 'Walk',
+            'Bike': 'Bike',
+            'Bus': 'Bus',
+            'Train': 'Train',
+            'Subway': 'Subway',
+            'Airplane': 'Airplane'
         }
 
     def process_segments(self, base_segments: List[dict]) -> List[Tuple[np.ndarray, str]]:
@@ -39,7 +46,11 @@ class Exp1DataAdapter:
         processed = []
 
         for seg in tqdm(base_segments, desc="[Exp1适配]"):
-            # 1. 提取9维特征
+            # 1. 标签过滤（只保留7类）
+            if seg['label'] not in self.valid_labels:
+                continue
+
+            # 2. 提取9维特征
             points = seg['raw_points']
             feature_cols = [
                 'latitude', 'longitude', 'speed', 'acceleration',
@@ -48,11 +59,11 @@ class Exp1DataAdapter:
             ]
             features = points[feature_cols].values
 
-            # 2. 长度规范化到100
+            # 3. 长度规范化到100
             features = self._normalize_length(features, self.target_length)
 
-            # 3. 标签映射
-            label = self.label_mapping.get(seg['label'], seg['label'].lower())
+            # 4. 标签映射
+            label = self.label_mapping.get(seg['label'], seg['label'])
 
             processed.append((features, label))
 

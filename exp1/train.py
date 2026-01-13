@@ -25,6 +25,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from common import BaseGeoLifePreprocessor, Exp1DataAdapter
+from common.data_split import load_split
 # ===== 新增结束 =====
 
 from src.data_loader import GeoLifeDataLoader, preprocess_segments
@@ -206,8 +207,8 @@ def main():
         use_base_data=args.use_base_data
     )
 
-    # 最终 6 类（car & taxi 已合并）
-    TARGET_MODES_FINAL = ['walk', 'bike', 'car & taxi', 'bus', 'train', 'subway']
+    # 最终 7 类（任务定义统一）
+    TARGET_MODES_FINAL = ['Walk', 'Bike', 'Car & taxi', 'Bus', 'Train', 'Subway', 'Airplane']
     segments = [s for s in segments if s[1] in TARGET_MODES_FINAL]
 
     labels = [s[1] for s in segments]
@@ -230,23 +231,32 @@ def main():
     print("✓ 已保存特征缓存: cache/exp1_processed_features.pkl")
 
     dataset = TrajectoryDataset(segments, label_encoder)
-    train_idx, test_idx = train_test_split(
-        range(len(dataset)),
-        test_size=0.2,
-        random_state=42,
-        stratify=labels
-    )
+
+    # ========================================================
+    # ✅ 加载统一数据划分（Train/Val/Test = 0.7/0.15/0.15）
+    # ========================================================
+    splits = load_split("common/splits.json")
 
     train_loader = DataLoader(
-        torch.utils.data.Subset(dataset, train_idx),
+        torch.utils.data.Subset(dataset, splits["train"]),
         batch_size=args.batch_size,
         shuffle=True
     )
-    test_loader = DataLoader(
-        torch.utils.data.Subset(dataset, test_idx),
+    val_loader = DataLoader(
+        torch.utils.data.Subset(dataset, splits["val"]),
         batch_size=args.batch_size,
         shuffle=False
     )
+    test_loader = DataLoader(
+        torch.utils.data.Subset(dataset, splits["test"]),
+        batch_size=args.batch_size,
+        shuffle=False
+    )
+
+    print(f"\n✅ 数据加载完成:")
+    print(f"  Train: {len(splits['train'])} 样本")
+    print(f"  Val:   {len(splits['val'])} 样本")
+    print(f"  Test:  {len(splits['test'])} 样本")
 
     model = TransportationModeClassifier(
         input_dim=TRAJECTORY_FEATURE_DIM,
@@ -259,22 +269,37 @@ def main():
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
+    # ========================================================
+    # ✅ Early Stopping 配置
+    # ========================================================
+    patience = 10
+    best_val_loss = float("inf")
+    epochs_no_improve = 0
+
     best_loss = float("inf")
-    os.makedirs("checkpoints", exist_ok=True) # 确保 checkpoint 目录存在
+    os.makedirs("checkpoints", exist_ok=True)
 
     for epoch in range(args.epochs):
         print(f"\nEpoch {epoch+1}/{args.epochs}")
+
         train_loss, train_acc = train_epoch(
             model, train_loader, criterion, optimizer, args.device
         )
-        test_loss, report = evaluate(
-            model, test_loader, criterion, args.device, label_encoder
+
+        # 在验证集上评估
+        val_loss, val_report = evaluate(
+            model, val_loader, criterion, args.device, label_encoder
         )
+        val_acc = val_report['accuracy']
 
-        print(f"Train Acc: {train_acc:.4f} | Test Acc: {report['accuracy']:.4f}")
+        print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f}")
+        print(f"Val   Loss: {val_loss:.4f} | Val   Acc: {val_acc:.4f}")
 
-        if test_loss < best_loss:
-            best_loss = test_loss
+        # Early Stopping 检查
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            epochs_no_improve = 0
+
             torch.save({
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
@@ -287,7 +312,33 @@ def main():
                     "dropout": args.dropout
                 }
             }, "checkpoints/exp1_model.pth")
-            print("✓ 保存最佳模型")
+            print("✓ 保存最佳模型（基于验证集）")
+        else:
+            epochs_no_improve += 1
+            print(f"⏳ 验证损失未改善: {epochs_no_improve}/{patience}")
+
+            if epochs_no_improve >= patience:
+                print(f"\n🛑 Early stopping 触发（patience={patience}）")
+                break
+
+    # ========================================================
+    # ✅ 在测试集上进行最终评估
+    # ========================================================
+    print("\n" + "=" * 80)
+    print("最终测试集评估")
+    print("=" * 80)
+
+    test_loss, test_report = evaluate(
+        model, test_loader, criterion, args.device, label_encoder
+    )
+    test_acc = test_report['accuracy']
+
+    print(f"\nTest Loss: {test_loss:.4f} | Test Acc: {test_acc:.4f}")
+    print("\n各类别详细指标:")
+    for cls in label_encoder.classes_:
+        if cls in test_report:
+            metrics = test_report[cls]
+            print(f"  {cls:15s}: P={metrics['precision']:.4f}, R={metrics['recall']:.4f}, F1={metrics['f1-score']:.4f}")
 
 
 if __name__ == "__main__":

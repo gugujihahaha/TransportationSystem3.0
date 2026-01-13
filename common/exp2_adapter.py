@@ -13,10 +13,10 @@ class Exp2DataAdapter:
     def __init__(self, target_length: int = 50):
         self.target_length = target_length
 
-        # Exp2使用7大类标签
+        # 统一7类标签（任务定义统一）
         self.valid_labels = {
             'Walk', 'Bike', 'Bus', 'Car & taxi',
-            'Train', 'Airplane', 'Other'
+            'Train', 'Subway', 'Airplane'
         }
 
     def process_segments(self, base_segments: List[dict]) -> List[Tuple[np.ndarray, str]]:

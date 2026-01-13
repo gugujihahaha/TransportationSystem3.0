@@ -12,14 +12,14 @@ from typing import Tuple
 
 
 class TransportationModeClassifier(nn.Module):
-    """交通方式分类器 (Exp3)"""
+    """交通方式分类器 (Exp3) - 任务定义统一 num_classes = 7"""
 
     def __init__(self,
                  trajectory_feature_dim: int = 9,
-                 kg_feature_dim: int = 15,  # 更新: 11 → 15
+                 kg_feature_dim: int = 15,
                  hidden_dim: int = 128,
                  num_layers: int = 2,
-                 num_classes: int = 6,
+                 num_classes: int = 7,
                  dropout: float = 0.3):
         super(TransportationModeClassifier, self).__init__()
 

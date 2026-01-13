@@ -34,7 +34,7 @@ class TransportationPredictorExp4:
             weather_feature_dim=config.get('weather_feature_dim', 12),
             hidden_dim=config.get('hidden_dim', 128),
             num_layers=config.get('num_layers', 2),
-            num_classes=config.get('num_classes', 6),
+            num_classes=config.get('num_classes', 7),
             dropout=config.get('dropout', 0.3)
         ).to(self.device)
 
