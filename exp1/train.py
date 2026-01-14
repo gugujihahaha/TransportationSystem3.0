@@ -25,7 +25,6 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from common import BaseGeoLifePreprocessor, Exp1DataAdapter
-from common.data_split import load_split
 # ===== 新增结束 =====
 
 from src.data_loader import GeoLifeDataLoader, preprocess_segments
@@ -233,30 +232,48 @@ def main():
     dataset = TrajectoryDataset(segments, label_encoder)
 
     # ========================================================
-    # ✅ 加载统一数据划分（Train/Val/Test = 0.7/0.15/0.15）
+    # ✅ 数据划分：一次性划分 70% 训练 / 10% 验证 / 20% 测试
     # ========================================================
-    splits = load_split("common/splits.json")
+    all_indices = np.arange(len(dataset))
+    labels_stratify = [s[1] for s in segments]
+
+    # 第一次划分：70% 训练 / 30% 临时
+    train_indices, temp_indices = train_test_split(
+        all_indices,
+        test_size=0.3,
+        random_state=42,
+        stratify=labels_stratify
+    )
+
+    # 第二次划分：从30%临时中划分出 10% 验证 / 20% 测试
+    temp_labels = [labels_stratify[i] for i in temp_indices]
+    val_indices, test_indices = train_test_split(
+        temp_indices,
+        test_size=2/3,
+        random_state=42,
+        stratify=temp_labels
+    )
 
     train_loader = DataLoader(
-        torch.utils.data.Subset(dataset, splits["train"]),
+        torch.utils.data.Subset(dataset, train_indices),
         batch_size=args.batch_size,
         shuffle=True
     )
     val_loader = DataLoader(
-        torch.utils.data.Subset(dataset, splits["val"]),
+        torch.utils.data.Subset(dataset, val_indices),
         batch_size=args.batch_size,
         shuffle=False
     )
     test_loader = DataLoader(
-        torch.utils.data.Subset(dataset, splits["test"]),
+        torch.utils.data.Subset(dataset, test_indices),
         batch_size=args.batch_size,
         shuffle=False
     )
 
     print(f"\n✅ 数据加载完成:")
-    print(f"  Train: {len(splits['train'])} 样本")
-    print(f"  Val:   {len(splits['val'])} 样本")
-    print(f"  Test:  {len(splits['test'])} 样本")
+    print(f"  Train: {len(train_indices)} 样本")
+    print(f"  Val:   {len(val_indices)} 样本")
+    print(f"  Test:  {len(test_indices)} 样本")
 
     model = TransportationModeClassifier(
         input_dim=TRAJECTORY_FEATURE_DIM,
