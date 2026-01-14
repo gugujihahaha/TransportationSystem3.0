@@ -8,7 +8,6 @@ from .exp1_adapter import Exp1DataAdapter
 from .exp2_adapter import Exp2DataAdapter
 from .exp3_adapter import Exp3DataAdapter
 from .exp4_adapter import Exp4DataAdapter
-from .exp5_adapter import Exp5DataAdapter, TrajectoryCleaner
 
 __all__ = [
     'BaseGeoLifePreprocessor',
@@ -16,6 +15,4 @@ __all__ = [
     'Exp2DataAdapter',
     'Exp3DataAdapter',
     'Exp4DataAdapter',
-    'Exp5DataAdapter',
-    'TrajectoryCleaner',
 ]

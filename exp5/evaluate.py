@@ -36,14 +36,15 @@ def main():
     # PyCharm 直接运行配置区域
     # ========================================================================
 
-    # 模型路径 - Exp5模型
-    MODEL_PATH = 'checkpoints/exp5_model.pth'
+    # 模型路径 - Exp5模型 (balanced 模式)
+    MODEL_PATH = 'checkpoints/exp5_model_balanced.pth'
 
-    # 缓存路径 - Exp5缓存 (v5_cleaning)
-    CACHE_PATH = 'cache/processed_features_weather_v5_cleaning.pkl'
+    # 缓存路径 - Exp5缓存 (v5_balanced)
+    CACHE_PATH = 'cache/processed_features_weather_v5_balanced.pkl'
 
     # 备用缓存路径列表（按优先级）
     ALTERNATIVE_CACHE_PATHS = [
+        'cache/processed_features_weather_v5_cleaning.pkl',  # cleaning 模式
         'cache/processed_features_weather_v5.pkl',  # 其他命名
     ]
 
@@ -58,7 +59,7 @@ def main():
     print(f"设备: {DEVICE}")
 
     # 1. 加载模型
-    print(f"\n[1/6] 正在加载模型: {MODEL_PATH}")
+    print(f"\n[1/5] 正在加载模型: {MODEL_PATH}")
 
     # 尝试多个模型路径
     model_paths_to_try = [
@@ -129,40 +130,17 @@ def main():
     print(f"   ✓ 找到缓存: {CACHE_PATH}")
 
     with open(CACHE_PATH, 'rb') as f:
-        all_features, cached_label_encoder, cleaning_stats = pickle.load(f)
+        cache_data = pickle.load(f)
+        if len(cache_data) == 3:
+            all_features, cached_label_encoder, cleaning_stats = cache_data
+        else:
+            all_features, cached_label_encoder = cache_data
+            cleaning_stats = {}
 
     print(f"   ✓ 加载完成: {len(all_features)} 个样本")
 
-    # 3. 打印清洗统计
-    print(f"\n[3/6] 数据清洗统计:")
-    print("=" * 60)
-
-    if cleaning_stats:
-        before = cleaning_stats.get('before', {})
-        after = cleaning_stats.get('after', {})
-        cleaner = cleaning_stats.get('cleaner', {})
-
-        print(f"\n第一阶段（基础处理）:")
-        print(f"  总轨迹段数: {before.get('total_segments', 0)}")
-        print(f"  总轨迹点数: {before.get('total_points', 0)}")
-
-        print(f"\n第二阶段（深度清洗）:")
-        print(f"  有效轨迹段数: {after.get('valid_segments', 0)}")
-        print(f"  丢弃轨迹段数: {after.get('discarded_segments', 0)}")
-        print(f"  保留率: {after.get('valid_segments', 0) / before.get('total_segments', 1) * 100:.2f}%")
-
-        print(f"\n清洗详情:")
-        print(f"  剔除异常点数: {cleaner.get('outliers_removed', 0)}")
-        print(f"  插值点数: {cleaner.get('points_interpolated', 0)}")
-        print(f"  方向平滑点数: {cleaner.get('bearing_smoothed', 0)}")
-        print(f"  最终轨迹点数: {after.get('total_points', 0)}")
-    else:
-        print("  ⚠️ 未找到清洗统计信息")
-
-    print("=" * 60)
-
-    # 4. 准备测试数据
-    print(f"\n[4/6] 正在准备测试数据...")
+    # 3. 准备测试数据
+    print(f"\n[3/5] 正在准备测试数据...")
     dataset = TrajectoryDatasetWithWeather(all_features)
     labels_for_stratify = [feat[3] for feat in all_features]
 
@@ -181,8 +159,8 @@ def main():
     )
     print(f"   ✓ 测试集大小: {len(test_indices)} 个样本")
 
-    # 5. 执行推理
-    print(f"\n[5/6] 正在进行模型推理...")
+    # 4. 执行推理
+    print(f"\n[4/5] 正在进行模型推理...")
     y_true, y_pred, y_probs = [], [], []
 
     with torch.no_grad():
@@ -204,8 +182,8 @@ def main():
     y_pred = np.array(y_pred)
     y_probs = np.array(y_probs)
 
-    # 6. 生成评估报告
-    print(f"\n[6/6] 正在生成评估报告...")
+    # 5. 生成评估报告
+    print(f"\n[5/5] 正在生成评估报告...")
 
     # 打印分类报告
     print("\n" + "=" * 60)
@@ -229,10 +207,6 @@ def main():
         output_dict=True,
         zero_division=0
     )
-
-    # 添加清洗统计到报告
-    report_dict['cleaning_stats'] = cleaning_stats
-
     json_path = os.path.join(OUTPUT_DIR, 'evaluation_report.json')
     with open(json_path, 'w', encoding='utf-8') as f:
         json.dump(report_dict, f, indent=4, ensure_ascii=False)
@@ -300,15 +274,6 @@ def main():
         print(f"   ✓ 保存: {errors_path} ({len(errors_df)} 个错误样本)")
     except Exception as e:
         print(f"   ⚠️ 错误分析保存失败: {e}")
-
-    # 文件 6: 清洗统计报告
-    try:
-        cleaning_report_path = os.path.join(OUTPUT_DIR, 'cleaning_stats.json')
-        with open(cleaning_report_path, 'w', encoding='utf-8') as f:
-            json.dump(cleaning_stats, f, indent=4, ensure_ascii=False)
-        print(f"   ✓ 保存: {cleaning_report_path}")
-    except Exception as e:
-        print(f"   ⚠️ 清洗统计保存失败: {e}")
 
     # 汇总统计
     print("\n" + "=" * 60)

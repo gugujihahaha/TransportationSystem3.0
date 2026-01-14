@@ -54,7 +54,7 @@ class TrajectoryDataset(Dataset):
 # ============================================================
 # Data loading (✅ 修改 2: 完整替换 load_data 函数)
 # ============================================================
-def load_data(geolife_root: str, max_users: int = None, use_base_data: bool = True):
+def load_data(geolife_root: str, max_users: int = None, use_base_data: bool = True, cleaning_mode: str = 'balanced'):
     """
     加载数据（支持使用基础数据）
 
@@ -62,6 +62,7 @@ def load_data(geolife_root: str, max_users: int = None, use_base_data: bool = Tr
         geolife_root: GeoLife数据根目录
         max_users: 最大用户数
         use_base_data: 是否使用预处理的基础数据（推荐）
+        cleaning_mode: 数据清洗模式 ('strict', 'balanced', 'gentle')
 
     Returns:
         processed_segments: List of (features, label)
@@ -80,11 +81,11 @@ def load_data(geolife_root: str, max_users: int = None, use_base_data: bool = Tr
         # 1. 加载基础数据
         base_segments = BaseGeoLifePreprocessor.load_from_cache(BASE_DATA_PATH)
 
-        # 2. Exp1特定适配（序列长度 100）
-        adapter = Exp1DataAdapter(target_length=100)
+        # 2. Exp1特定适配（序列长度 100，两阶段清洗）
+        adapter = Exp1DataAdapter(target_length=100, enable_cleaning=True, cleaning_mode=cleaning_mode)
         processed = adapter.process_segments(base_segments)
-
-        return processed
+        cleaning_stats = adapter.get_cleaning_stats()
+        return processed, cleaning_stats
 
     # ========== 传统模式：从头处理 ==========
     else:
@@ -189,6 +190,9 @@ def main():
     # ===== ✅ 修改 3: main 函数添加参数 =====
     parser.add_argument("--use_base_data", action="store_true", default=True,
                        help="使用预处理的基础数据（推荐，大幅加速）")
+    parser.add_argument("--cleaning_mode", type=str, default='balanced',
+                       choices=['strict', 'balanced', 'gentle'],
+                       help="数据清洗模式: strict(严格), balanced(平衡), gentle(温和)")
     # ===== 修改结束 =====
 
     parser.add_argument("--epochs", type=int, default=50)
@@ -201,9 +205,10 @@ def main():
     args = parser.parse_args()
 
     # ✅ 传递新参数
-    segments = load_data(
+    segments, cleaning_stats = load_data(
         args.geolife_root,
-        use_base_data=args.use_base_data
+        use_base_data=args.use_base_data,
+        cleaning_mode=args.cleaning_mode
     )
 
     # 最终 7 类（任务定义统一）
