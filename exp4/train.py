@@ -289,11 +289,12 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
             with open(PROCESSED_FEATURE_CACHE_PATH, 'rb') as f:
                 all_features_and_labels, label_encoder = pickle.load(f)
             print(f"✅ 特征从缓存加载完成: {len(all_features_and_labels)} 条")
-            return all_features_and_labels, kg, weather_processor, label_encoder
+            return all_features_and_labels, kg, weather_processor, label_encoder, {}
         except Exception as e:
             print(f"⚠️ 特征缓存加载失败: {e}")
 
     processed_segments_with_time = None
+    cleaning_stats = {}
 
     # 快速模式：使用基础数据
     if use_base_data and HAS_COMMON and os.path.exists(BASE_DATA_PATH):
@@ -305,6 +306,7 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
             base_segments = BaseGeoLifePreprocessor.load_from_cache(BASE_DATA_PATH)
             adapter = Exp4DataAdapter(target_length=FIXED_SEQUENCE_LENGTH, enable_cleaning=True, cleaning_mode=cleaning_mode)
             processed_segments_with_time = adapter.process_segments(base_segments)
+            cleaning_stats = adapter.get_cleaning_stats()
         except Exception as e:
             print(f"⚠️ 快速模式失败: {e}，切换到传统模式")
             processed_segments_with_time = None
@@ -489,7 +491,7 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
     # 保存缓存
     try:
         with open(PROCESSED_FEATURE_CACHE_PATH, 'wb') as f:
-            pickle.dump((all_features_and_labels, label_encoder), f,
+            pickle.dump((all_features_and_labels, label_encoder, cleaning_stats), f,
                        protocol=pickle.HIGHEST_PROTOCOL)
         kg.save_cache(GRID_CACHE_PATH)
         save_cache_metadata(osm_path, weather_path, geolife_root,
@@ -497,7 +499,7 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
     except Exception as e:
         print(f"⚠️ 缓存保存失败: {e}")
 
-    return all_features_and_labels, kg, weather_processor, label_encoder
+    return all_features_and_labels, kg, weather_processor, label_encoder, cleaning_stats
 
 
 def check_tensor_health(tensor: torch.Tensor, name: str) -> bool:
@@ -691,7 +693,7 @@ def main():
                 print(f"  已删除: {f}")
 
     # 加载数据
-    all_features_and_labels, kg, weather_processor, label_encoder = load_data(
+    all_features_and_labels, kg, weather_processor, label_encoder, cleaning_stats = load_data(
         args.geolife_root, args.osm_path, args.weather_path, args.max_users,
         use_base_data=args.use_base_data,
         cleaning_mode=args.cleaning_mode
