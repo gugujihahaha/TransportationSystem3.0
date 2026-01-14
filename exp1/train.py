@@ -128,7 +128,8 @@ def load_data(geolife_root: str, max_users: int = None, use_base_data: bool = Tr
         processed = preprocess_segments(all_segments, min_length=10)
         print(f"预处理后轨迹段数: {len(processed)}")
 
-        return processed
+        cleaning_stats = {}
+        return processed, cleaning_stats
 
 
 # ============================================================
@@ -229,7 +230,7 @@ def main():
     os.makedirs("cache", exist_ok=True)
     with open("cache/exp1_processed_features.pkl", "wb") as f:
         pickle.dump(
-            {"segments": segments, "label_encoder": label_encoder},
+            {"segments": segments, "label_encoder": label_encoder, "cleaning_stats": cleaning_stats},
             f
         )
     print("✓ 已保存特征缓存: cache/exp1_processed_features.pkl")

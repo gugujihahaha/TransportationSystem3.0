@@ -194,11 +194,12 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
             with open(PROCESSED_FEATURE_CACHE_PATH, 'rb') as f:
                 all_features_and_labels, label_encoder = pickle.load(f)
             print(f"✅ 预提取特征加载完成: {len(all_features_and_labels)} 条记录")
-            return all_features_and_labels, kg, label_encoder
+            return all_features_and_labels, kg, label_encoder, {}
         except Exception:
             pass
 
     processed_segments = None
+    cleaning_stats = {}
 
     # ✅ 快速模式：使用基础数据
     if use_base_data and os.path.exists(BASE_DATA_PATH):
@@ -209,6 +210,7 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
         base_segments = BaseGeoLifePreprocessor.load_from_cache(BASE_DATA_PATH)
         adapter = Exp3DataAdapter(target_length=50, enable_cleaning=True, cleaning_mode=cleaning_mode)
         processed_segments = adapter.process_segments(base_segments)
+        cleaning_stats = adapter.get_cleaning_stats()
 
     # 传统模式：从头处理
     else:
@@ -256,11 +258,11 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
 
     # 保存各级缓存
     with open(PROCESSED_FEATURE_CACHE_PATH, 'wb') as f:
-        pickle.dump((all_features_and_labels, label_encoder), f, protocol=pickle.HIGHEST_PROTOCOL)
+        pickle.dump((all_features_and_labels, label_encoder, cleaning_stats), f, protocol=pickle.HIGHEST_PROTOCOL)
     kg.save_cache(GRID_CACHE_PATH)
     save_cache_metadata(osm_path, geolife_root, len(all_features_and_labels), label_encoder)
 
-    return all_features_and_labels, kg, label_encoder
+    return all_features_and_labels, kg, label_encoder, cleaning_stats
 
 
 def train_epoch(model, dataloader, criterion, optimizer, device):
@@ -339,7 +341,7 @@ def main():
             kg = pickle.load(f)
     else:
         # ✅ 传递新参数
-        all_features_and_labels, kg, label_encoder = load_data(
+        all_features_and_labels, kg, label_encoder, cleaning_stats = load_data(
             args.geolife_root, args.osm_path, args.max_users,
             use_base_data=args.use_base_data,
             cleaning_mode=args.cleaning_mode

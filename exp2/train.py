@@ -94,12 +94,13 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
             with open(PROCESSED_FEATURE_CACHE_PATH, 'rb') as f:
                 with torch.serialization.safe_globals({LabelEncoder: LabelEncoder}):
                     all_features_and_labels, label_encoder = pickle.load(f)
-            return all_features_and_labels, kg, label_encoder
+            return all_features_and_labels, kg, label_encoder, {}
         except Exception:
             pass
 
     processed_segments = None
     label_encoder = None
+    cleaning_stats = {}
 
     # B. ✅ 快速模式逻辑
     if use_base_data and os.path.exists(BASE_DATA_PATH):
@@ -107,6 +108,7 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
         base_segments = BaseGeoLifePreprocessor.load_from_cache(BASE_DATA_PATH)
         adapter = Exp2DataAdapter(target_length=FIXED_SEQUENCE_LENGTH, enable_cleaning=True, cleaning_mode=cleaning_mode)
         processed_segments = adapter.process_segments(base_segments)
+        cleaning_stats = adapter.get_cleaning_stats()
 
         all_labels_str = [label for _, label in processed_segments]
         label_encoder = LabelEncoder().fit(all_labels_str)
@@ -159,9 +161,9 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
         except: continue
 
     with open(PROCESSED_FEATURE_CACHE_PATH, 'wb') as f:
-        pickle.dump((all_features_and_labels, label_encoder), f, protocol=pickle.HIGHEST_PROTOCOL)
+        pickle.dump((all_features_and_labels, label_encoder, cleaning_stats), f, protocol=pickle.HIGHEST_PROTOCOL)
     kg.save_cache(GRID_CACHE_PATH)
-    return all_features_and_labels, kg, label_encoder
+    return all_features_and_labels, kg, label_encoder, cleaning_stats
 
 # ... (train_epoch 和 evaluate 函数保持不变) ...
 
@@ -227,7 +229,7 @@ def main():
             if os.path.exists(f): os.remove(f)
 
     # 传递 use_base_data 参数
-    all_features_and_labels, kg, label_encoder = load_data(
+    all_features_and_labels, kg, label_encoder, cleaning_stats = load_data(
         args.geolife_root, args.osm_path, args.max_users,
         use_base_data=args.use_base_data,
         cleaning_mode=args.cleaning_mode
