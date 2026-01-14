@@ -134,8 +134,16 @@ class TrajectoryDataset(Dataset):
 # ============================================================
 # Data loading (✅ 修改 2: 更新 load_data 函数集成快速模式)
 # ============================================================
-def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_data: bool = True):
-    """加载所有数据 (支持快速模式与三级缓存)"""
+def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_data: bool = True, cleaning_mode: str = 'balanced'):
+    """加载所有数据 (支持快速模式与三级缓存)
+
+    Args:
+        geolife_root: GeoLife数据根目录
+        osm_path: OSM数据路径
+        max_users: 最大用户数
+        use_base_data: 是否使用预处理的基础数据
+        cleaning_mode: 数据清洗模式 ('strict', 'balanced', 'gentle')
+    """
 
     BASE_DATA_PATH = os.path.join(
         os.path.dirname(geolife_root),
@@ -195,11 +203,11 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
     # ✅ 快速模式：使用基础数据
     if use_base_data and os.path.exists(BASE_DATA_PATH):
         print(f"\n{'='*80}")
-        print("阶段 2: 使用预处理的基础数据（快速模式）")
+        print(f"阶段 2: 使用预处理的基础数据（快速模式 - 清洗模式: {cleaning_mode}）")
         print(f"{'='*80}\n")
 
         base_segments = BaseGeoLifePreprocessor.load_from_cache(BASE_DATA_PATH)
-        adapter = Exp3DataAdapter(target_length=50)
+        adapter = Exp3DataAdapter(target_length=50, enable_cleaning=True, cleaning_mode=cleaning_mode)
         processed_segments = adapter.process_segments(base_segments)
 
     # 传统模式：从头处理
@@ -295,6 +303,9 @@ def main():
 
     # ===== ✅ 新增参数 =====
     parser.add_argument('--use_base_data', action='store_true', default=True, help='使用预处理的基础数据（推荐）')
+    parser.add_argument('--cleaning_mode', type=str, default='balanced',
+                       choices=['strict', 'balanced', 'gentle'],
+                       help='数据清洗模式: strict(严格), balanced(平衡), gentle(温和)')
     # ===== 新增结束 =====
 
     parser.add_argument('--max_users', type=int, default=None)
@@ -330,7 +341,8 @@ def main():
         # ✅ 传递新参数
         all_features_and_labels, kg, label_encoder = load_data(
             args.geolife_root, args.osm_path, args.max_users,
-            use_base_data=args.use_base_data
+            use_base_data=args.use_base_data,
+            cleaning_mode=args.cleaning_mode
         )
 
     if args.generate_cache_only or not all_features_and_labels:

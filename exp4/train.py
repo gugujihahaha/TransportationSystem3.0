@@ -197,7 +197,7 @@ def normalize_features_safe(features: np.ndarray) -> np.ndarray:
 
 
 def load_data(geolife_root: str, osm_path: str, weather_path: str,
-              max_users: int = None, use_base_data: bool = True):
+              max_users: int = None, use_base_data: bool = True, cleaning_mode: str = 'balanced'):
     """
     加载所有数据 - 稳定版
 
@@ -205,6 +205,14 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
     1. 不丢弃任何样本
     2. 缺失特征使用零向量填充
     3. 全面的异常处理
+
+    Args:
+        geolife_root: GeoLife数据根目录
+        osm_path: OSM数据路径
+        weather_path: 天气数据路径
+        max_users: 最大用户数
+        use_base_data: 是否使用预处理的基础数据
+        cleaning_mode: 数据清洗模式 ('strict', 'balanced', 'gentle')
     """
     BASE_DATA_PATH = os.path.join(
         os.path.dirname(geolife_root),
@@ -290,12 +298,12 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
     # 快速模式：使用基础数据
     if use_base_data and HAS_COMMON and os.path.exists(BASE_DATA_PATH):
         print(f"\n{'='*80}")
-        print("阶段 3: 使用预处理的基础数据（快速模式 - 含时间序列）")
+        print(f"阶段 3: 使用预处理的基础数据（快速模式 - 清洗模式: {cleaning_mode}）")
         print(f"{'='*80}\n")
 
         try:
             base_segments = BaseGeoLifePreprocessor.load_from_cache(BASE_DATA_PATH)
-            adapter = Exp4DataAdapter(target_length=FIXED_SEQUENCE_LENGTH)
+            adapter = Exp4DataAdapter(target_length=FIXED_SEQUENCE_LENGTH, enable_cleaning=True, cleaning_mode=cleaning_mode)
             processed_segments_with_time = adapter.process_segments(base_segments)
         except Exception as e:
             print(f"⚠️ 快速模式失败: {e}，切换到传统模式")
@@ -599,6 +607,7 @@ def main():
 
             # 数据加载选项
             use_base_data = True   # 使用预处理的基础数据（更快）
+            cleaning_mode = 'balanced'  # 数据清洗模式: strict, balanced, gentle
             max_users = None       # 最大用户数（None = 全部）
 
             # 训练参数
@@ -628,6 +637,9 @@ def main():
         # 数据加载选项
         parser.add_argument('--use_base_data', action='store_true', default=True,
                             help='使用预处理的基础数据（推荐）')
+        parser.add_argument('--cleaning_mode', type=str, default='balanced',
+                           choices=['strict', 'balanced', 'gentle'],
+                           help='数据清洗模式: strict(严格), balanced(平衡), gentle(温和)')
         parser.add_argument('--max_users', type=int, default=None)
 
         # 训练参数（调整默认值以提高稳定性）
@@ -681,7 +693,8 @@ def main():
     # 加载数据
     all_features_and_labels, kg, weather_processor, label_encoder = load_data(
         args.geolife_root, args.osm_path, args.weather_path, args.max_users,
-        use_base_data=args.use_base_data
+        use_base_data=args.use_base_data,
+        cleaning_mode=args.cleaning_mode
     )
 
     # 数据集划分

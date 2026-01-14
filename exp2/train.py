@@ -52,8 +52,16 @@ class TrajectoryDataset(Dataset):
         return torch.FloatTensor(trajectory_features), torch.FloatTensor(kg_features), torch.LongTensor([label_encoded])[0]
 
 # ===== ✅ 修改 2：load_data 函数完整更新 =====
-def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_data: bool = True):
-    """加载所有数据，实现快速模式与传统模式切换"""
+def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_data: bool = True, cleaning_mode: str = 'balanced'):
+    """加载所有数据，实现快速模式与传统模式切换
+
+    Args:
+        geolife_root: GeoLife数据根目录
+        osm_path: OSM数据路径
+        max_users: 最大用户数
+        use_base_data: 是否使用预处理的基础数据
+        cleaning_mode: 数据清洗模式 ('strict', 'balanced', 'gentle')
+    """
 
     BASE_DATA_PATH = os.path.join(os.path.dirname(geolife_root), 'processed/base_segments.pkl')
 
@@ -95,9 +103,9 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
 
     # B. ✅ 快速模式逻辑
     if use_base_data and os.path.exists(BASE_DATA_PATH):
-        print(f"\n========== 阶段 2: 使用预处理基础数据 (快速模式) ==========")
+        print(f"\n========== 阶段 2: 使用预处理基础数据 (快速模式 - 清洗模式: {cleaning_mode}) ==========")
         base_segments = BaseGeoLifePreprocessor.load_from_cache(BASE_DATA_PATH)
-        adapter = Exp2DataAdapter(target_length=FIXED_SEQUENCE_LENGTH)
+        adapter = Exp2DataAdapter(target_length=FIXED_SEQUENCE_LENGTH, enable_cleaning=True, cleaning_mode=cleaning_mode)
         processed_segments = adapter.process_segments(base_segments)
 
         all_labels_str = [label for _, label in processed_segments]
@@ -193,6 +201,9 @@ def main():
 
     # 新增参数
     parser.add_argument('--use_base_data', action='store_true', default=True, help='使用预处理的基础数据')
+    parser.add_argument('--cleaning_mode', type=str, default='balanced',
+                       choices=['strict', 'balanced', 'gentle'],
+                       help='数据清洗模式: strict(严格), balanced(平衡), gentle(温和)')
 
     parser.add_argument('--max_users', type=int, default=None)
     parser.add_argument('--batch_size', type=int, default=32)
@@ -218,7 +229,8 @@ def main():
     # 传递 use_base_data 参数
     all_features_and_labels, kg, label_encoder = load_data(
         args.geolife_root, args.osm_path, args.max_users,
-        use_base_data=args.use_base_data
+        use_base_data=args.use_base_data,
+        cleaning_mode=args.cleaning_mode
     )
 
     if not all_features_and_labels: return
