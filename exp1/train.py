@@ -137,7 +137,7 @@ def train_epoch(model, loader, criterion, optimizer, device):
     model.train()
     total_loss, correct, total = 0, 0, 0
 
-    for x, y in tqdm(loader, desc="训练"):
+    for x, y in tqdm(loader, desc="Training Progress"):
         x, y = x.to(device), y.squeeze().to(device)
         optimizer.zero_grad()
         logits = model(x)
@@ -158,7 +158,7 @@ def evaluate(model, loader, criterion, device, label_encoder):
     total_loss = 0
 
     with torch.no_grad():
-        for x, y in tqdm(loader, desc="评估"):
+        for x, y in tqdm(loader, desc="Validation Progress"):
             x, y = x.to(device), y.squeeze().to(device)
             logits = model(x)
             loss = criterion(logits, y)
@@ -231,6 +231,10 @@ def main():
 
     dataset = TrajectoryDataset(segments, label_encoder)
 
+    print(f"\n✅ 数据集大小:")
+    print(f"  总样本数: {len(dataset)}")
+    print(f"  特征样本数: {len(segments)}")
+
     # ========================================================
     # ✅ 数据划分：一次性划分 70% 训练 / 10% 验证 / 20% 测试
     # ========================================================
@@ -249,7 +253,7 @@ def main():
     temp_labels = [labels_stratify[i] for i in temp_indices]
     val_indices, test_indices = train_test_split(
         temp_indices,
-        test_size=2/3,
+        test_size=0.6667,
         random_state=42,
         stratify=temp_labels
     )
@@ -274,6 +278,15 @@ def main():
     print(f"  Train: {len(train_indices)} 样本")
     print(f"  Val:   {len(val_indices)} 样本")
     print(f"  Test:  {len(test_indices)} 样本")
+    print(f"  训练批次总数: {len(train_loader)}")
+    print(f"  验证批次总数: {len(val_loader)}")
+
+    print(f"\n类别分布:")
+    for cls in label_encoder.classes_:
+        train_count = sum(1 for i in train_indices if segments[i][1] == cls)
+        val_count = sum(1 for i in val_indices if segments[i][1] == cls)
+        test_count = sum(1 for i in test_indices if segments[i][1] == cls)
+        print(f"  {cls:15s}: Train={train_count}, Val={val_count}, Test={test_count}")
 
     model = TransportationModeClassifier(
         input_dim=TRAJECTORY_FEATURE_DIM,
@@ -309,6 +322,7 @@ def main():
         )
         val_acc = val_report['accuracy']
 
+        # 在训练循环结束后再打印上一轮指标汇总
         print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f}")
         print(f"Val   Loss: {val_loss:.4f} | Val   Acc: {val_acc:.4f}")
 

@@ -160,7 +160,7 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
 def train_epoch(model, dataloader, criterion, optimizer, device):
     model.train()
     total_loss, correct, total = 0, 0, 0
-    for traj_f, kg_f, labels in tqdm(dataloader, desc="   [训练]"):
+    for traj_f, kg_f, labels in tqdm(dataloader, desc="Training Progress", leave=True):
         traj_f, kg_f, labels = traj_f.to(device), kg_f.to(device), labels.to(device)
         optimizer.zero_grad()
         logits = model(traj_f, kg_f)
@@ -176,7 +176,7 @@ def evaluate(model, dataloader, criterion, device, label_encoder):
     model.eval()
     total_loss, all_preds, all_labels = 0, [], []
     with torch.no_grad():
-        for traj_f, kg_f, labels in tqdm(dataloader, desc="   [评估]"):
+        for traj_f, kg_f, labels in tqdm(dataloader, desc="Validation Progress", leave=True):
             traj_f, kg_f, labels = traj_f.to(device), kg_f.to(device), labels.to(device)
             logits = model(traj_f, kg_f)
             total_loss += criterion(logits, labels).item()
@@ -227,6 +227,14 @@ def main():
     # ✅ 数据划分：一次性划分 70% 训练 / 10% 验证 / 20% 测试
     # ========================================================
     dataset = TrajectoryDataset(all_features_and_labels)
+
+    print(f"\n✅ 数据集大小:")
+    print(f"  总样本数: {len(dataset)}")
+    print(f"  特征样本数: {len(all_features_and_labels)}")
+
+    # ========================================================
+    # ✅ 数据划分：一次性划分 70% 训练 / 10% 验证 / 20% 测试
+    # ========================================================
     all_indices = np.arange(len(dataset))
     labels_stratify = [label_encoder.inverse_transform([label_encoded])[0] for _, _, label_encoded in all_features_and_labels]
 
@@ -270,6 +278,15 @@ def main():
     print(f"  Train: {len(train_indices)} 样本")
     print(f"  Val:   {len(val_indices)} 样本")
     print(f"  Test:  {len(test_indices)} 样本")
+    print(f"  训练批次总数: {len(train_loader)}")
+    print(f"  验证批次总数: {len(val_loader)}")
+
+    print(f"\n类别分布:")
+    for cls in label_encoder.classes_:
+        train_count = sum(1 for i in train_indices if labels_stratify[i] == cls)
+        val_count = sum(1 for i in val_indices if labels_stratify[i] == cls)
+        test_count = sum(1 for i in test_indices if labels_stratify[i] == cls)
+        print(f"  {cls:15s}: Train={train_count}, Val={val_count}, Test={test_count}")
 
     model = TransportationModeClassifier(
         TRAJECTORY_FEATURE_DIM, KG_FEATURE_DIM, args.hidden_dim, args.num_layers, len(label_encoder.classes_), args.dropout
@@ -287,18 +304,17 @@ def main():
     epochs_no_improve = 0
 
     for epoch in range(args.epochs):
-        print(f"\n[EPOCH {epoch+1}/{args.epochs}]")
+        print(f"\nEpoch {epoch+1}/{args.epochs}")
 
         train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, args.device)
 
-        # 在验证集上评估
         val_loss, report, _, _ = evaluate(model, val_loader, criterion, args.device, label_encoder)
         val_acc = report['accuracy']
 
-        print(f"   Train Loss: {train_loss:.4f}, Acc: {train_acc:.4f}")
-        print(f"   Val   Loss: {val_loss:.4f}, Acc: {val_acc:.4f}")
+        # 在训练循环结束后再打印上一轮指标汇总
+        print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f}")
+        print(f"Val   Loss: {val_loss:.4f} | Val   Acc: {val_acc:.4f}")
 
-        # Early Stopping 检查
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             epochs_no_improve = 0
@@ -307,13 +323,13 @@ def main():
                 'trajectory_feature_dim': TRAJECTORY_FEATURE_DIM, 'kg_feature_dim': KG_FEATURE_DIM,
                 'hidden_dim': args.hidden_dim, 'num_layers': args.num_layers, 'num_classes': len(label_encoder.classes_), 'dropout': args.dropout
             }}, os.path.join(args.save_dir, 'exp2_model.pth'))
-            print("   ✓ 保存最佳模型（基于验证集）")
+            print("✓ 保存最佳模型（基于验证集）")
         else:
             epochs_no_improve += 1
-            print(f"   ⏳ 验证损失未改善: {epochs_no_improve}/{patience}")
+            print(f"⏳ 验证损失未改善: {epochs_no_improve}/{patience}")
 
             if epochs_no_improve >= patience:
-                print(f"\n   🛑 Early stopping 触发（patience={patience}）")
+                print(f"\n🛑 Early stopping 触发（patience={patience}）")
                 break
 
     # ========================================================
