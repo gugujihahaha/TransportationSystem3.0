@@ -159,7 +159,7 @@ def main():
     y_true, y_pred, y_probs = [], [], []
 
     with torch.no_grad():
-        for traj, kg, weather, labels in tqdm(test_loader, desc="   推理进度"):
+        for traj, kg, weather, labels in tqdm(test_loader, desc="Evaluation Progress"):
             traj = traj.to(DEVICE)
             kg = kg.to(DEVICE)
             weather = weather.to(DEVICE)

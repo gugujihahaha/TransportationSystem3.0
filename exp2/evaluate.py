@@ -1,10 +1,10 @@
 """
-Exp2 评估脚本 (标准版)
-按照 Exp4 标准修复：只在测试集上评估，避免数据泄露
+Exp2 评估脚本 (标准版 - 与 Exp4 一致)
 功能：
-1. 自动适配 11 维 KG 特征
-2. 修复标签映射逻辑，合并 Car & Taxi
-3. 支持从缓存快速加载，避免冗长的路网匹配过程
+1. 自动适配轨迹 + KG特征（9+11维）
+2. 支持多路径缓存加载
+3. 生成详细的分类报告、混淆矩阵和预测详情
+4. 输出所有文件至 evaluation_results/ 子目录
 """
 import os
 import json
@@ -62,6 +62,12 @@ def main():
     OUTPUT_DIR = 'evaluation_results'
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
+    # 备用缓存路径列表（按优先级）
+    ALTERNATIVE_CACHE_PATHS = [
+        'cache/processed_features_v1.pkl',
+        'cache/exp2_features.pkl',
+    ]
+
     print("\n" + "=" * 60)
     print("Exp2 模型评估 (轨迹 + 基础知识图谱)")
     print("=" * 60)
@@ -69,10 +75,27 @@ def main():
 
     # 1. 加载模型
     print(f"\n[1/5] 正在加载模型: {MODEL_PATH}")
-    
-    if not os.path.exists(MODEL_PATH):
-        print(f"❌ 错误: 找不到模型文件 {MODEL_PATH}")
+
+    # 尝试多个模型路径
+    model_paths_to_try = [
+        MODEL_PATH,
+        'checkpoints/exp2_model.pth',
+    ]
+
+    model_loaded = False
+    for mp in model_paths_to_try:
+        if os.path.exists(mp):
+            MODEL_PATH = mp
+            model_loaded = True
+            break
+
+    if not model_loaded:
+        print(f"❌ 错误: 找不到模型文件，尝试过以下路径:")
+        for mp in model_paths_to_try:
+            print(f"   - {mp}")
         return
+
+    print(f"   ✓ 找到模型: {MODEL_PATH}")
 
     checkpoint = torch.load(MODEL_PATH, map_location=DEVICE, weights_only=False)
     label_encoder = checkpoint['label_encoder']
@@ -101,12 +124,26 @@ def main():
     print("   ✓ 模型加载完成")
 
     # 2. 加载特征缓存
-    print(f"\n[2/5] 正在加载特征缓存: {CACHE_PATH}")
-    
-    if not os.path.exists(CACHE_PATH):
-        print(f"❌ 错误: 找不到特征缓存 {CACHE_PATH}")
-        print("请先运行 train.py 生成特征缓存。")
+    print(f"\n[2/5] 正在加载特征缓存...")
+
+    # 尝试多个缓存路径
+    cache_paths_to_try = [CACHE_PATH] + ALTERNATIVE_CACHE_PATHS
+    cache_loaded = False
+
+    for cp in cache_paths_to_try:
+        if os.path.exists(cp):
+            CACHE_PATH = cp
+            cache_loaded = True
+            break
+
+    if not cache_loaded:
+        print(f"❌ 错误: 找不到特征缓存，尝试过以下路径:")
+        for cp in cache_paths_to_try:
+            print(f"   - {cp}")
+        print("\n请先运行 train.py 生成特征缓存。")
         return
+
+    print(f"   ✓ 找到缓存: {CACHE_PATH}")
 
     with open(CACHE_PATH, 'rb') as f:
         # 训练脚本保存的是 (processed_segments, label_encoder)
@@ -139,16 +176,20 @@ def main():
     y_true, y_pred, y_probs = [], [], []
 
     with torch.no_grad():
-        for traj, kg, labels in tqdm(test_loader, desc="   推理进度"):
-            traj, kg, labels = traj.to(DEVICE), kg.to(DEVICE), labels.to(DEVICE)
+        for traj, kg, labels in tqdm(test_loader, desc="Evaluation Progress", leave=True):
+            try:
+                traj, kg, labels = traj.to(DEVICE), kg.to(DEVICE), labels.to(DEVICE)
 
-            logits = model(traj, kg)
-            probs = torch.softmax(logits, dim=1)
-            preds = torch.argmax(probs, dim=1)
+                logits = model(traj, kg)
+                probs = torch.softmax(logits, dim=1)
+                preds = torch.argmax(probs, dim=1)
 
-            y_true.extend(labels.cpu().numpy())
-            y_pred.extend(preds.cpu().numpy())
-            y_probs.extend(probs.cpu().numpy())
+                y_true.extend(labels.cpu().numpy())
+                y_pred.extend(preds.cpu().numpy())
+                y_probs.extend(probs.cpu().numpy())
+            except Exception as e:
+                print(f"   ⚠️ 推理异常: {e}")
+                continue
 
     # 转换为 Numpy 数组
     y_true = np.array(y_true)

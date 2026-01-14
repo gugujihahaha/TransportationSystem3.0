@@ -507,11 +507,6 @@ def train_epoch(model, dataloader, criterion, optimizer, device,
                 max_grad_norm: float = 1.0):
     """
     训练一个 epoch - 稳定版
-
-    关键改进:
-    1. 梯度裁剪
-    2. NaN/Inf 检测
-    3. 跳过异常批次但不中断训练
     """
     model.train()
     total_loss = 0.0
@@ -520,67 +515,25 @@ def train_epoch(model, dataloader, criterion, optimizer, device,
     nan_batches = 0
 
     for batch_idx, (traj_f, kg_f, weather_f, labels) in enumerate(
-        tqdm(dataloader, desc="   [训练]", leave=False)
+        tqdm(dataloader, desc="Training Progress", leave=True)
     ):
         try:
-            # 数据移动到设备
             traj_f = traj_f.to(device)
             kg_f = kg_f.to(device)
             weather_f = weather_f.to(device)
             labels = labels.to(device)
 
-            # 检查输入健康状态（静默检查，不打印）
-            input_healthy = True
-            for t in [traj_f, kg_f, weather_f]:
-                if torch.isnan(t).any() or torch.isinf(t).any():
-                    input_healthy = False
-                    break
-
-            if not input_healthy:
-                nan_batches += 1
-                continue
-
             optimizer.zero_grad()
 
-            # 前向传播
             logits = model(traj_f, kg_f, weather_f)
-
-            # 检查输出
-            if torch.isnan(logits).any() or torch.isinf(logits).any():
-                nan_batches += 1
-                continue
-
-            # 计算损失
             loss = criterion(logits, labels)
 
-            # 检查损失
-            if torch.isnan(loss) or torch.isinf(loss):
-                nan_batches += 1
-                continue
-
-            # 反向传播
             loss.backward()
 
-            # 检查梯度
-            has_nan_grad = False
-            for name, param in model.named_parameters():
-                if param.grad is not None:
-                    if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
-                        has_nan_grad = True
-                        break
-
-            if has_nan_grad:
-                optimizer.zero_grad()
-                nan_batches += 1
-                continue
-
-            # 梯度裁剪
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
 
-            # 参数更新
             optimizer.step()
 
-            # 统计
             total_loss += loss.item()
             preds = torch.argmax(logits, dim=1)
             correct += (preds == labels).sum().item()
@@ -601,64 +554,32 @@ def train_epoch(model, dataloader, criterion, optimizer, device,
 
 
 def evaluate(model, dataloader, criterion, device, label_encoder):
-    """
-    评估模型 - 稳定版
-    """
     model.eval()
     total_loss = 0.0
     all_preds = []
     all_labels = []
-    nan_batches = 0
 
     with torch.no_grad():
-        for batch_idx, (traj_f, kg_f, weather_f, labels) in enumerate(
-            tqdm(dataloader, desc="   [评估]", leave=False)
-        ):
-            try:
-                traj_f = traj_f.to(device)
-                kg_f = kg_f.to(device)
-                weather_f = weather_f.to(device)
-                labels = labels.to(device)
+        for traj_f, kg_f, weather_f, labels in tqdm(dataloader, desc="Validation Progress", leave=True):
+            traj_f = traj_f.to(device)
+            kg_f = kg_f.to(device)
+            weather_f = weather_f.to(device)
+            labels = labels.to(device)
 
-                logits = model(traj_f, kg_f, weather_f)
+            logits = model(traj_f, kg_f, weather_f)
+            total_loss += criterion(logits, labels).item()
 
-                # 检查输出
-                if torch.isnan(logits).any() or torch.isinf(logits).any():
-                    nan_batches += 1
-                    continue
+            all_preds.extend(torch.argmax(logits, dim=1).cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
 
-                loss = criterion(logits, labels)
+    report = classification_report(
+        all_labels, all_preds,
+        target_names=label_encoder.classes_,
+        output_dict=True,
+        zero_division=0
+    )
 
-                if torch.isnan(loss) or torch.isinf(loss):
-                    nan_batches += 1
-                    continue
-
-                total_loss += loss.item()
-                preds = torch.argmax(logits, dim=1)
-                all_preds.extend(preds.cpu().numpy())
-                all_labels.extend(labels.cpu().numpy())
-
-            except Exception as e:
-                nan_batches += 1
-                continue
-
-    if nan_batches > 0:
-        print(f"   ⚠️ 评估时跳过 {nan_batches} 个异常批次")
-
-    # 生成报告
-    if len(all_preds) > 0:
-        report = classification_report(
-            all_labels, all_preds,
-            target_names=label_encoder.classes_,
-            output_dict=True,
-            zero_division=0
-        )
-    else:
-        report = {'accuracy': 0.0}
-
-    avg_loss = total_loss / max(len(dataloader) - nan_batches, 1)
-
-    return avg_loss, report, all_preds, all_labels
+    return total_loss / len(dataloader), report, all_preds, all_labels
 
 
 def main():
@@ -770,6 +691,10 @@ def main():
 
     dataset = TrajectoryDatasetWithWeather(all_features_and_labels)
 
+    print(f"\n✅ 数据集大小:")
+    print(f"  总样本数: {len(dataset)}")
+    print(f"  特征样本数: {len(all_features_and_labels)}")
+
     # ========================================================
     # ✅ 数据划分：一次性划分 70% 训练 / 10% 验证 / 20% 测试
     # ========================================================
@@ -816,6 +741,8 @@ def main():
     print(f"  Train: {len(train_indices)} 样本")
     print(f"  Val:   {len(val_indices)} 样本")
     print(f"  Test:  {len(test_indices)} 样本")
+    print(f"  训练批次总数: {len(train_loader)}")
+    print(f"  验证批次总数: {len(val_loader)}")
 
     # 构建模型
     model = TransportationModeClassifierWithWeather(
@@ -863,6 +790,7 @@ def main():
         )
         val_acc = report.get('accuracy', 0.0)
 
+        # 在训练循环结束后再打印上一轮指标汇总
         print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f}")
         print(f"Val   Loss: {val_loss:.4f} | Val   Acc: {val_acc:.4f}")
 
