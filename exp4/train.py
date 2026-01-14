@@ -46,7 +46,6 @@ os.chdir(SCRIPT_DIR)
 # 尝试导入 common 模块（可选）
 try:
     from common import BaseGeoLifePreprocessor, Exp4DataAdapter
-    from common.data_split import load_split
     HAS_COMMON = True
 except ImportError:
     HAS_COMMON = False
@@ -772,33 +771,51 @@ def main():
     dataset = TrajectoryDatasetWithWeather(all_features_and_labels)
 
     # ========================================================
-    # ✅ 加载统一数据划分（Train/Val/Test = 0.7/0.15/0.15）
+    # ✅ 数据划分：一次性划分 70% 训练 / 10% 验证 / 20% 测试
     # ========================================================
-    splits = load_split("common/splits.json")
+    all_indices = np.arange(len(dataset))
+    labels_stratify = [label_encoder.inverse_transform([label_encoded])[0] for _, _, _, label_encoded in all_features_and_labels]
+
+    # 第一次划分：70% 训练 / 30% 临时（验证+测试）
+    train_indices, temp_indices = train_test_split(
+        all_indices,
+        test_size=0.3,
+        random_state=42,
+        stratify=labels_stratify
+    )
+
+    # 第二次划分：从30%临时中划分出 10% 验证 / 20% 测试
+    temp_labels = [labels_stratify[i] for i in temp_indices]
+    val_indices, test_indices = train_test_split(
+        temp_indices,
+        test_size=0.6667,
+        random_state=42,
+        stratify=temp_labels
+    )
 
     train_loader = DataLoader(
-        torch.utils.data.Subset(dataset, splits["train"]),
+        torch.utils.data.Subset(dataset, train_indices),
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=args.num_workers
     )
     val_loader = DataLoader(
-        torch.utils.data.Subset(dataset, splits["val"]),
+        torch.utils.data.Subset(dataset, val_indices),
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=args.num_workers
     )
     test_loader = DataLoader(
-        torch.utils.data.Subset(dataset, splits["test"]),
+        torch.utils.data.Subset(dataset, test_indices),
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=args.num_workers
     )
 
     print(f"\n✅ 数据加载完成:")
-    print(f"  Train: {len(splits['train'])} 样本")
-    print(f"  Val:   {len(splits['val'])} 样本")
-    print(f"  Test:  {len(splits['test'])} 样本")
+    print(f"  Train: {len(train_indices)} 样本")
+    print(f"  Val:   {len(val_indices)} 样本")
+    print(f"  Test:  {len(test_indices)} 样本")
 
     # 构建模型
     model = TransportationModeClassifierWithWeather(
@@ -834,29 +851,21 @@ def main():
     print("=" * 80)
 
     for epoch in range(args.epochs):
-        print(f"\n[EPOCH {epoch + 1}/{args.epochs}]")
+        print(f"\nEpoch {epoch+1}/{args.epochs}")
 
-        # 训练
         train_loss, train_acc = train_epoch(
             model, train_loader, criterion, optimizer, args.device,
             max_grad_norm=args.max_grad_norm
         )
 
-        # 在验证集上评估
         val_loss, report, _, _ = evaluate(
             model, val_loader, criterion, args.device, label_encoder
         )
         val_acc = report.get('accuracy', 0.0)
 
-        # 打印结果
-        print(f"   Train Loss: {train_loss:.4f}, Acc: {train_acc:.4f}")
-        print(f"   Val   Loss: {val_loss:.4f}, Acc: {val_acc:.4f}")
-        print(f"   LR: {optimizer.param_groups[0]['lr']:.2e}")
+        print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f}")
+        print(f"Val   Loss: {val_loss:.4f} | Val   Acc: {val_acc:.4f}")
 
-        # 学习率调度
-        scheduler.step(val_loss)
-
-        # Early Stopping 检查
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             epochs_no_improve = 0
@@ -879,13 +888,13 @@ def main():
                 }
             }
             torch.save(checkpoint, os.path.join(args.save_dir, 'exp4_model.pth'))
-            print("   ✓ 保存最佳模型（基于验证集）")
+            print("✓ 保存最佳模型（基于验证集）")
         else:
             epochs_no_improve += 1
-            print(f"   ⏳ 验证损失未改善: {epochs_no_improve}/{patience}")
+            print(f"⏳ 验证损失未改善: {epochs_no_improve}/{patience}")
 
             if epochs_no_improve >= patience:
-                print(f"\n   🛑 Early stopping 触发（patience={patience}）")
+                print(f"\n🛑 Early stopping 触发（patience={patience}）")
                 break
 
     # ========================================================
