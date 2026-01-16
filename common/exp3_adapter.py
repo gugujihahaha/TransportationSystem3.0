@@ -30,7 +30,7 @@ class Exp3DataAdapter:
                  target_length: int = 50,
                  enable_cleaning: bool = True,
                  cleaning_mode: str = 'balanced',
-                 use_cleaned_data: bool = False,
+                 use_cleaned_data: bool = True,
                  cleaned_data_path: str = None,
                  kg=None):
         """
@@ -60,11 +60,11 @@ class Exp3DataAdapter:
             'Train', 'Subway', 'Airplane'
         }
 
-        # 根据模式设置清洗参数（仅在不使用清洗后数据时）
-        if not self.use_cleaned_data:
-            self._setup_cleaning_params()
+        # 始终设置清洗参数（修复：无论是否使用清洗后数据都需要这些参数）
+        self._setup_cleaning_params()
 
-            # 初始化清洗器
+        # 仅在不使用清洗后数据时初始化清洗器
+        if not self.use_cleaned_data:
             self.cleaner = TrajectoryCleaner(
                 max_time_gap=self.max_time_gap,
                 max_bearing_change=self.max_bearing_change,
@@ -143,7 +143,7 @@ class Exp3DataAdapter:
 
         with open(self.cleaned_data_path, 'rb') as f:
             data = pickle.load(f)
-            
+
             if len(data) == 3:
                 cleaned_segments, cleaning_stats, cleaning_mode = data
             else:
@@ -177,17 +177,17 @@ class Exp3DataAdapter:
             # 生成增强KG特征（15维）
             try:
                 kg_features = self.kg.extract_kg_features(trajectory)
-                
+
                 # 扩展KG特征为15维（Exp3使用增强KG）
                 enhanced_kg_features = np.zeros((self.target_length, 15), dtype=np.float32)
                 enhanced_kg_features[:, :11] = kg_features
-                
+
                 # 添加额外的4维特征（示例：速度统计、加速度统计等）
                 enhanced_kg_features[:, 11] = np.mean(kg_features[:, 2], axis=0)  # 速度均值
                 enhanced_kg_features[:, 12] = np.std(kg_features[:, 2], axis=0)   # 速度标准差
                 enhanced_kg_features[:, 13] = np.mean(kg_features[:, 3], axis=0)  # 加速度均值
                 enhanced_kg_features[:, 14] = np.std(kg_features[:, 3], axis=0)   # 加速度标准差
-                
+
             except Exception as e:
                 print(f"⚠️ 增强KG特征生成失败: {e}")
                 enhanced_kg_features = np.zeros((self.target_length, 15), dtype=np.float32)
@@ -291,6 +291,11 @@ class Exp3DataAdapter:
         # ========== 第二阶段: 深度清洗 ==========
         if not self.enable_cleaning:
             print("⚠️ 跳过第二阶段清洗")
+            return self._finalize_segments(valid_segments)
+
+        # 检查清洗器是否已初始化
+        if not hasattr(self, 'cleaner'):
+            print("⚠️ 清洗器未初始化，跳过第二阶段清洗")
             return self._finalize_segments(valid_segments)
 
         print(f"\n第二阶段: 深度清洗 (模式: {self.cleaning_mode})...")
