@@ -22,8 +22,8 @@ sys.path.insert(0, SCRIPT_DIR)
 os.chdir(SCRIPT_DIR)
 # ==============================================================================
 
-# 导入 Exp4 专用模型与 Dataset
-from exp4.src.model_weather import TransportationModeClassifierWithWeather
+# 导入 Exp5 专用模型与 Dataset
+from src.model_weak_supervision import WeaklySupervisedContextModel
 from train import TrajectoryDatasetWithWeather
 
 # 设置中文字体 (防止图片乱码)
@@ -93,15 +93,19 @@ def main():
     print(f"     - 天气特征维度: {config['weather_feature_dim']}")
     print(f"     - 类别数: {config['num_classes']}")
     print(f"     - 类别: {list(class_names)}")
+    print(f"     - 上下文损失类型: {config.get('context_loss_type', 'mse')}")
+    print(f"     - 上下文损失权重: {config.get('context_loss_weight', 0.05)}")
 
-    model = TransportationModeClassifierWithWeather(
+    model = WeaklySupervisedContextModel(
         trajectory_feature_dim=config['trajectory_feature_dim'],
         kg_feature_dim=config['kg_feature_dim'],
         weather_feature_dim=config['weather_feature_dim'],
         hidden_dim=config['hidden_dim'],
         num_layers=config['num_layers'],
         num_classes=config['num_classes'],
-        dropout=config.get('dropout', 0.3)
+        dropout=config.get('dropout', 0.3),
+        context_loss_type=config.get('context_loss_type', 'mse'),
+        context_loss_weight=config.get('context_loss_weight', 0.05)
     ).to(DEVICE)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
@@ -169,7 +173,9 @@ def main():
             kg = kg.to(DEVICE)
             weather = weather.to(DEVICE)
 
-            logits = model(traj, kg, weather)
+            output = model(traj, kg, weather)
+            
+            logits = output if not isinstance(output, tuple) else output[0]
             probs = torch.softmax(logits, dim=1)
             preds = torch.argmax(logits, dim=1)
 

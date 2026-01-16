@@ -1,12 +1,13 @@
 """
-训练脚本 (Exp5 - 改进版)
-在 Exp4 基础上添加两阶段数据清洗和弱监督上下文处理
-
-关键改进:
+训练脚本 (Exp5 - 弱监督上下文表示增强)
+核心改进：
 1. 支持三种清洗模式 (strict/balanced/gentle)
 2. 清洗模式独立缓存管理
 3. 完整的质量评估和统计报告
-4. 灵活的清洗参数配置
+4. 弱监督上下文表示增强（GTA-Seg思想）
+   - 上下文特征仅用于改善轨迹编码器表示
+   - 不参与分类决策
+   - embedding-level一致性损失约束
 """
 import os
 import sys
@@ -46,12 +47,14 @@ except ImportError:
 # 尝试导入新版适配器
 from common.exp5_adapter import Exp5DataAdapter
 
-# 导入 Exp4 的模块（复用）
+# 导入 Exp5 的弱监督模型
+from exp5.src.model_weak_supervision import WeaklySupervisedContextModel
+
+# 导入 Exp4 的数据处理模块（复用）
 from exp4.src.data_preprocessing import GeoLifeDataLoader, OSMDataLoader
 from exp4.src.knowledge_graph import EnhancedTransportationKG
 from exp4.src.weather_preprocessing import WeatherDataProcessor
 from exp4.src.feature_extraction_weather import FeatureExtractorWithWeather
-from exp4.src.model_weather import TransportationModeClassifierWithWeather
 
 # ========================== 特征维度常量 ==========================
 TRAJECTORY_FEATURE_DIM = 9
@@ -514,10 +517,26 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
 
 
 def train_epoch(model, dataloader, criterion, optimizer, device,
-                max_grad_norm: float = 1.0):
-    """训练一个 epoch"""
+                max_grad_norm: float = 1.0, context_loss_weight: float = 0.1):
+    """训练一个 epoch（支持弱监督上下文损失）
+
+    Args:
+        model: 弱监督上下文模型
+        dataloader: 数据加载器
+        criterion: 分类损失函数（交叉熵）
+        optimizer: 优化器
+        device: 设备
+        max_grad_norm: 梯度裁剪阈值
+        context_loss_weight: 上下文损失权重 λ
+
+    Returns:
+        avg_loss: 平均总损失
+        accuracy: 训练准确率
+    """
     model.train()
     total_loss = 0.0
+    total_ce_loss = 0.0
+    total_context_loss = 0.0
     correct = 0
     total = 0
     nan_batches = 0
@@ -532,13 +551,30 @@ def train_epoch(model, dataloader, criterion, optimizer, device,
             labels = labels.to(device)
 
             optimizer.zero_grad()
-            logits = model(traj_f, kg_f, weather_f)
-            loss = criterion(logits, labels)
-            loss.backward()
+
+            # 前向传播（获取轨迹表示和上下文表示）
+            logits, trajectory_repr, context_repr = model(
+                traj_f, kg_f, weather_f, return_context=True
+            )
+
+            # 计算分类损失（交叉熵）
+            ce_loss = criterion(logits, labels)
+
+            # 计算上下文一致性损失（embedding-level约束）
+            context_loss = model.compute_context_loss(trajectory_repr, context_repr)
+
+            # 总损失 = CE + λ * L_context
+            total_batch_loss = ce_loss + context_loss_weight * context_loss
+
+            # 反向传播
+            total_batch_loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
             optimizer.step()
 
-            total_loss += loss.item()
+            total_loss += total_batch_loss.item()
+            total_ce_loss += ce_loss.item()
+            total_context_loss += context_loss.item()
+
             preds = torch.argmax(logits, dim=1)
             correct += (preds == labels).sum().item()
             total += labels.size(0)
@@ -551,10 +587,13 @@ def train_epoch(model, dataloader, criterion, optimizer, device,
     if nan_batches > 0:
         print(f"   ⚠️ 本 epoch 跳过 {nan_batches} 个异常批次")
 
-    avg_loss = total_loss / max(len(dataloader) - nan_batches, 1)
+    num_batches = max(len(dataloader) - nan_batches, 1)
+    avg_loss = total_loss / num_batches
+    avg_ce_loss = total_ce_loss / num_batches
+    avg_context_loss = total_context_loss / num_batches
     accuracy = correct / max(total, 1)
 
-    return avg_loss, accuracy
+    return avg_loss, accuracy, avg_ce_loss, avg_context_loss
 
 
 def evaluate(model, dataloader, criterion, device, label_encoder):
@@ -570,7 +609,12 @@ def evaluate(model, dataloader, criterion, device, label_encoder):
             weather_f = weather_f.to(device)
             labels = labels.to(device)
 
-            logits = model(traj_f, kg_f, weather_f)
+            outputs = model(traj_f, kg_f, weather_f)
+            if isinstance(outputs, tuple):
+                logits = outputs[0]
+            else:
+                logits = outputs
+
             total_loss += criterion(logits, labels).item()
 
             all_preds.extend(torch.argmax(logits, dim=1).cpu().numpy())
@@ -725,15 +769,17 @@ def main():
     print(f"  Val:   {len(val_indices)} 样本")
     print(f"  Test:  {len(test_indices)} 样本")
 
-    # 构建模型
-    model = TransportationModeClassifierWithWeather(
+    # 构建弱监督上下文模型
+    model = WeaklySupervisedContextModel(
         trajectory_feature_dim=TRAJECTORY_FEATURE_DIM,
         kg_feature_dim=KG_FEATURE_DIM,
         weather_feature_dim=WEATHER_FEATURE_DIM,
         hidden_dim=args.hidden_dim,
         num_layers=args.num_layers,
         num_classes=num_classes,
-        dropout=args.dropout
+        dropout=args.dropout,
+        context_loss_type='mse',
+        context_loss_weight=0.05
     ).to(args.device)
 
     print(f"\n模型参数量: {sum(p.numel() for p in model.parameters()):,}")
@@ -744,28 +790,35 @@ def main():
     )
     criterion = nn.CrossEntropyLoss()
 
+    # 上下文损失权重 λ
+    context_loss_weight = 0.05
+
     patience = 10
     best_val_loss = float("inf")
     epochs_no_improve = 0
 
     print("\n" + "=" * 80)
-    print("开始训练")
+    print("开始训练（弱监督上下文表示增强）")
     print("=" * 80)
 
     for epoch in range(args.epochs):
         print(f"\nEpoch {epoch+1}/{args.epochs}")
 
-        train_loss, train_acc = train_epoch(
+        # 训练（包含上下文一致性损失）
+        train_loss, train_acc, train_ce_loss, train_context_loss = train_epoch(
             model, train_loader, criterion, optimizer, args.device,
-            max_grad_norm=args.max_grad_norm
+            max_grad_norm=args.max_grad_norm,
+            context_loss_weight=context_loss_weight
         )
 
+        # 验证（仅使用分类损失）
         val_loss, report, _, _ = evaluate(
             model, val_loader, criterion, args.device, label_encoder
         )
         val_acc = report.get('accuracy', 0.0)
 
         print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f}")
+        print(f"  CE Loss: {train_ce_loss:.4f} | Context Loss: {train_context_loss:.4f}")
         print(f"Val   Loss: {val_loss:.4f} | Val   Acc: {val_acc:.4f}")
 
         if val_loss < best_val_loss:
@@ -786,7 +839,9 @@ def main():
                     'hidden_dim': args.hidden_dim,
                     'num_layers': args.num_layers,
                     'num_classes': num_classes,
-                    'dropout': args.dropout
+                    'dropout': args.dropout,
+                    'context_loss_type': 'mse',
+                    'context_loss_weight': context_loss_weight
                 },
                 'cleaning_stats': cleaning_stats,
                 'cleaning_mode': args.cleaning_mode
