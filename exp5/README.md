@@ -1,189 +1,384 @@
-# Exp5: 数据清洗 + 弱监督上下文增强
+ # Exp5: 弱监督上下文表示增强
 
 ## 实验概述
 
-实验五在 Exp4 的基础上，通过两阶段数据清洗和弱监督上下文增强，进一步提升交通方式识别的准确性和鲁棒性。
+Exp5采用GTA-Seg（Graph-based Temporal Attention for Semantic Segmentation）思想，探索弱监督上下文表示增强的可能性。与Exp4的硬拼接不同，Exp5中上下文特征（KG+天气）仅用于约束轨迹表示学习，不直接参与分类决策。
 
-### 核心改进
+## 实验设计
 
-1. **两阶段数据清洗**
-   - 第一阶段：基础处理（固定序列长度、缺失特征填充）
-   - 第二阶段：深度清洗（异常值剔除、轨迹连续性处理、方向修正）
+### 特征组合
 
-2. **弱监督上下文增强**
-   - OSM/天气特征仅用于表示层（encoder）
-   - 不直接影响决策层
-   - 避免模型对不可靠信号过拟合
+- **轨迹特征**: 9维
+  - speed（速度）
+  - acceleration（加速度）
+  - distance（累计距离）
+  - bearing（方向角）
+  - bearing_change（方向变化）
+  - speed_change（速度变化）
+  - time_interval（时间间隔）
+  - distance_change（距离变化）
+  - duration（持续时间）
 
-3. **GTA-Seg 思想迁移**
-   - 不干预决策层
-   - 只改善 encoder 表示
+- **上下文特征**: 27维（KG 15维 + 天气 12维）
+  - KG特征：道路类型、POI距离、空间语义、交通网络等
+  - 天气特征：温度、降水量、降雪量、风速、湿度等
 
-## 目录结构
+### 融合策略
+
+- **弱监督约束**: 上下文特征仅约束轨迹表示学习
+- **决策层**: 仅轨迹表示影响分类决策
+- **GTA-Seg思想**: 不干预决策层，只改善encoder表示
+
+## 模型架构
+
+### 弱监督上下文表示增强模型
 
 ```
-exp5/
-├── src/
-│   ├── __init__.py
-│   ├── trajectory_cleaner.py    # 轨迹清洗器
-│   └── exp5_adapter.py          # Exp5数据适配器
-├── cache/                        # 特征缓存目录
-├── checkpoints/                  # 模型保存目录
-├── evaluation_results/           # 评估结果目录
-├── train.py                      # 训练脚本
-├── evaluate.py                   # 评估脚本
-└── README.md                     # 本文件
+轨迹输入: (batch, 50, 9)  轨迹特征序列
+    ↓
+┌─────────────────────────────────────┐
+│      轨迹Bi-LSTM编码器           │
+│  • input_dim = 9                  │
+│  • hidden_dim = 128               │
+│  • num_layers = 2                 │
+│  • bidirectional = True           │
+└─────────────────┬───────────────┘
+                  │
+                  ▼
+         轨迹原始表示 (batch, 256)
+                  │
+                  ▼
+┌─────────────────────────────────────┐
+│      轨迹投影层（用于对齐）     │
+│  • Linear(256, 128)               │
+│  • ReLU + Dropout(0.3)            │
+└─────────────────┬───────────────┘
+                  │
+                  ▼
+         轨迹表示 (batch, 128)
+
+上下文输入1: (batch, 50, 15)  KG特征序列
+    ↓
+┌─────────────────────────────────────┐
+│      KGBi-LSTM编码器           │
+│  • input_dim = 15                 │
+│  • hidden_dim = 64                │
+│  • num_layers = 2                 │
+│  • bidirectional = True           │
+└─────────────────┬───────────────┘
+                  │
+                  ▼
+         KG表示 (batch, 128)
+
+上下文输入2: (batch, 50, 12)  天气特征序列
+    ↓
+┌─────────────────────────────────────┐
+│      天气Bi-LSTM编码器         │
+│  • input_dim = 12                 │
+│  • hidden_dim = 32                │
+│  • num_layers = 2                 │
+│  • bidirectional = True           │
+└─────────────────┬───────────────┘
+                  │
+                  ▼
+         天气表示 (batch, 64)
+                  │
+                  ▼
+┌─────────────────────────────────────┐
+│      上下文融合层（KG + weather）│
+│  • concat([KG, weather])         │
+│  • Linear(192, 128)               │
+│  • ReLU + Dropout(0.3)            │
+└─────────────────┬───────────────┘
+                  │
+                  ▼
+         上下文表示 (batch, 128)
+                  │
+                  ▼
+┌─────────────────────────────────────┐
+│      分类层（仅接收轨迹表示）   │
+│  • Linear(128, 64)                │
+│  • ReLU + Dropout(0.3)            │
+│  • Linear(64, 7)                  │
+└─────────────────┬───────────────┘
+                  │
+                  ▼
+         类别logits (batch, 7)
+
+训练阶段：
+  • 分类损失: L_ce = CrossEntropy(logits, labels)
+  • 上下文一致性损失: L_context = MSE/Cosine(trajectory_repr, context_repr)
+  • 总损失: L = L_ce + λ * L_context
+
+验证/测试阶段：
+  • 仅使用分类损失: L = L_ce
 ```
 
-## 数据清洗详情
+## 数据处理
 
-### 第一阶段清洗（基础处理）
+### 数据清洗
 
-- 保持固定序列长度（50）
-- 缺失特征用零填充
-- 不丢弃任何样本
-- 保留原始标签，类别完全一致
+采用统一的两阶段数据清洗流程：
 
-### 第二阶段清洗（深度清洗）
+**第一阶段：基础预处理**
+- 填充缺失特征
+- 统一轨迹序列长度（50）
+- 快速平滑速度/加速度异常点
 
-#### 1. 异常值剔除
-- 速度异常：步行 > 10 m/s，车辆 > 50 m/s
-- 加速度异常：超过 10 m/s²
-- 删除异常点或用前后均值/中位数平滑
+**第二阶段：深度清洗**
+- 剔除异常轨迹段（速度/加速度/方向过大）
+- 插值缺失点，处理时间跳变
+- 平滑异常方向（bearing）
+- 统一序列长度
+- 记录清洗统计信息
 
-#### 2. 轨迹连续性处理
-- 时间戳跳变过大的点进行插值或平滑
-- 小段缺失点填充为线性插值
+### 上下文数据处理
 
-#### 3. 方向/角度异常修正
-- 突然改变方向的点，若非合理转弯，做平滑处理
+复用Exp4的上下文数据处理流程：
 
-#### 4. 序列长度统一
-- 删除或填充后，保证每条轨迹段仍为固定长度（50）
+1. **知识图谱构建**
+   - 道路类型分类
+   - POI距离（公交站/地铁站）
+   - 空间语义（市区/郊区）
+   - 交通网络（道路连通性）
 
-#### 5. 统计过滤
-- 删除过短轨迹段或异常比例过高的轨迹
-- 保证各类别样本均衡（但不丢弃有效类别）
+2. **天气数据处理**
+   - 加载2007-2012年小时级天气数据
+   - 解析时间戳和气象参数
+   - 时间对齐和缺失值处理
+   - 特征归一化
+
+3. **降级特征处理**
+   - 完全缺失：使用零向量替代
+   - 部分缺失：使用可用特征，缺失部分用零填充
+   - 时间不匹配：使用最近时间点的数据
+
+### 数据划分
+
+- **训练集**: 70%
+- **验证集**: 10%
+- **测试集**: 20%
+- **划分策略**: 分层采样（stratified sampling）
+
+## 训练配置
+
+### 超参数
+
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| learning_rate | 5e-5 | AdamW优化器学习率 |
+| batch_size | 32 | 批次大小 |
+| epochs | 50 | 最大训练轮数 |
+| hidden_dim | 128 | LSTM隐藏层维度 |
+| num_layers | 2 | LSTM层数 |
+| dropout | 0.3 | Dropout比率 |
+| weight_decay | 1e-4 | L2正则化 |
+| max_grad_norm | 1.0 | 梯度裁剪阈值 |
+| cleaning_mode | balanced | 数据清洗模式 |
+| context_loss_type | mse | 上下文损失类型（mse/cosine/combined） |
+| context_loss_weight | 0.05 | 上下文损失权重 λ |
+
+### 训练策略
+
+- **优化器**: AdamW
+- **学习率调度**: ReduceLROnPlateau
+- **早停机制**: 验证损失10轮不改善则停止
+- **梯度裁剪**: 最大梯度范数为1.0
+- **损失函数**: 复合损失（分类损失 + 上下文一致性损失）
+- **NaN/Inf检测**: 自动跳过异常批次
+- **样本保留**: 不丢弃任何样本，使用降级特征
+
+### 损失函数
+
+**训练阶段**：
+```
+L_ce = CrossEntropy(logits, labels)
+L_context = MSE(trajectory_repr, context_repr)
+L_total = L_ce + λ * L_context
+```
+
+**验证/测试阶段**：
+```
+L = CrossEntropy(logits, labels)
+```
+
+## 核心创新
+
+### 1. 弱监督表示增强
+
+- **上下文约束**: KG+天气特征仅用于约束轨迹表示学习
+- **决策独立**: 分类器仅接收轨迹表示，不受上下文直接影响
+- **GTA-Seg思想**: 不干预决策层，只改善encoder表示
+
+### 2. Embedding-level一致性损失
+
+- **MSE损失**: 最小化轨迹表示与上下文表示的欧氏距离
+- **Cosine损失**: 最大化轨迹表示与上下文表示的余弦相似度
+- **Combined损失**: MSE + Cosine组合
+
+### 3. 融合机制消融
+
+- **Exp4**: 硬拼接（trajectory + KG + weather → classifier）
+- **Exp5**: 弱监督约束（trajectory → classifier，KG+weather → constraint）
+
+## 与Exp4的对比
+
+### 模型结构对比
+
+| 层面 | Exp4（硬拼接） | Exp5（弱监督） |
+|------|--------------|---------------|
+| **轨迹编码** | Bi-LSTM → 256维 | Bi-LSTM → 256维 → 投影128维 |
+| **上下文编码** | Bi-LSTM → KG 128维 + 天气 64维 | Bi-LSTM → KG 128维 + 天气 64维 → 融合128维 |
+| **特征融合** | 三特征硬拼接（448维） | **不拼接**，上下文仅作为约束 |
+| **分类器输入** | 融合后的特征（64维） | **仅轨迹表示**（128维） |
+| **上下文作用** | 直接参与分类决策 | **约束轨迹表示学习** |
+
+### 训练目标对比
+
+| 损失类型 | Exp4 | Exp5 |
+|---------|------|------|
+| **分类损失** | `L = CE` | `L = CE` |
+| **上下文损失** | 无 | `L_context = MSE/Cosine` |
+| **总损失** | `L = CE` | `L = CE + λ * L_context` |
+| **损失权重** | λ = 0 | λ = 0.1（可调） |
+
+### 梯度流向对比
+
+**Exp4 梯度流向**：
+```
+分类损失 (CE)
+  ↓
+分类器
+  ↓
+融合层
+  ↓
+├─→ 轨迹编码器
+├─→ KG编码器
+└─→ 天气编码器
+```
+
+**Exp5 梯度流向**：
+```
+分类损失 (CE)
+  ↓
+分类器（仅接收轨迹表示）
+  ↓
+轨迹编码器
+  ↓
+轨迹投影层
+  ↓
+├─→ 轨迹编码器（来自CE）
+└─→ 轨迹编码器（来自L_context，通过一致性约束）
+
+上下文一致性损失 (L_context)
+  ↓
+├─→ 轨迹投影层（约束轨迹表示）
+├─→ KG编码器
+└─→ 天气编码器
+```
 
 ## 使用方法
 
 ### 训练模型
 
 ```bash
-# 使用 PyCharm 直接运行（推荐）
-python exp5/train.py
-
-# 或使用命令行参数
-python exp5/train.py --geolife_root ../data/Geolife\ Trajectories\ 1.3 \
-                     --osm_path ../data/exp3.geojson \
-                     --weather_path ../data/beijing_weather_hourly_2007_2012.csv \
-                     --batch_size 32 \
-                     --epochs 50 \
-                     --lr 5e-5
+cd exp5
+python train.py
 ```
 
 ### 评估模型
 
 ```bash
-python exp5/evaluate.py
+cd exp5
+python evaluate.py
 ```
 
-## 训练参数
+### 快速模式
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `geolife_root` | `../data/Geolife Trajectories 1.3` | GeoLife 数据集路径 |
-| `osm_path` | `../data/exp3.geojson` | OSM GeoJSON 路径 |
-| `weather_path` | `../data/beijing_weather_hourly_2007_2012.csv` | 天气数据路径 |
-| `batch_size` | 32 | 批次大小 |
-| `epochs` | 50 | 训练轮数 |
-| `lr` | 5e-5 | 学习率 |
-| `hidden_dim` | 128 | 隐藏层维度 |
-| `num_layers` | 2 | LSTM 层数 |
-| `dropout` | 0.3 | Dropout 比例 |
-| `max_grad_norm` | 1.0 | 梯度裁剪阈值 |
+使用预处理的基础数据，加速训练：
 
-## 输出文件
+```python
+# 在train.py中设置
+use_base_data = True
+```
 
-### 训练输出
+### 调整上下文损失类型
 
-- `checkpoints/exp5_model.pth`: 最佳模型文件
-- `cache/processed_features_weather_v5_cleaning.pkl`: 特征缓存
-- `cache/cache_meta_cleaning.json`: 缓存元数据（含清洗统计）
+```python
+# 在train.py中修改模型初始化
+model = WeaklySupervisedContextModel(
+    ...
+    context_loss_type='cosine',  # 或 'mse', 'combined'
+    context_loss_weight=0.1
+)
+```
 
-### 评估输出
-
-- `evaluation_results/evaluation_report.json`: 评估报告（含清洗统计）
-- `evaluation_results/predictions_exp5.csv`: 预测结果
-- `evaluation_results/confusion_matrix.png`: 混淆矩阵图
-- `evaluation_results/per_class_f1_scores.png`: 各类别 F1 分数图
-- `evaluation_results/error_analysis.csv`: 错误分析
-- `evaluation_results/cleaning_stats.json`: 清洗统计报告
-
-## 与其他实验的对比
-
-| 实验 | 特征 | 准确率 | 特点 |
-|------|------|--------|------|
-| Exp1 | 仅轨迹 | 62.82% | 基线模型 |
-| Exp2 | 轨迹+KG | 75.05% | 知识图谱增强 |
-| Exp3 | 轨迹+增强KG | 72.22% | 增强知识图谱 |
-| Exp4 | 轨迹+KG+天气 | 71.17% | 天气数据增强 |
-| Exp5 | 轨迹+KG+天气+清洗 | 待测试 | 数据清洗+弱监督 |
-
-## 技术细节
-
-### 轨迹清洗器 (TrajectoryCleaner)
-
-主要方法：
-- `clean_segment()`: 清洗单个轨迹段
-- `_remove_outliers()`: 剔除异常值
-- `_smooth_outliers()`: 平滑异常点
-- `_handle_continuity()`: 处理轨迹连续性
-- `_smooth_bearing()`: 平滑方向异常
-- `normalize_sequence_length()`: 统一序列长度
-
-### Exp5 数据适配器 (Exp5DataAdapter)
-
-继承自 `Exp4DataAdapter`，添加：
-- 第二阶段清洗功能
-- 清洗统计收集
-- 清洗摘要打印
-
-## 注意事项
-
-1. **缓存管理**
-   - 首次运行会生成缓存文件
-   - 如需重新生成，删除 `cache/` 目录下的文件或使用 `--clear_cache` 参数
-
-2. **数据清洗**
-   - 清洗过程会剔除部分异常样本
-   - 保留率通常在 85-95% 之间
-   - 可通过调整 `TrajectoryCleaner` 参数控制清洗强度
-
-3. **弱监督上下文**
-   - OSM/天气特征仅用于表示层
-   - 不直接影响决策层
-   - 避免对不可靠信号过拟合
-
-4. **Windows 兼容性**
-   - 建议设置 `num_workers=0` 避免多进程问题
-
-## 依赖项
-
-- PyTorch >= 2.0.0
-- NumPy >= 1.24.0
-- Pandas >= 2.0.0
-- Scikit-learn >= 1.3.0
-- SciPy >= 1.10.0
-- Matplotlib >= 3.7.0
-- Seaborn >= 0.12.0
-- tqdm >= 4.65.0
-
-## 引用
-
-如果使用本实验代码，请引用：
+## 文件说明
 
 ```
-Exp5: 数据清洗 + 弱监督上下文增强
-基于多源数据融合的交通方式识别系统
+exp5/
+├── src/
+│   └── model_weak_supervision.py  # 弱监督上下文表示增强模型
+├── train.py                      # 训练脚本
+├── evaluate.py                   # 评估脚本
+├── cache/                        # 特征缓存（复用Exp4）
+├── checkpoints/                  # 模型检查点
+│   └── exp5_model_balanced.pth  # 最佳模型
+└── evaluation_results/           # 评估结果
+    ├── confusion_matrix.png      # 混淆矩阵
+    ├── f1_scores.png            # F1分数图
+    ├── predictions.csv          # 预测结果
+    └── errors.csv               # 错误分析
 ```
+
+## 与其他实验对比
+
+| 实验 | 特征组合 | 融合策略 | 准确率 | 加权F1 |
+|------|---------|---------|--------|---------|
+| Exp1 | 仅轨迹 | 无融合 | 69.60% | 0.6818 |
+| Exp2 | 轨迹+基础KG | 硬拼接 | 79.49% | 0.7916 |
+| Exp3 | 轨迹+增强KG | 硬拼接 | 78.25% | 0.7793 |
+| Exp4 | 轨迹+KG+天气 | 硬拼接 | 74.80% | 0.7373 |
+| **Exp5** | 轨迹+KG+天气 | **弱监督约束** | **待测试** | **待测试** |
+
+## 实验目标
+
+1. **验证弱监督有效性**: 探索上下文特征作为弱监督信号的有效性
+2. **对比融合策略**: 对比硬拼接vs弱监督约束的不同融合策略
+3. **GTA-Seg思想验证**: 验证GTA-Seg思想在交通方式识别中的适用性
+4. **特征作用分析**: 分析上下文特征在表示学习中的作用方式
+
+## 预期结果
+
+1. **性能提升**: 相比Exp4，准确率可能有所提升
+2. **泛化能力**: 弱监督约束可能提高模型泛化能力
+3. **特征利用**: 上下文特征被更有效地利用
+4. **融合机制**: 验证弱监督约束作为融合机制的有效性
+
+## 优化方向
+
+1. **损失权重调优**: 调整λ值（context_loss_weight）找到最优平衡
+2. **损失类型选择**: 对比MSE、Cosine、Combined三种损失类型
+3. **投影层设计**: 优化轨迹投影层和上下文融合层
+4. **注意力机制**: 引入注意力机制增强特征交互
+5. **多任务学习**: 结合其他辅助任务进一步提升性能
+
+## 理论基础
+
+### GTA-Seg思想
+
+GTA-Seg（Graph-based Temporal Attention for Semantic Segmentation）的核心思想是：
+- **表示增强**: 使用辅助信息改善主任务的特征表示
+- **决策独立**: 辅助信息不直接参与决策，仅约束表示学习
+- **弱监督**: 辅助信息作为弱监督信号，提供额外约束
+
+### 弱监督学习
+
+弱监督学习的特点：
+- **标签不完整**: 辅助任务可能没有完整标签
+- **噪声标签**: 辅助任务标签可能存在噪声
+- **隐式监督**: 通过一致性约束提供隐式监督
+
+## 结论
+
+Exp5采用弱监督上下文表示增强策略，探索了上下文特征作为弱监督信号的可能性。与Exp4的硬拼接不同，Exp5中上下文特征仅用于约束轨迹表示学习，不直接参与分类决策。该实验构成了融合机制的消融研究，为理解不同融合策略的有效性提供了重要视角。

@@ -54,25 +54,46 @@ class TrajectoryDataset(Dataset):
 # ============================================================
 # Data loading (✅ 修改 2: 完整替换 load_data 函数)
 # ============================================================
-def load_data(geolife_root: str, max_users: int = None, use_base_data: bool = True, cleaning_mode: str = 'balanced'):
+def load_data(geolife_root: str, max_users: int = None, use_base_data: bool = True, 
+              use_cleaned_data: bool = True, cleaning_mode: str = 'balanced'):
     """
-    加载数据（支持使用基础数据）
+    加载数据（支持使用清洗后的数据）
 
     Args:
         geolife_root: GeoLife数据根目录
         max_users: 最大用户数
-        use_base_data: 是否使用预处理的基础数据（推荐）
+        use_base_data: 是否使用预处理的基础数据
+        use_cleaned_data: 是否使用清洗后的数据（推荐）
         cleaning_mode: 数据清洗模式 ('strict', 'balanced', 'gentle')
 
     Returns:
         processed_segments: List of (features, label)
+        cleaning_stats: 清洗统计信息
     """
     BASE_DATA_PATH = os.path.join(
         os.path.dirname(geolife_root),
         'processed/base_segments.pkl'
     )
+    
+    # 获取清洗后数据路径
+    from common.cleaned_data_loader import get_cleaned_data_path
+    CLEANED_DATA_PATH = get_cleaned_data_path(cleaning_mode)
 
-    # ========== 快速模式：使用基础数据 ==========
+    # ========== 优先：使用清洗后的数据 ==========
+    if use_cleaned_data and os.path.exists(CLEANED_DATA_PATH):
+        print("\n" + "=" * 80)
+        print("使用清洗后的数据（推荐模式）")
+        print("=" * 80)
+        
+        adapter = Exp1DataAdapter(
+            use_cleaned_data=True,
+            cleaned_data_path=CLEANED_DATA_PATH
+        )
+        processed = adapter.load_cleaned_data()
+        cleaning_stats = adapter.get_cleaning_stats()
+        return processed, cleaning_stats
+
+    # ========== 次优：使用基础数据 ==========
     if use_base_data and os.path.exists(BASE_DATA_PATH):
         print("\n" + "=" * 80)
         print("使用预处理的基础数据（快速模式）")
@@ -89,10 +110,12 @@ def load_data(geolife_root: str, max_users: int = None, use_base_data: bool = Tr
 
     # ========== 传统模式：从头处理 ==========
     else:
-        if use_base_data:
-            print(f"\n⚠️  警告: 基础数据文件不存在: {BASE_DATA_PATH}")
+        if use_base_data or use_cleaned_data:
+            print(f"\n⚠️  警告: 清洗后数据或基础数据文件不存在")
+            print(f"    清洗后数据: {CLEANED_DATA_PATH}")
+            print(f"    基础数据: {BASE_DATA_PATH}")
             print("    将使用传统方式处理数据（较慢）")
-            print("    建议先运行: python scripts/generate_base_data.py\n")
+            print("    建议先运行: python scripts/generate_cleaned_base_data.py\n")
 
         print("=" * 80)
         print("加载 GeoLife 数据（传统模式）")
@@ -190,7 +213,9 @@ def main():
 
     # ===== ✅ 修改 3: main 函数添加参数 =====
     parser.add_argument("--use_base_data", action="store_true", default=True,
-                       help="使用预处理的基础数据（推荐，大幅加速）")
+                       help="使用预处理的基础数据")
+    parser.add_argument("--use_cleaned_data", action="store_true", default=True,
+                       help="使用清洗后的数据（推荐，避免重复清洗）")
     parser.add_argument("--cleaning_mode", type=str, default='balanced',
                        choices=['strict', 'balanced', 'gentle'],
                        help="数据清洗模式: strict(严格), balanced(平衡), gentle(温和)")
@@ -209,6 +234,7 @@ def main():
     segments, cleaning_stats = load_data(
         args.geolife_root,
         use_base_data=args.use_base_data,
+        use_cleaned_data=args.use_cleaned_data,
         cleaning_mode=args.cleaning_mode
     )
 
