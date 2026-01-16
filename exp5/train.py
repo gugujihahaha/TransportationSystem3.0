@@ -207,11 +207,17 @@ def normalize_features_safe(features: np.ndarray) -> np.ndarray:
 
 def load_data(geolife_root: str, osm_path: str, weather_path: str,
               max_users: int = None, use_base_data: bool = True,
-              cleaning_mode: str = 'balanced'):
+              use_cleaned_data: bool = True, cleaning_mode: str = 'balanced'):
     """
     加载所有数据 - Exp5版本（含第二阶段清洗）
 
     Args:
+        geolife_root: GeoLife数据根目录
+        osm_path: OSM数据路径
+        weather_path: 天气数据路径
+        max_users: 最大用户数
+        use_base_data: 是否使用预处理的基础数据
+        use_cleaned_data: 是否使用清洗后的数据（推荐）
         cleaning_mode: 清洗模式 ('strict', 'balanced', 'gentle')
     """
     # 获取缓存路径
@@ -222,6 +228,10 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
         os.path.dirname(geolife_root),
         'processed/base_segments.pkl'
     )
+    
+    # 获取清洗后数据路径
+    from common.cleaned_data_loader import get_cleaned_data_path
+    CLEANED_DATA_PATH = get_cleaned_data_path(cleaning_mode)
 
     geolife_loader = GeoLifeDataLoader(geolife_root)
     users = geolife_loader.get_all_users()
@@ -304,6 +314,53 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
 
     processed_segments_with_time = None
     adapter = None
+
+    # ✅ 优先：使用清洗后的数据
+    if use_cleaned_data and HAS_COMMON and os.path.exists(CLEANED_DATA_PATH):
+        print(f"\n{'='*80}")
+        print(f"阶段 3: 使用清洗后数据（推荐模式 - 清洗模式: {cleaning_mode}）")
+        print(f"{'='*80}\n")
+
+        try:
+            adapter = Exp5DataAdapter(
+                use_cleaned_data=True,
+                cleaned_data_path=CLEANED_DATA_PATH,
+                kg=kg,
+                weather=weather_processor
+            )
+            features = adapter.load_cleaned_data()
+            
+            # 转换为训练格式
+            all_features_and_labels = []
+            all_labels_str = []
+            for trajectory, kg_features, weather_features, label in features:
+                all_labels_str.append(label)
+                all_features_and_labels.append((trajectory, kg_features, weather_features, label))
+            
+            # 创建label_encoder
+            label_encoder = LabelEncoder().fit(all_labels_str)
+            # 重新编码所有标签
+            all_features_and_labels = [
+                (traj, kg_feat, weather_feat, label_encoder.transform([label])[0])
+                for traj, kg_feat, weather_feat, label in all_features_and_labels
+            ]
+            
+            cleaning_stats = adapter.get_cleaning_stats()
+            print(f"✅ 清洗后数据加载完成: {len(all_features_and_labels)} 个样本")
+            
+            # 保存缓存
+            with open(cache_paths['features'], 'wb') as f:
+                pickle.dump((all_features_and_labels, label_encoder, cleaning_stats), f, protocol=pickle.HIGHEST_PROTOCOL)
+            save_cache_metadata(cache_paths, osm_path, weather_path, geolife_root, 
+                              len(all_features_and_labels), label_encoder, cleaning_stats, cleaning_mode)
+            
+            return all_features_and_labels, kg, weather_processor, label_encoder, cleaning_stats
+            
+        except Exception as e:
+            print(f"⚠️ 清洗后数据加载失败: {e}，尝试其他模式")
+            import traceback
+            traceback.print_exc()
+            processed_segments_with_time = None
 
     # 快速模式：使用基础数据 + Exp5适配器（含第二阶段清洗）
     if use_base_data and HAS_COMMON and os.path.exists(BASE_DATA_PATH):
@@ -643,6 +700,7 @@ def main():
             weather_path = '../data/beijing_weather_hourly_2007_2012.csv'
 
             use_base_data = True
+            use_cleaned_data = True  # 使用清洗后的数据（推荐）
             max_users = None
 
             # ✅ 新增：清洗模式配置
@@ -671,6 +729,8 @@ def main():
         parser.add_argument('--weather_path', type=str, default='../data/beijing_weather_hourly_2007_2012.csv')
 
         parser.add_argument('--use_base_data', action='store_true', default=True)
+        parser.add_argument('--use_cleaned_data', action='store_true', default=True,
+                          help='使用清洗后的数据（推荐，避免重复清洗）')
         parser.add_argument('--max_users', type=int, default=None)
 
         # ✅ 新增：清洗模式参数
@@ -725,7 +785,9 @@ def main():
     # 加载数据
     all_features_and_labels, kg, weather_processor, label_encoder, cleaning_stats = load_data(
         args.geolife_root, args.osm_path, args.weather_path, args.max_users,
-        use_base_data=args.use_base_data, cleaning_mode=args.cleaning_mode
+        use_base_data=args.use_base_data,
+        use_cleaned_data=args.use_cleaned_data,
+        cleaning_mode=args.cleaning_mode
     )
 
     # 数据集划分
