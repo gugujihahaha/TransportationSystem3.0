@@ -29,30 +29,21 @@ class Exp2DataAdapter:
     def __init__(self,
                  target_length: int = 50,
                  enable_cleaning: bool = True,
-                 cleaning_mode: str = 'balanced',
-                 use_cleaned_data: bool = True,
-                 cleaned_data_path: str = None,
-                 kg=None):
+                 cleaning_mode: str = 'balanced'):
         """
         初始化Exp2数据适配器
 
         Args:
             target_length: 目标序列长度
-            enable_cleaning: 是否启用第二阶段清洗（当use_cleaned_data=True时忽略）
-            cleaning_mode: 清洗模式（当use_cleaned_data=True时忽略）
+            enable_cleaning: 是否启用第二阶段清洗
+            cleaning_mode: 清洗模式
                 - 'strict': 严格模式 (高质量，低保留率)
                 - 'balanced': 平衡模式 (推荐)
                 - 'gentle': 温和模式 (高保留率)
-            use_cleaned_data: 是否使用清洗后的数据（推荐）
-            cleaned_data_path: 清洗后数据路径
-            kg: 知识图谱实例（用于生成KG特征）
         """
         self.target_length = target_length
         self.enable_cleaning = enable_cleaning
         self.cleaning_mode = cleaning_mode
-        self.use_cleaned_data = use_cleaned_data
-        self.cleaned_data_path = cleaned_data_path
-        self.kg = kg
 
         # 统一7类标签（任务定义统一）
         self.valid_labels = {
@@ -60,19 +51,18 @@ class Exp2DataAdapter:
             'Train', 'Subway', 'Airplane'
         }
 
-        # 始终设置清洗参数（修复：无论是否使用清洗后数据都需要这些参数）
+        # 根据模式设置清洗参数
         self._setup_cleaning_params()
 
-        # 仅在不使用清洗后数据时初始化清洗器
-        if not self.use_cleaned_data:
-            self.cleaner = TrajectoryCleaner(
-                max_time_gap=self.max_time_gap,
-                max_bearing_change=self.max_bearing_change,
-                min_segment_length=self.min_segment_length,
-                max_outlier_ratio=self.max_outlier_ratio,
-                enable_smoothing=self.enable_smoothing,
-                smoothing_window=self.smoothing_window
-            )
+        # 初始化清洗器
+        self.cleaner = TrajectoryCleaner(
+            max_time_gap=self.max_time_gap,
+            max_bearing_change=self.max_bearing_change,
+            min_segment_length=self.min_segment_length,
+            max_outlier_ratio=self.max_outlier_ratio,
+            enable_smoothing=self.enable_smoothing,
+            smoothing_window=self.smoothing_window
+        )
 
         # 统计信息
         self.cleaning_stats = {
@@ -106,107 +96,6 @@ class Exp2DataAdapter:
             self.max_outlier_ratio = 0.25
             self.enable_smoothing = True
             self.smoothing_window = 5
-
-    def load_cleaned_data(self) -> List[Tuple[np.ndarray, np.ndarray, str]]:
-        """
-        加载清洗后的数据并生成KG特征（推荐方式）
-
-        Returns:
-            处理后的数据列表 [(trajectory, kg_features, label), ...]
-        """
-        if not self.use_cleaned_data:
-            print("⚠️ 未启用清洗后数据模式，请设置 use_cleaned_data=True")
-            return []
-
-        if not self.cleaned_data_path:
-            print("❌ 错误: 未指定清洗后数据路径")
-            return []
-
-        if self.kg is None:
-            print("❌ 错误: 未传入知识图谱实例（kg参数）")
-            return []
-
-        print(f"\n{'=' * 80}")
-        print(f"Exp2 数据适配 - 加载清洗后数据 + 生成KG特征")
-        print(f"{'=' * 80}\n")
-
-        import os
-        import pickle
-
-        if not os.path.exists(self.cleaned_data_path):
-            print(f"❌ 错误: 找不到清洗后数据: {self.cleaned_data_path}")
-            print("\n请先运行以下命令生成清洗后数据:")
-            print("  python scripts/generate_cleaned_base_data.py")
-            return []
-
-        print(f"正在加载清洗后数据: {self.cleaned_data_path}")
-
-        with open(self.cleaned_data_path, 'rb') as f:
-            data = pickle.load(f)
-
-            if len(data) == 3:
-                cleaned_segments, cleaning_stats, cleaning_mode = data
-            else:
-                cleaned_segments, cleaning_stats = data
-                cleaning_mode = 'unknown'
-
-        print(f"   ✓ 加载完成: {len(cleaned_segments)} 个轨迹段")
-        print(f"   ✓ 清洗模式: {cleaning_mode}")
-
-        # 打印清洗统计
-        self._print_cleaned_stats(cleaning_stats)
-
-        # 处理清洗后的数据（轨迹 + KG特征）
-        features = []
-        for seg in tqdm(cleaned_segments, desc="[生成KG特征]"):
-            # 提取清洗后的轨迹
-            trajectory = seg['cleaned_trajectory']
-            label = seg['label']
-
-            # 长度规范化（如果需要）
-            if len(trajectory) != self.target_length:
-                if len(trajectory) > self.target_length:
-                    indices = np.linspace(0, len(trajectory) - 1,
-                                          self.target_length, dtype=int)
-                    trajectory = trajectory[indices]
-                else:
-                    padding = np.zeros((self.target_length - len(trajectory), 9),
-                                       dtype=np.float32)
-                    trajectory = np.vstack([trajectory, padding])
-
-            # 生成KG特征
-            try:
-                kg_features = self.kg.extract_kg_features(trajectory)
-            except Exception as e:
-                print(f"⚠️ KG特征生成失败: {e}")
-                kg_features = np.zeros((self.target_length, 11), dtype=np.float32)
-
-            features.append((trajectory, kg_features, label))
-
-        print(f"\n✅ 处理完成: {len(features)} 个样本")
-        print(f"   - 轨迹特征: {trajectory.shape}")
-        print(f"   - KG特征: {kg_features.shape}")
-
-        return features
-
-    def _print_cleaned_stats(self, cleaning_stats: Dict):
-        """打印清洗统计信息"""
-        print("\n" + "=" * 80)
-        print("数据清洗统计")
-        print("=" * 80)
-
-        print(f"\n清洗统计:")
-        print(f"  - 原始轨迹段: {cleaning_stats.get('total_segments', 0):,}")
-        print(f"  - 保留轨迹段: {cleaning_stats.get('segments_kept', 0):,}")
-        print(f"  - 丢弃轨迹段: {cleaning_stats.get('segments_discarded', 0):,}")
-        print(f"  - 保留率: {cleaning_stats.get('segments_kept', 0) / max(cleaning_stats.get('total_segments', 1), 1) * 100:.2f}%")
-
-        print(f"\n清洗操作:")
-        print(f"  - 剔除异常点: {cleaning_stats.get('outliers_removed', 0):,}")
-        print(f"  - 插值点数: {cleaning_stats.get('points_interpolated', 0):,}")
-        print(f"  - 平滑点数: {cleaning_stats.get('points_smoothed', 0):,}")
-
-        print("=" * 80 + "\n")
 
     def process_segments(self, base_segments: List[dict]) -> List[Tuple[np.ndarray, str]]:
         """
@@ -280,11 +169,6 @@ class Exp2DataAdapter:
         # ========== 第二阶段: 深度清洗 ==========
         if not self.enable_cleaning:
             print("⚠️ 跳过第二阶段清洗")
-            return self._finalize_segments(valid_segments)
-
-        # 检查清洗器是否已初始化
-        if not hasattr(self, 'cleaner'):
-            print("⚠️ 清洗器未初始化，跳过第二阶段清洗")
             return self._finalize_segments(valid_segments)
 
         print(f"\n第二阶段: 深度清洗 (模式: {self.cleaning_mode})...")

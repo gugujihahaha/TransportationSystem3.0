@@ -134,9 +134,7 @@ class TrajectoryDataset(Dataset):
 # ============================================================
 # Data loading (✅ 修改 2: 更新 load_data 函数集成快速模式)
 # ============================================================
-def load_data(geolife_root: str, osm_path: str, max_users: int = None, 
-              use_base_data: bool = True, use_cleaned_data: bool = True, 
-              cleaning_mode: str = 'balanced'):
+def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_data: bool = True, cleaning_mode: str = 'balanced'):
     """加载所有数据 (支持快速模式与三级缓存)
 
     Args:
@@ -144,7 +142,6 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None,
         osm_path: OSM数据路径
         max_users: 最大用户数
         use_base_data: 是否使用预处理的基础数据
-        use_cleaned_data: 是否使用清洗后的数据（推荐）
         cleaning_mode: 数据清洗模式 ('strict', 'balanced', 'gentle')
     """
 
@@ -152,10 +149,6 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None,
         os.path.dirname(geolife_root),
         'processed/base_segments.pkl'
     )
-    
-    # 获取清洗后数据路径
-    from common.cleaned_data_loader import get_cleaned_data_path
-    CLEANED_DATA_PATH = get_cleaned_data_path(cleaning_mode)
 
     geolife_loader = GeoLifeDataLoader(geolife_root)
     users = geolife_loader.get_all_users()
@@ -208,39 +201,8 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None,
     processed_segments = None
     cleaning_stats = {}
 
-    # ✅ 优先：使用清洗后的数据
-    if use_cleaned_data and os.path.exists(CLEANED_DATA_PATH):
-        print(f"\n{'='*80}")
-        print(f"阶段 2: 使用清洗后数据（推荐模式 - 清洗模式: {cleaning_mode}）")
-        print(f"{'='*80}\n")
-
-        adapter = Exp3DataAdapter(
-            use_cleaned_data=True,
-            cleaned_data_path=CLEANED_DATA_PATH,
-            kg=kg
-        )
-        features = adapter.load_cleaned_data()
-        
-        # 转换为训练格式
-        all_features_and_labels = []
-        all_labels_str = []
-        for trajectory, kg_features, label in features:
-            all_labels_str.append(label)
-            all_features_and_labels.append((trajectory, kg_features, label))
-        
-        # 创建label_encoder
-        label_encoder = LabelEncoder().fit(all_labels_str)
-        # 重新编码所有标签
-        all_features_and_labels = [
-            (traj, kg_feat, label_encoder.transform([label])[0])
-            for traj, kg_feat, label in all_features_and_labels
-        ]
-        
-        cleaning_stats = adapter.get_cleaning_stats()
-        print(f"✅ 清洗后数据加载完成: {len(all_features_and_labels)} 个样本")
-
-    # ✅ 次优：使用基础数据
-    elif use_base_data and os.path.exists(BASE_DATA_PATH):
+    # ✅ 快速模式：使用基础数据
+    if use_base_data and os.path.exists(BASE_DATA_PATH):
         print(f"\n{'='*80}")
         print(f"阶段 2: 使用预处理的基础数据（快速模式 - 清洗模式: {cleaning_mode}）")
         print(f"{'='*80}\n")
@@ -252,10 +214,8 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None,
 
     # 传统模式：从头处理
     else:
-        if use_base_data or use_cleaned_data:
-            print(f"\n⚠️ 清洗后数据或基础数据不存在，使用传统模式")
-            print(f"    清洗后数据: {CLEANED_DATA_PATH}")
-            print(f"    基础数据: {BASE_DATA_PATH}")
+        if use_base_data:
+            print(f"\n⚠️  基础数据不存在，使用传统模式")
 
         print("\n========== 阶段 2: 加载轨迹数据 (传统模式) ==========")
         all_segments = []
@@ -276,26 +236,25 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None,
         valid_modes = {'Walk', 'Bike', 'Bus', 'Car & taxi', 'Train', 'Subway', 'Airplane'}
         processed_segments = [(t, l) for t, l in processed_segments if l in valid_modes]
 
-    # 特征提取阶段（仅传统模式需要）
-    if not use_cleaned_data or not os.path.exists(CLEANED_DATA_PATH):
-        if not processed_segments:
-            print("错误: 没有可用轨迹段")
-            return [], kg, None
+    # 特征提取阶段
+    if not processed_segments:
+        print("错误: 没有可用轨迹段")
+        return [], kg, None
 
-        all_labels_str = [label for _, label in processed_segments]
-        label_encoder = LabelEncoder().fit(all_labels_str)
+    all_labels_str = [label for _, label in processed_segments]
+    label_encoder = LabelEncoder().fit(all_labels_str)
 
-        print("\n========== 阶段 3: 特征提取 ==========")
-        feature_extractor = FeatureExtractor(kg)
-        all_features_and_labels = []
+    print("\n========== 阶段 3: 特征提取 ==========")
+    feature_extractor = FeatureExtractor(kg)
+    all_features_and_labels = []
 
-        for trajectory, label_str in tqdm(processed_segments, desc="[Exp3 特征提取]"):
-            try:
-                trajectory_features, kg_features = feature_extractor.extract_features(trajectory)
-                label_encoded = label_encoder.transform([label_str])[0]
-                all_features_and_labels.append((trajectory_features, kg_features, label_encoded))
-            except Exception:
-                continue
+    for trajectory, label_str in tqdm(processed_segments, desc="[Exp3 特征提取]"):
+        try:
+            trajectory_features, kg_features = feature_extractor.extract_features(trajectory)
+            label_encoded = label_encoder.transform([label_str])[0]
+            all_features_and_labels.append((trajectory_features, kg_features, label_encoded))
+        except Exception:
+            continue
 
     # 保存各级缓存
     with open(PROCESSED_FEATURE_CACHE_PATH, 'wb') as f:
@@ -345,8 +304,7 @@ def main():
     parser.add_argument('--osm_path', type=str, default='../data/exp3.geojson')
 
     # ===== ✅ 新增参数 =====
-    parser.add_argument('--use_base_data', action='store_true', default=True, help='使用预处理的基础数据')
-    parser.add_argument('--use_cleaned_data', action='store_true', default=True, help='使用清洗后的数据（推荐）')
+    parser.add_argument('--use_base_data', action='store_true', default=True, help='使用预处理的基础数据（推荐）')
     parser.add_argument('--cleaning_mode', type=str, default='balanced',
                        choices=['strict', 'balanced', 'gentle'],
                        help='数据清洗模式: strict(严格), balanced(平衡), gentle(温和)')
@@ -386,7 +344,6 @@ def main():
         all_features_and_labels, kg, label_encoder, cleaning_stats = load_data(
             args.geolife_root, args.osm_path, args.max_users,
             use_base_data=args.use_base_data,
-            use_cleaned_data=args.use_cleaned_data,
             cleaning_mode=args.cleaning_mode
         )
 

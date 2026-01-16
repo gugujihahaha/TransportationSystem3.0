@@ -52,9 +52,7 @@ class TrajectoryDataset(Dataset):
         return torch.FloatTensor(trajectory_features), torch.FloatTensor(kg_features), torch.LongTensor([label_encoded])[0]
 
 # ===== ✅ 修改 2：load_data 函数完整更新 =====
-def load_data(geolife_root: str, osm_path: str, max_users: int = None, 
-              use_base_data: bool = True, use_cleaned_data: bool = True, 
-              cleaning_mode: str = 'balanced'):
+def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_data: bool = True, cleaning_mode: str = 'balanced'):
     """加载所有数据，实现快速模式与传统模式切换
 
     Args:
@@ -62,15 +60,10 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None,
         osm_path: OSM数据路径
         max_users: 最大用户数
         use_base_data: 是否使用预处理的基础数据
-        use_cleaned_data: 是否使用清洗后的数据（推荐）
         cleaning_mode: 数据清洗模式 ('strict', 'balanced', 'gentle')
     """
 
     BASE_DATA_PATH = os.path.join(os.path.dirname(geolife_root), 'processed/base_segments.pkl')
-    
-    # 获取清洗后数据路径
-    from common.cleaned_data_loader import get_cleaned_data_path
-    CLEANED_DATA_PATH = get_cleaned_data_path(cleaning_mode)
 
     # 1. 知识图谱构建 (保持原有逻辑)
     kg = None
@@ -109,49 +102,8 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None,
     label_encoder = None
     cleaning_stats = {}
 
-    # B. ✅ 优先：使用清洗后的数据
-    if use_cleaned_data and os.path.exists(CLEANED_DATA_PATH):
-        print(f"\n========== 阶段 2: 使用清洗后数据 (推荐模式 - 清洗模式: {cleaning_mode}) ==========")
-        adapter = Exp2DataAdapter(
-            use_cleaned_data=True,
-            cleaned_data_path=CLEANED_DATA_PATH,
-            kg=kg
-        )
-        features = adapter.load_cleaned_data()
-        
-        # 转换为训练格式
-        all_features_and_labels = []
-        all_labels_str = []
-        for trajectory, kg_features, label in features:
-            label_encoded = kg.label_encoder.transform([label])[0] if hasattr(kg, 'label_encoder') else None
-            if label_encoded is None:
-                # 如果kg没有label_encoder，创建一个临时的
-                if label_encoder is None:
-                    all_labels_str.append(label)
-                    all_features_and_labels.append((trajectory, kg_features, label))
-                else:
-                    try:
-                        label_encoded = label_encoder.transform([label])[0]
-                        all_features_and_labels.append((trajectory, kg_features, label_encoded))
-                    except:
-                        continue
-            else:
-                all_features_and_labels.append((trajectory, kg_features, label_encoded))
-        
-        # 如果还没有label_encoder，创建一个
-        if label_encoder is None:
-            label_encoder = LabelEncoder().fit(all_labels_str)
-            # 重新编码所有标签
-            all_features_and_labels = [
-                (traj, kg_feat, label_encoder.transform([label])[0])
-                for traj, kg_feat, label in all_features_and_labels
-            ]
-        
-        cleaning_stats = adapter.get_cleaning_stats()
-        print(f"✅ 清洗后数据加载完成: {len(all_features_and_labels)} 个样本")
-
-    # C. ✅ 次优：使用基础数据
-    elif use_base_data and os.path.exists(BASE_DATA_PATH):
+    # B. ✅ 快速模式逻辑
+    if use_base_data and os.path.exists(BASE_DATA_PATH):
         print(f"\n========== 阶段 2: 使用预处理基础数据 (快速模式 - 清洗模式: {cleaning_mode}) ==========")
         base_segments = BaseGeoLifePreprocessor.load_from_cache(BASE_DATA_PATH)
         adapter = Exp2DataAdapter(target_length=FIXED_SEQUENCE_LENGTH, enable_cleaning=True, cleaning_mode=cleaning_mode)
@@ -162,13 +114,9 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None,
         label_encoder = LabelEncoder().fit(all_labels_str)
         print(f"✅ 基础数据适配完成: {len(processed_segments)} 个段")
 
-    # D. 传统模式逻辑
+    # C. 传统模式逻辑
     else:
-        if use_base_data or use_cleaned_data:
-            print(f"⚠️ 清洗后数据或基础数据不存在，回退传统模式")
-            print(f"    清洗后数据: {CLEANED_DATA_PATH}")
-            print(f"    基础数据: {BASE_DATA_PATH}")
-        
+        if use_base_data: print(f"⚠️ 基础数据不存在，回退传统模式")
         if os.path.exists(PROCESSED_SEGMENTS_CACHE_PATH):
             print(f"\n========== 阶段 2.1: 轨迹段加载 (从缓存) ==========")
             with open(PROCESSED_SEGMENTS_CACHE_PATH, 'rb') as f:
@@ -201,17 +149,16 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None,
             with open(PROCESSED_SEGMENTS_CACHE_PATH, 'wb') as f:
                 pickle.dump((processed_segments, label_encoder), f, protocol=pickle.HIGHEST_PROTOCOL)
 
-    # 3. 特征提取 (仅传统模式需要)
-    if not use_cleaned_data or not os.path.exists(CLEANED_DATA_PATH):
-        print("\n========== 2.2: 特征提取 ==========")
-        feature_extractor = FeatureExtractor(kg)
-        all_features_and_labels = []
-        for trajectory, label_str in tqdm(processed_segments, desc="[特征提取]"):
-            try:
-                trajectory_features, kg_features = feature_extractor.extract_features(trajectory)
-                label_encoded = label_encoder.transform([label_str])[0]
-                all_features_and_labels.append((trajectory_features, kg_features, label_encoded))
-            except: continue
+    # 3. 特征提取 (阶段 D)
+    print("\n========== 2.2: 特征提取 ==========")
+    feature_extractor = FeatureExtractor(kg)
+    all_features_and_labels = []
+    for trajectory, label_str in tqdm(processed_segments, desc="[特征提取]"):
+        try:
+            trajectory_features, kg_features = feature_extractor.extract_features(trajectory)
+            label_encoded = label_encoder.transform([label_str])[0]
+            all_features_and_labels.append((trajectory_features, kg_features, label_encoded))
+        except: continue
 
     with open(PROCESSED_FEATURE_CACHE_PATH, 'wb') as f:
         pickle.dump((all_features_and_labels, label_encoder, cleaning_stats), f, protocol=pickle.HIGHEST_PROTOCOL)
@@ -256,7 +203,6 @@ def main():
 
     # 新增参数
     parser.add_argument('--use_base_data', action='store_true', default=True, help='使用预处理的基础数据')
-    parser.add_argument('--use_cleaned_data', action='store_true', default=True, help='使用清洗后的数据（推荐）')
     parser.add_argument('--cleaning_mode', type=str, default='balanced',
                        choices=['strict', 'balanced', 'gentle'],
                        help='数据清洗模式: strict(严格), balanced(平衡), gentle(温和)')
@@ -282,11 +228,10 @@ def main():
         for f in [KG_CACHE_PATH, GRID_CACHE_PATH, PROCESSED_SEGMENTS_CACHE_PATH, PROCESSED_FEATURE_CACHE_PATH]:
             if os.path.exists(f): os.remove(f)
 
-    # 传递 use_base_data 和 use_cleaned_data 参数
+    # 传递 use_base_data 参数
     all_features_and_labels, kg, label_encoder, cleaning_stats = load_data(
         args.geolife_root, args.osm_path, args.max_users,
         use_base_data=args.use_base_data,
-        use_cleaned_data=args.use_cleaned_data,
         cleaning_mode=args.cleaning_mode
     )
 
