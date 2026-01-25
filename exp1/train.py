@@ -82,7 +82,7 @@ def load_data(geolife_root: str, max_users: int = None, use_base_data: bool = Tr
         base_segments = BaseGeoLifePreprocessor.load_from_cache(BASE_DATA_PATH)
 
         # 2. Exp1特定适配（序列长度 100，两阶段清洗）
-        adapter = Exp1DataAdapter(target_length=100, enable_cleaning=True, cleaning_mode=cleaning_mode)
+        adapter = Exp1DataAdapter(enable_cleaning=True, cleaning_mode=cleaning_mode)
         processed = adapter.process_segments(base_segments)
         cleaning_stats = adapter.get_cleaning_stats()
         return processed, cleaning_stats
