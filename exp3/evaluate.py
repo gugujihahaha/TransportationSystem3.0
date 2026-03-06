@@ -1,7 +1,7 @@
 """
 Exp3 评估脚本 (标准版 - 与 Exp4 一致)
 功能：
-1. 自动适配轨迹 + 增强KG特征（9+15维）
+1. 自动适配轨迹 + 增强空间特征（9+15维）
 2. 支持多路径缓存加载
 3. 生成详细的分类报告、混淆矩阵和预测详情
 4. 输出所有文件至 evaluation_results/ 子目录
@@ -39,11 +39,11 @@ class DualFeatureDataset(Dataset):
         return len(self.segments)
 
     def __getitem__(self, idx):
-        # 兼容性处理：根据训练脚本，特征可能是 (traj, kg, label)
-        traj_features, kg_features, label = self.segments[idx]
+        # 兼容性处理：根据训练脚本，特征可能是 (traj, spatial, label)
+        traj_features, spatial_features, label = self.segments[idx]
 
         traj_tensor = torch.FloatTensor(traj_features)
-        kg_tensor = torch.FloatTensor(kg_features)
+        spatial_tensor = torch.FloatTensor(spatial_features)
 
         # 标签编码
         if isinstance(label, (int, np.integer)):
@@ -52,7 +52,7 @@ class DualFeatureDataset(Dataset):
             label_encoded = self.label_encoder.transform([label])[0]
             label_tensor = torch.LongTensor([label_encoded])[0]
 
-        return traj_tensor, kg_tensor, label_tensor
+        return traj_tensor, spatial_tensor, label_tensor
 
 
 def main():
@@ -69,7 +69,7 @@ def main():
     ]
 
     print("\n" + "=" * 60)
-    print("Exp3 模型评估 (轨迹 + 增强知识图谱)")
+    print("Exp3 模型评估 (轨迹 + 增强OSM空间特征)")
     print("=" * 60)
     print(f"设备: {DEVICE}")
 
@@ -104,7 +104,7 @@ def main():
 
     print(f"   模型配置:")
     print(f"     - 轨迹特征维度: {config['trajectory_feature_dim']}")
-    print(f"     - KG特征维度: {config['kg_feature_dim']}")
+    print(f"     - 空间特征维度: {config['spatial_feature_dim']}")
     print(f"     - 隐藏层维度: {config['hidden_dim']}")
     print(f"     - 层数: {config['num_layers']}")
     print(f"     - 类别数: {config['num_classes']}")
@@ -112,7 +112,7 @@ def main():
 
     model = TransportationModeClassifier(
         trajectory_feature_dim=config['trajectory_feature_dim'],
-        kg_feature_dim=config['kg_feature_dim'],
+        spatial_feature_dim=config['spatial_feature_dim'],
         hidden_dim=config['hidden_dim'],
         num_layers=config['num_layers'],
         num_classes=config['num_classes'],
@@ -217,11 +217,11 @@ def main():
     y_true, y_pred, y_probs = [], [], []
 
     with torch.no_grad():
-        for traj_f, kg_f, labels in tqdm(test_loader, desc="Evaluation Progress", leave=True):
+        for traj_f, spatial_f, labels in tqdm(test_loader, desc="Evaluation Progress", leave=True):
             try:
-                traj_f, kg_f, labels = traj_f.to(DEVICE), kg_f.to(DEVICE), labels.to(DEVICE)
+                traj_f, spatial_f, labels = traj_f.to(DEVICE), spatial_f.to(DEVICE), labels.to(DEVICE)
 
-                logits = model(traj_f, kg_f)
+                logits = model(traj_f, spatial_f)
                 probs = torch.softmax(logits, dim=1)
                 preds = torch.argmax(logits, dim=1)
 
@@ -286,7 +286,7 @@ def main():
             cm, annot=True, fmt='d', cmap='Blues',
             xticklabels=class_names, yticklabels=class_names
         )
-        plt.title('Exp3 Confusion Matrix (Trajectory + Enhanced KG)', fontsize=14)
+        plt.title('Exp3 Confusion Matrix (Trajectory + Enhanced Spatial Features)', fontsize=14)
         plt.ylabel('True Label')
         plt.xlabel('Predicted Label')
         plt.tight_layout()

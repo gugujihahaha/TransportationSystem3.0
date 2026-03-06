@@ -3,7 +3,7 @@
 在 Exp3 基础上增加天气数据
 
 稳定性增强:
-1. 全面的缺失数据处理（天气、KG）
+1. 全面的缺失数据处理（天气、空间特征）
 2. 梯度裁剪和数值稳定性
 3. NaN/Inf 检测和处理
 4. 样本保留策略（不丢弃任何样本）
@@ -45,7 +45,7 @@ os.chdir(SCRIPT_DIR)
 
 # 尝试导入 common 模块（可选）
 try:
-    from common import BaseGeoLifePreprocessor, Exp4DataAdapter
+    from common import BaseGeoLifePreprocessor, Exp4DataAdapter, train_epoch, evaluate
     HAS_COMMON = True
 except ImportError:
     HAS_COMMON = False
@@ -53,24 +53,24 @@ except ImportError:
 
 # 导入 Exp3/4 的模块
 from src.data_preprocessing import GeoLifeDataLoader, OSMDataLoader, preprocess_trajectory_segments
-from src.knowledge_graph import EnhancedTransportationKG
+from src.osm_feature_extractor import EnhancedOsmSpatialExtractor
 from src.weather_preprocessing import WeatherDataProcessor
 from src.feature_extraction_weather import FeatureExtractorWithWeather
 from src.model_weather import TransportationModeClassifierWithWeather
 
 # ========================== 特征维度常量 ==========================
 TRAJECTORY_FEATURE_DIM = 9
-KG_FEATURE_DIM = 15
+SPATIAL_FEATURE_DIM = 15
 WEATHER_FEATURE_DIM = 12
-TOTAL_FEATURE_DIM = TRAJECTORY_FEATURE_DIM + KG_FEATURE_DIM + WEATHER_FEATURE_DIM  # 36
+TOTAL_FEATURE_DIM = TRAJECTORY_FEATURE_DIM + SPATIAL_FEATURE_DIM + WEATHER_FEATURE_DIM  # 36
 FIXED_SEQUENCE_LENGTH = 50
 # ==================================================================
 
 # ========================== 缓存配置 ==========================
 CACHE_VERSION = "v2_stable"
 CACHE_DIR = 'cache'
-KG_CACHE_PATH = os.path.join(CACHE_DIR, f'kg_data_{CACHE_VERSION}.pkl')
-GRID_CACHE_PATH = os.path.join(CACHE_DIR, f'grid_cache_{CACHE_VERSION}.pkl')
+SPATIAL_CACHE_PATH = os.path.join(CACHE_DIR, f'spatial_data_{CACHE_VERSION}.pkl')
+SPATIAL_GRID_CACHE_PATH = os.path.join(CACHE_DIR, f'spatial_grid_cache_{CACHE_VERSION}.pkl')
 WEATHER_CACHE_PATH = os.path.join(CACHE_DIR, f'weather_data_{CACHE_VERSION}.pkl')
 PROCESSED_FEATURE_CACHE_PATH = os.path.join(CACHE_DIR, f'processed_features_weather_{CACHE_VERSION}.pkl')
 META_CACHE_PATH = os.path.join(CACHE_DIR, 'cache_meta_weather.json')
@@ -101,7 +101,7 @@ def save_cache_metadata(osm_path: str, weather_path: str, geolife_root: str,
         "weather_file": weather_path,
         "weather_file_hash": compute_file_hash(weather_path),
         "geolife_root": geolife_root,
-        "kg_feature_dim": KG_FEATURE_DIM,
+        "spatial_feature_dim": SPATIAL_FEATURE_DIM,
         "trajectory_feature_dim": TRAJECTORY_FEATURE_DIM,
         "weather_feature_dim": WEATHER_FEATURE_DIM,
         "total_feature_dim": TOTAL_FEATURE_DIM,
@@ -163,21 +163,21 @@ class TrajectoryDatasetWithWeather(Dataset):
         return len(self.data)
 
     def __getitem__(self, idx):
-        trajectory_features, kg_features, weather_features, label_encoded = self.data[idx]
+        trajectory_features, spatial_features, weather_features, label_encoded = self.data[idx]
 
         # 确保数据类型和形状正确
         trajectory_tensor = torch.FloatTensor(
             np.nan_to_num(trajectory_features, nan=0.0, posinf=0.0, neginf=0.0)
         )
-        kg_tensor = torch.FloatTensor(
-            np.nan_to_num(kg_features, nan=0.0, posinf=0.0, neginf=0.0)
+        spatial_tensor = torch.FloatTensor(
+            np.nan_to_num(spatial_features, nan=0.0, posinf=0.0, neginf=0.0)
         )
         weather_tensor = torch.FloatTensor(
             np.nan_to_num(weather_features, nan=0.0, posinf=0.0, neginf=0.0)
         )
         label_tensor = torch.LongTensor([label_encoded])[0]
 
-        return trajectory_tensor, kg_tensor, weather_tensor, label_tensor
+        return trajectory_tensor, spatial_tensor, weather_tensor, label_tensor
 
 
 def normalize_features_safe(features: np.ndarray) -> np.ndarray:
@@ -224,36 +224,36 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
     if max_users and max_users < len(users):
         users = users[:max_users]
 
-    # ================= 阶段 1: 知识图谱构建 ==================
-    kg = None
-    if os.path.exists(KG_CACHE_PATH):
-        print(f"\n========== 阶段 1: 知识图谱加载 (从缓存) ==========")
+    # ================= 阶段 1: 空间特征提取器构建 ==================
+    spatial_extractor = None
+    if os.path.exists(SPATIAL_CACHE_PATH):
+        print(f"\n========== 阶段 1: 空间特征提取器加载 (从缓存) ==========")
         try:
-            with open(KG_CACHE_PATH, 'rb') as f:
-                kg = pickle.load(f)
-            print("✅ 知识图谱从缓存加载完成")
-            if os.path.exists(GRID_CACHE_PATH):
-                kg.load_cache(GRID_CACHE_PATH)
+            with open(SPATIAL_CACHE_PATH, 'rb') as f:
+                spatial_extractor = pickle.load(f)
+            print("✅ 空间特征提取器从缓存加载完成")
+            if os.path.exists(SPATIAL_GRID_CACHE_PATH):
+                spatial_extractor.load_cache(SPATIAL_GRID_CACHE_PATH)
         except Exception as e:
-            warnings.warn(f"[WARN] KG 缓存加载失败 ({e})，将重新构建")
-            kg = None
+            warnings.warn(f"[WARN] 空间特征提取器缓存加载失败 ({e})，将重新构建")
+            spatial_extractor = None
 
-    if kg is None:
-        print("\n========== 阶段 1: 知识图谱构建 (重建) ==========")
+    if spatial_extractor is None:
+        print("\n========== 阶段 1: 空间特征提取器构建 (重建) ==========")
         try:
             osm_loader = OSMDataLoader(osm_path)
             osm_data = osm_loader.load_osm_data()
             road_network = osm_loader.extract_road_network(osm_data)
             pois = osm_loader.extract_pois(osm_data)
             transit_routes = osm_loader.extract_transit_routes(osm_data)
-            kg = EnhancedTransportationKG()
-            kg.build_from_osm(road_network, pois, transit_routes)
-            with open(KG_CACHE_PATH, 'wb') as f:
-                pickle.dump(kg, f, protocol=pickle.HIGHEST_PROTOCOL)
-            print("✅ 知识图谱缓存完成")
+            spatial_extractor = EnhancedOsmSpatialExtractor()
+            spatial_extractor.build_from_osm(road_network, pois, transit_routes)
+            with open(SPATIAL_CACHE_PATH, 'wb') as f:
+                pickle.dump(spatial_extractor, f, protocol=pickle.HIGHEST_PROTOCOL)
+            print("✅ 空间特征提取器缓存完成")
         except Exception as e:
-            print(f"⚠️ KG 构建失败: {e}")
-            kg = EnhancedTransportationKG()  # 空 KG
+            print(f"⚠️ 空间特征提取器构建失败: {e}")
+            spatial_extractor = EnhancedOsmSpatialExtractor()  # 空空间特征提取器
 
     # ================= 阶段 2: 天气数据加载 ==================
     weather_processor = None
@@ -289,7 +289,7 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
             with open(PROCESSED_FEATURE_CACHE_PATH, 'rb') as f:
                 all_features_and_labels, label_encoder = pickle.load(f)
             print(f"✅ 特征从缓存加载完成: {len(all_features_and_labels)} 条")
-            return all_features_and_labels, kg, weather_processor, label_encoder, {}
+            return all_features_and_labels, spatial_extractor, weather_processor, label_encoder, {}
         except Exception as e:
             print(f"⚠️ 特征缓存加载失败: {e}")
 
@@ -408,7 +408,7 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
 
     # ================= 特征提取（关键改进：不丢弃样本）==================
     print("\n3.1 正在进行【增强特征提取（含天气）】...")
-    feature_extractor = FeatureExtractorWithWeather(kg, weather_processor)
+    feature_extractor = FeatureExtractorWithWeather(spatial_extractor, weather_processor)
     all_features_and_labels = []
 
     success_count = 0
@@ -418,18 +418,18 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
                                                         desc="[Exp4 特征提取]"):
         try:
             # 尝试完整特征提取
-            trajectory_features, kg_features, weather_features = feature_extractor.extract_features(
+            trajectory_features, spatial_features, weather_features = feature_extractor.extract_features(
                 trajectory, datetime_series
             )
 
             # 验证形状
             assert trajectory_features.shape == (FIXED_SEQUENCE_LENGTH, TRAJECTORY_FEATURE_DIM)
-            assert kg_features.shape == (FIXED_SEQUENCE_LENGTH, KG_FEATURE_DIM)
+            assert spatial_features.shape == (FIXED_SEQUENCE_LENGTH, SPATIAL_FEATURE_DIM)
             assert weather_features.shape == (FIXED_SEQUENCE_LENGTH, WEATHER_FEATURE_DIM)
 
             label_encoded = label_encoder.transform([label_str])[0]
             all_features_and_labels.append((
-                trajectory_features, kg_features, weather_features, label_encoded
+                trajectory_features, spatial_features, weather_features, label_encoded
             ))
             success_count += 1
 
@@ -456,13 +456,13 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
                                               dtype=np.float32)
                             trajectory_features = np.hstack([trajectory_features, padding])
 
-                # KG 和天气：使用零向量
-                kg_features = np.zeros((FIXED_SEQUENCE_LENGTH, KG_FEATURE_DIM), dtype=np.float32)
+                # 空间特征和天气：使用零向量
+                spatial_features = np.zeros((FIXED_SEQUENCE_LENGTH, SPATIAL_FEATURE_DIM), dtype=np.float32)
                 weather_features = np.zeros((FIXED_SEQUENCE_LENGTH, WEATHER_FEATURE_DIM), dtype=np.float32)
 
                 label_encoded = label_encoder.transform([label_str])[0]
                 all_features_and_labels.append((
-                    trajectory_features, kg_features, weather_features, label_encoded
+                    trajectory_features, spatial_features, weather_features, label_encoded
                 ))
                 degraded_count += 1
 
@@ -470,7 +470,7 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
                 # 极端情况：创建完全零特征
                 trajectory_features = np.zeros((FIXED_SEQUENCE_LENGTH, TRAJECTORY_FEATURE_DIM),
                                               dtype=np.float32)
-                kg_features = np.zeros((FIXED_SEQUENCE_LENGTH, KG_FEATURE_DIM), dtype=np.float32)
+                spatial_features = np.zeros((FIXED_SEQUENCE_LENGTH, SPATIAL_FEATURE_DIM), dtype=np.float32)
                 weather_features = np.zeros((FIXED_SEQUENCE_LENGTH, WEATHER_FEATURE_DIM), dtype=np.float32)
 
                 try:
@@ -479,7 +479,7 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
                     label_encoded = 0
 
                 all_features_and_labels.append((
-                    trajectory_features, kg_features, weather_features, label_encoded
+                    trajectory_features, spatial_features, weather_features, label_encoded
                 ))
                 degraded_count += 1
 
@@ -493,13 +493,13 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
         with open(PROCESSED_FEATURE_CACHE_PATH, 'wb') as f:
             pickle.dump((all_features_and_labels, label_encoder, cleaning_stats), f,
                        protocol=pickle.HIGHEST_PROTOCOL)
-        kg.save_cache(GRID_CACHE_PATH)
+        spatial_extractor.save_cache(SPATIAL_GRID_CACHE_PATH)
         save_cache_metadata(osm_path, weather_path, geolife_root,
                            len(all_features_and_labels), label_encoder)
     except Exception as e:
         print(f"⚠️ 缓存保存失败: {e}")
 
-    return all_features_and_labels, kg, weather_processor, label_encoder, cleaning_stats
+    return all_features_and_labels, spatial_extractor, weather_processor, label_encoder, cleaning_stats
 
 
 def check_tensor_health(tensor: torch.Tensor, name: str) -> bool:
@@ -511,85 +511,6 @@ def check_tensor_health(tensor: torch.Tensor, name: str) -> bool:
         print(f"⚠️ {name} 包含 Inf")
         return False
     return True
-
-
-def train_epoch(model, dataloader, criterion, optimizer, device,
-                max_grad_norm: float = 1.0):
-    """
-    训练一个 epoch - 稳定版
-    """
-    model.train()
-    total_loss = 0.0
-    correct = 0
-    total = 0
-    nan_batches = 0
-
-    for batch_idx, (traj_f, kg_f, weather_f, labels) in enumerate(
-        tqdm(dataloader, desc="Training Progress", leave=True)
-    ):
-        try:
-            traj_f = traj_f.to(device)
-            kg_f = kg_f.to(device)
-            weather_f = weather_f.to(device)
-            labels = labels.to(device)
-
-            optimizer.zero_grad()
-
-            logits = model(traj_f, kg_f, weather_f)
-            loss = criterion(logits, labels)
-
-            loss.backward()
-
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
-
-            optimizer.step()
-
-            total_loss += loss.item()
-            preds = torch.argmax(logits, dim=1)
-            correct += (preds == labels).sum().item()
-            total += labels.size(0)
-
-        except RuntimeError as e:
-            nan_batches += 1
-            optimizer.zero_grad()
-            continue
-
-    if nan_batches > 0:
-        print(f"   ⚠️ 本 epoch 跳过 {nan_batches} 个异常批次")
-
-    avg_loss = total_loss / max(len(dataloader) - nan_batches, 1)
-    accuracy = correct / max(total, 1)
-
-    return avg_loss, accuracy
-
-
-def evaluate(model, dataloader, criterion, device, label_encoder):
-    model.eval()
-    total_loss = 0.0
-    all_preds = []
-    all_labels = []
-
-    with torch.no_grad():
-        for traj_f, kg_f, weather_f, labels in tqdm(dataloader, desc="Validation Progress", leave=True):
-            traj_f = traj_f.to(device)
-            kg_f = kg_f.to(device)
-            weather_f = weather_f.to(device)
-            labels = labels.to(device)
-
-            logits = model(traj_f, kg_f, weather_f)
-            total_loss += criterion(logits, labels).item()
-
-            all_preds.extend(torch.argmax(logits, dim=1).cpu().numpy())
-            all_labels.extend(labels.cpu().numpy())
-
-    report = classification_report(
-        all_labels, all_preds,
-        target_names=label_encoder.classes_,
-        output_dict=True,
-        zero_division=0
-    )
-
-    return total_loss / len(dataloader), report, all_preds, all_labels
 
 
 def main():
@@ -686,14 +607,14 @@ def main():
     # 清理缓存
     if args.clear_cache:
         print("正在清理缓存...")
-        for f in [KG_CACHE_PATH, GRID_CACHE_PATH, WEATHER_CACHE_PATH,
+        for f in [SPATIAL_CACHE_PATH, SPATIAL_GRID_CACHE_PATH, WEATHER_CACHE_PATH,
                   PROCESSED_FEATURE_CACHE_PATH, META_CACHE_PATH]:
             if os.path.exists(f):
                 os.remove(f)
                 print(f"  已删除: {f}")
 
     # 加载数据
-    all_features_and_labels, kg, weather_processor, label_encoder, cleaning_stats = load_data(
+    all_features_and_labels, spatial_extractor, weather_processor, label_encoder, cleaning_stats = load_data(
         args.geolife_root, args.osm_path, args.weather_path, args.max_users,
         use_base_data=args.use_base_data,
         cleaning_mode=args.cleaning_mode
@@ -762,7 +683,7 @@ def main():
     # 构建模型
     model = TransportationModeClassifierWithWeather(
         trajectory_feature_dim=TRAJECTORY_FEATURE_DIM,
-        kg_feature_dim=KG_FEATURE_DIM,
+        spatial_feature_dim=SPATIAL_FEATURE_DIM,
         weather_feature_dim=WEATHER_FEATURE_DIM,
         hidden_dim=args.hidden_dim,
         num_layers=args.num_layers,
@@ -822,7 +743,7 @@ def main():
                 'val_accuracy': val_acc,
                 'model_config': {
                     'trajectory_feature_dim': TRAJECTORY_FEATURE_DIM,
-                    'kg_feature_dim': KG_FEATURE_DIM,
+                    'spatial_feature_dim': SPATIAL_FEATURE_DIM,
                     'weather_feature_dim': WEATHER_FEATURE_DIM,
                     'hidden_dim': args.hidden_dim,
                     'num_layers': args.num_layers,
@@ -867,15 +788,15 @@ def main():
     print(f"最终测试 Accuracy: {test_acc:.4f}")
     print(f"模型已保存到: {os.path.join(args.save_dir, 'exp4_model.pth')}")
 
-    # 打印 KG 和天气统计
-    if kg is not None:
-        print("\nKG 统计:")
-        kg_stats = kg.get_graph_statistics()
-        for k, v in kg_stats.items():
+    # 打印空间特征提取器和天气统计
+    if spatial_extractor is not None:
+        print("\n空间特征提取器统计:")
+        spatial_stats = spatial_extractor.get_graph_statistics()
+        for k, v in spatial_stats.items():
             print(f"  {k}: {v}")
 
-        cache_stats = kg.get_cache_stats()
-        print(f"\nKG 缓存统计:")
+        cache_stats = spatial_extractor.get_cache_stats()
+        print(f"\n空间特征提取器缓存统计:")
         for k, v in cache_stats.items():
             print(f"  {k}: {v}")
 

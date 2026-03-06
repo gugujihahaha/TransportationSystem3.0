@@ -1,13 +1,23 @@
 """
-知识图谱构建模块 (混合优化版 - 修复 Decimal 类型问题)
-结合网格缓存和批量查询，实现速度与准确率的最佳平衡
+OSM 空间特征提取模块 (exp2 - 基础版)
 
-核心优化:
-1. ✅ 预构建 KDTree 索引（一次性初始化）
-2. ✅ 网格缓存系统（常用位置缓存）
-3. ✅ 批量查询（未缓存点）
-4. ✅ 自适应缓存策略
-5. ✅ 修复 Decimal 类型问题
+功能:
+    基于 OpenStreetMap 道路网络和 POI 数据，
+    为轨迹点提取 11 维空间上下文特征。
+
+特征组成（共11维）:
+    [0:6]  道路类型 one-hot: walk/bike/car/bus/train/unknown
+    [6:10] POI 邻近标记: 公交站/停车场/地铁站/最近POI距离(归一化)
+    [10]   道路密度: 100m 范围内道路节点数(归一化)
+
+依赖:
+    - osmnx:  OSM 数据获取
+    - scipy:  KDTree 空间索引
+    - numpy:  特征矩阵运算
+
+注意:
+    本模块与"知识图谱"无关，仅是基于地理空间的特征工程。
+    所有查询结果会缓存到磁盘以加速后续运行。
 """
 import numpy as np
 import pandas as pd
@@ -22,10 +32,31 @@ import os
 from decimal import Decimal
 
 
-class TransportationKnowledgeGraph:
-    """交通知识图谱 (混合优化版)"""
+class OsmSpatialExtractor:
+    """
+    OSM 空间特征提取器 (基础版)
+
+    职责:
+        从 OSM 数据构建空间索引，为轨迹点提取空间上下文特征。
+
+    主要属性:
+        graph: NetworkX 图对象，存储道路节点和 POI 节点
+        road_kdtree: 道路节点的 KDTree 空间索引
+        poi_kdtree: POI 节点的 KDTree 空间索引
+        _grid_cache: 网格缓存字典，加速重复查询
+        _cache_resolution: 网格缓存分辨率（约 111 米）
+    """
 
     def __init__(self):
+        """
+        初始化 OSM 空间特征提取器。
+
+        初始化内容:
+            - 创建空的 NetworkX 图
+            - 初始化道路类型映射字典
+            - 初始化 KDTree 索引为 None
+            - 初始化网格缓存字典
+        """
         self.graph = nx.MultiDiGraph()
         self.road_network = None
         self.pois = None
@@ -57,7 +88,19 @@ class TransportationKnowledgeGraph:
         self._cache_misses = 0
 
     def build_from_osm(self, road_network: pd.DataFrame, pois: pd.DataFrame):
-        """从OSM数据构建知识图谱"""
+        """
+        从 OSM 数据构建空间特征提取器。
+
+        构建流程:
+            1. 添加道路网络节点和路段到图
+            2. 添加 POI 节点到图
+            3. 构建 KDTree 空间索引
+            4. 关联 POI 到最近的道路节点
+
+        参数:
+            road_network (pd.DataFrame): 道路网络数据，包含 id、highway、coordinates 等字段
+            pois (pd.DataFrame): POI 数据，包含 id、type、coordinates 等字段
+        """
         self.road_network = road_network
         self.pois = pois
 
@@ -76,13 +119,37 @@ class TransportationKnowledgeGraph:
         self._link_roads_to_pois()
 
     def _convert_to_float(self, value):
-        """转换任意数值类型为 float"""
+        """
+        转换任意数值类型为 float。
+
+        用于处理 Decimal 类型（来自 GeoJSON 解析），
+        确保所有坐标数据为 float 类型以兼容 numpy。
+
+        参数:
+            value: 任意数值类型（int、float、Decimal 等）
+
+        返回:
+            float: 转换后的浮点数
+        """
         if isinstance(value, Decimal):
             return float(value)
         return float(value)
 
     def _add_road_network(self):
-        """添加道路网络到知识图谱"""
+        """
+        添加道路网络到空间特征提取器。
+
+        处理逻辑:
+            1. 遍历道路网络 DataFrame
+            2. 对每条道路，解析其坐标序列
+            3. 为每个坐标点创建道路节点
+            4. 在相邻节点之间创建道路路段边
+            5. 计算路段距离（使用 Haversine 公式）
+
+        注意:
+            支持 LineString 和 Polygon 两种几何类型
+            所有坐标值都会转换为 float 类型
+        """
         for _, road in self.road_network.iterrows():
             road_id = road['id']
             road_type = road.get('highway') or road.get('railway', '')
@@ -112,6 +179,7 @@ class TransportationKnowledgeGraph:
 
                 if i > 0:
                     prev_node_id = f"{road_id}_node_{i-1}"
+                    # Haversine 距离计算（单位：米）
                     distance = geodesic((coords[i-1][1], coords[i-1][0]),
                                        (lat, lon)).meters
 
@@ -121,7 +189,17 @@ class TransportationKnowledgeGraph:
                                       distance=distance)
 
     def _add_pois(self):
-        """添加POI到知识图谱"""
+        """
+        添加 POI 到空间特征提取器。
+
+        处理逻辑:
+            1. 遍历 POI DataFrame
+            2. 解析 POI 坐标（支持 Point 和 MultiPoint）
+            3. 为每个 POI 创建节点，存储类型和名称信息
+
+        注意:
+            所有坐标值都会转换为 float 类型
+        """
         for _, poi in self.pois.iterrows():
             poi_id = poi['id']
             poi_type = poi['type']
@@ -145,7 +223,17 @@ class TransportationKnowledgeGraph:
                               longitude=lon)
 
     def _build_spatial_indices(self):
-        """预构建 KDTree 空间索引"""
+        """
+        预构建 KDTree 空间索引。
+
+        构建内容:
+            1. 道路节点 KDTree: 用于快速查询最近道路
+            2. POI 节点 KDTree: 用于快速查询附近 POI
+
+        性能优化:
+            - 预先构建索引，避免每次查询时重新构建
+            - 使用 KDTree 的 query 和 query_ball_point 方法加速空间查询
+        """
 
         # 1. 构建道路节点索引
         road_nodes_data = [
@@ -183,21 +271,29 @@ class TransportationKnowledgeGraph:
             print(f"   -> POI KDTree: {len(self.poi_coords)} 个节点")
 
     # ========== 核心：混合查询策略 ==========
-    def extract_kg_features(self, trajectory: np.ndarray) -> np.ndarray:
+    def extract_spatial_features(self, trajectory: np.ndarray) -> np.ndarray:
         """
-        混合方案：网格缓存 + 批量查询
+        为轨迹序列的每个点提取 OSM 空间上下文特征。
 
-        Args:
-            trajectory: (N, 9) 轨迹数组
+        算法流程:
+            1. 对每个轨迹点计算网格 key（精度约 111m）
+            2. 命中网格缓存则直接读取，否则加入待查询列表
+            3. 对未缓存点批量执行 KDTree 最近邻查询
+            4. 将查询结果写回网格缓存
 
-        Returns:
-            kg_features: (N, 11) KG特征数组
+        参数:
+            trajectory (np.ndarray): 形状 (N, 9) 的轨迹数组，
+                                     第0列=纬度，第1列=经度。
+
+        返回:
+            np.ndarray: 形状 (N, 11) 的特征矩阵，
+                        dtype=float32，不含 NaN 或 Inf。
         """
         if self.road_kdtree is None or self.poi_kdtree is None:
             return np.zeros((trajectory.shape[0], 11), dtype=np.float32)
 
         N = trajectory.shape[0]
-        kg_features = np.zeros((N, 11), dtype=np.float32)
+        spatial_features = np.zeros((N, 11), dtype=np.float32)
 
         uncached_indices = []
         uncached_coords = []
@@ -208,7 +304,7 @@ class TransportationKnowledgeGraph:
             grid_key = self._get_grid_key(lat, lon)
 
             if grid_key in self._grid_cache:
-                kg_features[i] = self._grid_cache[grid_key]
+                spatial_features[i] = self._grid_cache[grid_key]
                 self._cache_hits += 1
             else:
                 uncached_indices.append(i)
@@ -225,19 +321,41 @@ class TransportationKnowledgeGraph:
                 lat, lon = float(trajectory[idx, 0]), float(trajectory[idx, 1])
                 grid_key = self._get_grid_key(lat, lon)
                 self._grid_cache[grid_key] = uncached_features[i]
-                kg_features[idx] = uncached_features[i]
+                spatial_features[idx] = uncached_features[i]
 
-        return kg_features.astype(np.float32)
+        return spatial_features.astype(np.float32)
 
     def _get_grid_key(self, lat: float, lon: float) -> Tuple[int, int]:
-        """将坐标映射到网格 (约 111 米精度)"""
+        """
+        将坐标映射到网格 (约 111 米精度)。
+
+        参数:
+            lat (float): 纬度
+            lon (float): 经度
+
+        返回:
+            Tuple[int, int]: 网格键值 (lat_key, lon_key)
+        """
         return (
             round(lat / self._cache_resolution),
             round(lon / self._cache_resolution)
         )
 
     def _batch_query_all(self, coords: np.ndarray) -> np.ndarray:
-        """批量查询所有 KG 特征"""
+        """
+        批量查询所有空间特征。
+
+        查询内容:
+            1. 道路类型特征（6维 one-hot）
+            2. POI 邻近特征（4维）
+            3. 道路密度特征（1维）
+
+        参数:
+            coords (np.ndarray): 形状 (N, 2) 的坐标数组，每行为 (lat, lon)
+
+        返回:
+            np.ndarray: 形状 (N, 11) 的特征矩阵
+        """
         # 特征1: 道路类型 (6维)
         road_type_features = self._batch_query_road_types(coords)
 
@@ -255,7 +373,22 @@ class TransportationKnowledgeGraph:
 
     def _batch_query_road_types(self, coords: np.ndarray,
                                  max_distance: float = 50.0) -> np.ndarray:
-        """批量查询道路类型"""
+        """
+        批量查询道路类型。
+
+        查询逻辑:
+            1. 使用 KDTree 查询每个坐标最近的道路节点
+            2. 如果距离小于阈值，使用该道路类型
+            3. 否则标记为 unknown
+            4. 将道路类型转换为 one-hot 编码
+
+        参数:
+            coords (np.ndarray): 形状 (N, 2) 的坐标数组
+            max_distance (float): 最大查询距离（米），默认 50.0
+
+        返回:
+            np.ndarray: 形状 (N, 6) 的 one-hot 编码矩阵
+        """
         N = coords.shape[0]
 
         # 查询最近的道路节点
@@ -279,7 +412,22 @@ class TransportationKnowledgeGraph:
 
     def _batch_query_pois(self, coords: np.ndarray,
                           max_distance: float = 200.0) -> np.ndarray:
-        """批量查询 POI 信息（修复 Decimal 类型问题）"""
+        """
+        批量查询 POI 信息。
+
+        查询逻辑:
+            1. 使用 KDTree 查询每个坐标附近的所有 POI
+            2. 检查是否有公交站、地铁站、停车场
+            3. 计算最近 POI 的距离并归一化
+
+        参数:
+            coords (np.ndarray): 形状 (N, 2) 的坐标数组
+            max_distance (float): 最大查询距离（米），默认 200.0
+
+        返回:
+            np.ndarray: 形状 (N, 4) 的 POI 特征矩阵
+                        [公交站标记, 地铁站标记, 停车场标记, 最近POI距离(归一化)]
+        """
         N = coords.shape[0]
         poi_features = np.zeros((N, 4), dtype=np.float32)
 
@@ -313,7 +461,20 @@ class TransportationKnowledgeGraph:
 
     def _batch_query_road_density(self, coords: np.ndarray,
                                    radius: float = 100.0) -> np.ndarray:
-        """批量查询道路密度"""
+        """
+        批量查询道路密度。
+
+        查询逻辑:
+            1. 使用 KDTree 查询每个坐标半径内的道路节点数量
+            2. 将数量归一化到 [0, 1] 区间
+
+        参数:
+            coords (np.ndarray): 形状 (N, 2) 的坐标数组
+            radius (float): 查询半径（米），默认 100.0
+
+        返回:
+            np.ndarray: 形状 (N, 1) 的道路密度矩阵
+        """
         N = coords.shape[0]
 
         # 查询附近道路节点数量
@@ -328,7 +489,17 @@ class TransportationKnowledgeGraph:
 
     # ========== 缓存管理 ==========
     def get_cache_stats(self) -> Dict:
-        """获取缓存统计"""
+        """
+        获取缓存统计信息。
+
+        返回:
+            Dict: 包含以下键的字典
+                - cache_size: 缓存条目数
+                - cache_hits: 缓存命中次数
+                - cache_misses: 缓存未命中次数
+                - hit_rate: 缓存命中率（百分比字符串）
+                - cache_memory_mb: 缓存占用内存（MB）
+        """
         total = self._cache_hits + self._cache_misses
         hit_rate = self._cache_hits / total if total > 0 else 0
 
@@ -341,13 +512,23 @@ class TransportationKnowledgeGraph:
         }
 
     def save_cache(self, cache_path: str):
-        """保存缓存到文件"""
+        """
+        保存缓存到文件。
+
+        参数:
+            cache_path (str): 缓存文件保存路径
+        """
         with open(cache_path, 'wb') as f:
             pickle.dump(self._grid_cache, f)
         print(f" -> 缓存已保存到: {cache_path}")
 
     def load_cache(self, cache_path: str):
-        """从文件加载缓存"""
+        """
+        从文件加载缓存。
+
+        参数:
+            cache_path (str): 缓存文件路径
+        """
         if os.path.exists(cache_path):
             with open(cache_path, 'rb') as f:
                 self._grid_cache = pickle.load(f)
@@ -356,14 +537,31 @@ class TransportationKnowledgeGraph:
             print(f" -> 缓存文件不存在: {cache_path}")
 
     def clear_cache(self):
-        """清空缓存"""
+        """
+        清空缓存。
+
+        清空内容:
+            - 网格缓存字典
+            - 缓存命中/未命中计数器
+        """
         self._grid_cache.clear()
         self._cache_hits = 0
         self._cache_misses = 0
 
     # ========== 保留原有接口 ==========
     def _link_roads_to_pois(self, max_distance: float = 100.0):
-        """使用 KDTree 加速 POI 到最近道路节点的链接"""
+        """
+        使用 KDTree 加速 POI 到最近道路节点的链接。
+
+        链接逻辑:
+            1. 对每个 POI，使用 KDTree 查询附近的所有道路节点
+            2. 计算每个道路节点到 POI 的 Haversine 距离
+            3. 选择距离最近的道路节点建立连接
+            4. 在图中添加双向边（POI->道路，道路->POI）
+
+        参数:
+            max_distance (float): 最大链接距离（米），默认 100.0
+        """
         poi_nodes = [n for n, d in self.graph.nodes(data=True) if d.get('type') == 'poi']
         road_nodes_data = [(n, d) for n, d in self.graph.nodes(data=True) if d.get('type') == 'road_node']
 
@@ -389,7 +587,7 @@ class TransportationKnowledgeGraph:
         indices = road_tree.query_ball_point(poi_coords, r=max_degree_distance)
 
         link_count = 0
-        for i, neighbors_indices in enumerate(tqdm(indices, desc="   [KG关联进度]", leave=False)):
+        for i, neighbors_indices in enumerate(tqdm(indices, desc="   [空间特征关联进度]", leave=False)):
             poi_node = poi_ids_list[i]
             poi_lat, poi_lon = poi_coords[i]
 
@@ -399,6 +597,7 @@ class TransportationKnowledgeGraph:
             for j in neighbors_indices:
                 road_node = road_node_ids[j]
                 road_lat, road_lon = road_coords[j]
+                # Haversine 距离计算（单位：米）
                 dist = geodesic((poi_lat, poi_lon), (road_lat, road_lon)).meters
 
                 if dist < min_dist:
@@ -414,10 +613,20 @@ class TransportationKnowledgeGraph:
                                   distance=min_dist)
                 link_count += 1
 
-        print(f" -> 知识图谱道路-POI关联完成。共添加 {link_count} 条关联边。")
+        print(f" -> 空间特征道路-POI关联完成。共添加 {link_count} 条关联边。")
 
     def get_graph_statistics(self) -> Dict:
-        """获取知识图谱统计信息"""
+        """
+        获取空间特征提取器统计信息。
+
+        返回:
+            Dict: 包含以下键的字典
+                - num_nodes: 图中节点总数
+                - num_edges: 图中边总数
+                - road_nodes: 道路节点数
+                - poi_nodes: POI 节点数
+                - poi_links: POI-道路关联边数
+        """
         return {
             'num_nodes': self.graph.number_of_nodes(),
             'num_edges': self.graph.number_of_edges(),

@@ -18,26 +18,26 @@ import sys
 
 # ===== ✅ 修改 1：支持基础数据导入 =====
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from common import BaseGeoLifePreprocessor, Exp2DataAdapter
+from common import BaseGeoLifePreprocessor, Exp2DataAdapter, train_epoch, evaluate
 # =====================================
 
 try:
     from src.data_preprocessing import GeoLifeDataLoader, OSMDataLoader, preprocess_trajectory_segments
     from src.feature_extraction import FeatureExtractor
     from src.model import TransportationModeClassifier
-    from src.knowledge_graph import TransportationKnowledgeGraph
+    from src.osm_feature_extractor import OsmSpatialExtractor
 except ImportError:
     pass
 
 # 特征维度常量
 TRAJECTORY_FEATURE_DIM = 9
-KG_FEATURE_DIM = 11
+SPATIAL_FEATURE_DIM = 11
 FIXED_SEQUENCE_LENGTH = 50
 
 # 缓存配置
 CACHE_DIR = 'cache'
-KG_CACHE_PATH = os.path.join(CACHE_DIR, 'kg_data.pkl')
-GRID_CACHE_PATH = os.path.join(CACHE_DIR, 'grid_cache.pkl')
+SPATIAL_CACHE_PATH = os.path.join(CACHE_DIR, 'spatial_data.pkl')
+SPATIAL_GRID_CACHE_PATH = os.path.join(CACHE_DIR, 'spatial_grid_cache.pkl')
 PROCESSED_SEGMENTS_CACHE_PATH = os.path.join(CACHE_DIR, 'processed_segments.pkl')
 PROCESSED_FEATURE_CACHE_PATH = os.path.join(CACHE_DIR, 'processed_features.pkl')
 os.makedirs(CACHE_DIR, exist_ok=True)
@@ -48,8 +48,8 @@ class TrajectoryDataset(Dataset):
     def __len__(self):
         return len(self.data)
     def __getitem__(self, idx):
-        trajectory_features, kg_features, label_encoded = self.data[idx]
-        return torch.FloatTensor(trajectory_features), torch.FloatTensor(kg_features), torch.LongTensor([label_encoded])[0]
+        trajectory_features, spatial_features, label_encoded = self.data[idx]
+        return torch.FloatTensor(trajectory_features), torch.FloatTensor(spatial_features), torch.LongTensor([label_encoded])[0]
 
 # ===== ✅ 修改 2：load_data 函数完整更新 =====
 def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_data: bool = True, cleaning_mode: str = 'balanced'):
@@ -65,26 +65,26 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
 
     BASE_DATA_PATH = os.path.join(os.path.dirname(geolife_root), 'processed/base_segments.pkl')
 
-    # 1. 知识图谱构建 (保持原有逻辑)
-    kg = None
-    if os.path.exists(KG_CACHE_PATH):
-        print(f"\n========== 阶段 1: 知识图谱加载 (从缓存) ==========")
+    # 1. 空间特征提取器构建 (保持原有逻辑)
+    spatial_extractor = None
+    if os.path.exists(SPATIAL_CACHE_PATH):
+        print(f"\n========== 阶段 1: 空间特征提取器加载 (从缓存) ==========")
         try:
-            with open(KG_CACHE_PATH, 'rb') as f:
+            with open(SPATIAL_CACHE_PATH, 'rb') as f:
                 with torch.serialization.safe_globals({LabelEncoder: LabelEncoder}):
-                    kg = pickle.load(f)
-            if os.path.exists(GRID_CACHE_PATH): kg.load_cache(GRID_CACHE_PATH)
+                    spatial_extractor = pickle.load(f)
+            if os.path.exists(SPATIAL_GRID_CACHE_PATH): spatial_extractor.load_cache(SPATIAL_GRID_CACHE_PATH)
         except Exception as e:
-            kg = None
+            spatial_extractor = None
 
-    if kg is None:
-        print("\n========== 阶段 1: 知识图谱构建 (重建) ==========")
+    if spatial_extractor is None:
+        print("\n========== 阶段 1: 空间特征提取器构建 (重建) ==========")
         osm_loader = OSMDataLoader(osm_path)
         osm_data = osm_loader.load_osm_data()
-        kg = TransportationKnowledgeGraph()
-        kg.build_from_osm(osm_loader.extract_road_network(osm_data), osm_loader.extract_pois(osm_data))
-        with open(KG_CACHE_PATH, 'wb') as f:
-            pickle.dump(kg, f, protocol=pickle.HIGHEST_PROTOCOL)
+        spatial_extractor = OsmSpatialExtractor()
+        spatial_extractor.build_from_osm(osm_loader.extract_road_network(osm_data), osm_loader.extract_pois(osm_data))
+        with open(SPATIAL_CACHE_PATH, 'wb') as f:
+            pickle.dump(spatial_extractor, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     # 2. 数据准备
     # A. 最终特征缓存检查
@@ -94,7 +94,7 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
             with open(PROCESSED_FEATURE_CACHE_PATH, 'rb') as f:
                 with torch.serialization.safe_globals({LabelEncoder: LabelEncoder}):
                     all_features_and_labels, label_encoder = pickle.load(f)
-            return all_features_and_labels, kg, label_encoder, {}
+            return all_features_and_labels, spatial_extractor, label_encoder, {}
         except Exception:
             pass
 
@@ -151,49 +151,19 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
 
     # 3. 特征提取 (阶段 D)
     print("\n========== 2.2: 特征提取 ==========")
-    feature_extractor = FeatureExtractor(kg)
+    feature_extractor = FeatureExtractor(spatial_extractor)
     all_features_and_labels = []
     for trajectory, label_str in tqdm(processed_segments, desc="[特征提取]"):
         try:
-            trajectory_features, kg_features = feature_extractor.extract_features(trajectory)
+            trajectory_features, spatial_features = feature_extractor.extract_features(trajectory)
             label_encoded = label_encoder.transform([label_str])[0]
-            all_features_and_labels.append((trajectory_features, kg_features, label_encoded))
+            all_features_and_labels.append((trajectory_features, spatial_features, label_encoded))
         except: continue
 
     with open(PROCESSED_FEATURE_CACHE_PATH, 'wb') as f:
         pickle.dump((all_features_and_labels, label_encoder, cleaning_stats), f, protocol=pickle.HIGHEST_PROTOCOL)
-    kg.save_cache(GRID_CACHE_PATH)
-    return all_features_and_labels, kg, label_encoder, cleaning_stats
-
-# ... (train_epoch 和 evaluate 函数保持不变) ...
-
-def train_epoch(model, dataloader, criterion, optimizer, device):
-    model.train()
-    total_loss, correct, total = 0, 0, 0
-    for traj_f, kg_f, labels in tqdm(dataloader, desc="Training Progress", leave=True):
-        traj_f, kg_f, labels = traj_f.to(device), kg_f.to(device), labels.to(device)
-        optimizer.zero_grad()
-        logits = model(traj_f, kg_f)
-        loss = criterion(logits, labels)
-        loss.backward()
-        optimizer.step()
-        total_loss += loss.item()
-        correct += (torch.argmax(logits, dim=1) == labels).sum().item()
-        total += labels.size(0)
-    return total_loss / len(dataloader), correct / total
-
-def evaluate(model, dataloader, criterion, device, label_encoder):
-    model.eval()
-    total_loss, all_preds, all_labels = 0, [], []
-    with torch.no_grad():
-        for traj_f, kg_f, labels in tqdm(dataloader, desc="Validation Progress", leave=True):
-            traj_f, kg_f, labels = traj_f.to(device), kg_f.to(device), labels.to(device)
-            logits = model(traj_f, kg_f)
-            total_loss += criterion(logits, labels).item()
-            all_preds.extend(torch.argmax(logits, dim=1).cpu().numpy())
-            all_labels.extend(labels.cpu().numpy())
-    report = classification_report(all_labels, all_preds, target_names=label_encoder.classes_, output_dict=True, zero_division=0)
-    return total_loss / len(dataloader), report, all_preds, all_labels
+    spatial_extractor.save_cache(SPATIAL_GRID_CACHE_PATH)
+    return all_features_and_labels, spatial_extractor, label_encoder, cleaning_stats
 
 # ===== ✅ 修改 3：main 函数参数接入 =====
 def main():
@@ -225,11 +195,11 @@ def main():
     os.makedirs(args.save_dir, exist_ok=True)
 
     if args.clear_cache:
-        for f in [KG_CACHE_PATH, GRID_CACHE_PATH, PROCESSED_SEGMENTS_CACHE_PATH, PROCESSED_FEATURE_CACHE_PATH]:
+        for f in [SPATIAL_CACHE_PATH, SPATIAL_GRID_CACHE_PATH, PROCESSED_SEGMENTS_CACHE_PATH, PROCESSED_FEATURE_CACHE_PATH]:
             if os.path.exists(f): os.remove(f)
 
     # 传递 use_base_data 参数
-    all_features_and_labels, kg, label_encoder, cleaning_stats = load_data(
+    all_features_and_labels, spatial_extractor, label_encoder, cleaning_stats = load_data(
         args.geolife_root, args.osm_path, args.max_users,
         use_base_data=args.use_base_data,
         cleaning_mode=args.cleaning_mode
@@ -303,7 +273,7 @@ def main():
         print(f"  {cls:15s}: Train={train_count}, Val={val_count}, Test={test_count}")
 
     model = TransportationModeClassifier(
-        TRAJECTORY_FEATURE_DIM, KG_FEATURE_DIM, args.hidden_dim, args.num_layers, len(label_encoder.classes_), args.dropout
+        TRAJECTORY_FEATURE_DIM, SPATIAL_FEATURE_DIM, args.hidden_dim, args.num_layers, len(label_encoder.classes_), args.dropout
     ).to(args.device)
 
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
@@ -334,7 +304,7 @@ def main():
             epochs_no_improve = 0
 
             torch.save({'model_state_dict': model.state_dict(), 'label_encoder': label_encoder, 'model_config': {
-                'trajectory_feature_dim': TRAJECTORY_FEATURE_DIM, 'kg_feature_dim': KG_FEATURE_DIM,
+                'trajectory_feature_dim': TRAJECTORY_FEATURE_DIM, 'spatial_feature_dim': SPATIAL_FEATURE_DIM,
                 'hidden_dim': args.hidden_dim, 'num_layers': args.num_layers, 'num_classes': len(label_encoder.classes_), 'dropout': args.dropout
             }}, os.path.join(args.save_dir, 'exp2_model.pth'))
             print("✓ 保存最佳模型（基于验证集）")

@@ -89,14 +89,14 @@ def main():
 
     print(f"   模型配置:")
     print(f"     - 轨迹特征维度: {config['trajectory_feature_dim']}")
-    print(f"     - KG特征维度: {config['kg_feature_dim']}")
+    print(f"     - 空间特征维度: {config['spatial_feature_dim']}")
     print(f"     - 天气特征维度: {config['weather_feature_dim']}")
     print(f"     - 类别数: {config['num_classes']}")
     print(f"     - 类别: {list(class_names)}")
 
     model = TransportationModeClassifierWithWeather(
         trajectory_feature_dim=config['trajectory_feature_dim'],
-        kg_feature_dim=config['kg_feature_dim'],
+        spatial_feature_dim=config['spatial_feature_dim'],
         weather_feature_dim=config['weather_feature_dim'],
         hidden_dim=config['hidden_dim'],
         num_layers=config['num_layers'],
@@ -202,12 +202,12 @@ def main():
     y_true, y_pred, y_probs = [], [], []
 
     with torch.no_grad():
-        for traj, kg, weather, labels in tqdm(test_loader, desc="Evaluation Progress"):
+        for traj, spatial, weather, labels in tqdm(test_loader, desc="Evaluation Progress"):
             traj = traj.to(DEVICE)
-            kg = kg.to(DEVICE)
+            spatial = spatial.to(DEVICE)
             weather = weather.to(DEVICE)
 
-            logits = model(traj, kg, weather)
+            logits = model(traj, spatial, weather)
             probs = torch.softmax(logits, dim=1)
             preds = torch.argmax(logits, dim=1)
 
@@ -269,7 +269,7 @@ def main():
             cm, annot=True, fmt='d', cmap='Blues',
             xticklabels=class_names, yticklabels=class_names
         )
-        plt.title('Exp4 Confusion Matrix (Trajectory + KG + Weather)', fontsize=14)
+        plt.title('Exp4 Confusion Matrix (Trajectory + Spatial Features + Weather)', fontsize=14)
         plt.xlabel('Predicted')
         plt.ylabel('True')
         plt.tight_layout()

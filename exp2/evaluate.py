@@ -1,7 +1,7 @@
 """
 Exp2 评估脚本 (标准版 - 与 Exp4 一致)
 功能：
-1. 自动适配轨迹 + KG特征（9+11维）
+1. 自动适配轨迹 + 空间特征（9+11维）
 2. 支持多路径缓存加载
 3. 生成详细的分类报告、混淆矩阵和预测详情
 4. 输出所有文件至 evaluation_results/ 子目录
@@ -39,11 +39,11 @@ class DualFeatureDataset(Dataset):
         return len(self.segments)
 
     def __getitem__(self, idx):
-        # 适配训练脚本保存的格式: (traj_feat, kg_feat, label)
-        traj_features, kg_features, label = self.segments[idx]
+        # 适配训练脚本保存的格式: (traj_feat, spatial_feat, label)
+        traj_features, spatial_features, label = self.segments[idx]
 
         traj_tensor = torch.FloatTensor(traj_features)
-        kg_tensor = torch.FloatTensor(kg_features)
+        spatial_tensor = torch.FloatTensor(spatial_features)
 
         # 标签处理：如果是字符串则转换，如果是数字则直接读取
         if isinstance(label, (int, np.integer)):
@@ -52,7 +52,7 @@ class DualFeatureDataset(Dataset):
             label_encoded = self.label_encoder.transform([label])[0]
             label_tensor = torch.LongTensor([label_encoded])[0]
 
-        return traj_tensor, kg_tensor, label_tensor
+        return traj_tensor, spatial_tensor, label_tensor
 
 
 def main():
@@ -69,7 +69,7 @@ def main():
     ]
 
     print("\n" + "=" * 60)
-    print("Exp2 模型评估 (轨迹 + 基础知识图谱)")
+    print("Exp2 模型评估 (轨迹 + 基础OSM空间特征)")
     print("=" * 60)
     print(f"设备: {DEVICE}")
 
@@ -104,7 +104,7 @@ def main():
 
     print(f"   模型配置:")
     print(f"     - 轨迹特征维度: {config['trajectory_feature_dim']}")
-    print(f"     - KG特征维度: {config['kg_feature_dim']}")
+    print(f"     - 空间特征维度: {config['spatial_feature_dim']}")
     print(f"     - 隐藏层维度: {config['hidden_dim']}")
     print(f"     - 层数: {config['num_layers']}")
     print(f"     - 类别数: {config['num_classes']}")
@@ -113,7 +113,7 @@ def main():
     # 动态初始化模型 (Exp2: 9 + 11 维)
     model = TransportationModeClassifier(
         trajectory_feature_dim=config['trajectory_feature_dim'],
-        kg_feature_dim=config['kg_feature_dim'],
+        spatial_feature_dim=config['spatial_feature_dim'],
         hidden_dim=config['hidden_dim'],
         num_layers=config['num_layers'],
         num_classes=config['num_classes'],
@@ -218,11 +218,11 @@ def main():
     y_true, y_pred, y_probs = [], [], []
 
     with torch.no_grad():
-        for traj, kg, labels in tqdm(test_loader, desc="Evaluation Progress", leave=True):
+        for traj, spatial, labels in tqdm(test_loader, desc="Evaluation Progress", leave=True):
             try:
-                traj, kg, labels = traj.to(DEVICE), kg.to(DEVICE), labels.to(DEVICE)
+                traj, spatial, labels = traj.to(DEVICE), spatial.to(DEVICE), labels.to(DEVICE)
 
-                logits = model(traj, kg)
+                logits = model(traj, spatial)
                 probs = torch.softmax(logits, dim=1)
                 preds = torch.argmax(probs, dim=1)
 
@@ -287,7 +287,7 @@ def main():
             cm, annot=True, fmt='d', cmap='Greens',
             xticklabels=class_names, yticklabels=class_names
         )
-        plt.title('Exp2 Confusion Matrix (Trajectory + Basic KG)', fontsize=14)
+        plt.title('Exp2 Confusion Matrix (Trajectory + Basic Spatial Features)', fontsize=14)
         plt.xlabel('Predicted')
         plt.ylabel('True')
         plt.tight_layout()
