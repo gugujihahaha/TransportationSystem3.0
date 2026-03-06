@@ -83,7 +83,7 @@ def main():
     print(f"     - 类别: {list(class_names)}")
 
     model = TransportationModeClassifier(
-        input_dim=config['input_dim'],
+        trajectory_feature_dim=config.get('trajectory_feature_dim', config.get('input_dim', 9)),
         hidden_dim=config['hidden_dim'],
         num_layers=config['num_layers'],
         num_classes=config['num_classes'],

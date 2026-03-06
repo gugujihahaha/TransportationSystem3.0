@@ -29,7 +29,7 @@ class TrajectoryPredictor:
 
         # 初始化模型架构
         self.model = TransportationModeClassifier(
-            input_dim=config['input_dim'],
+            trajectory_feature_dim=config.get('trajectory_feature_dim', config.get('input_dim', 9)),
             hidden_dim=config['hidden_dim'],
             num_layers=config['num_layers'],
             num_classes=config['num_classes'],
@@ -40,7 +40,7 @@ class TrajectoryPredictor:
         self.model.eval()
 
         print(f"✅ Exp1 模型加载成功！")
-        print(f"📊 特征配置: 轨迹维度={config['input_dim']}")
+        print(f"📊 特征配置: 轨迹维度={config.get('trajectory_feature_dim', config.get('input_dim', 9))}")
         print(f"🏷️  支持类别: {list(self.class_names)}")
 
     def predict(self, trajectory_features):

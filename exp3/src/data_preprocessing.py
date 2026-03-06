@@ -10,9 +10,9 @@ from typing import List, Tuple
 
 from exp2.src.data_preprocessing import (
     GeoLifeDataLoader as _BaseGeoLifeDataLoader,
+    OSMDataLoader,
     preprocess_trajectory_segments,
 )
-from exp3.src.osm_feature_extractor import OSMDataLoader
 
 
 class GeoLifeDataLoader(_BaseGeoLifeDataLoader):

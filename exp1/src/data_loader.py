@@ -48,6 +48,10 @@ def preprocess_segments(segments: List[Tuple[pd.DataFrame, str]],
                        max_length: int = 200,
                        target_length: int = 100) -> List[Tuple[np.ndarray, str]]:
     """
+    【仅传统模式使用】
+    快速模式（use_base_data=True）使用 Exp1DataAdapter，不经过此函数。
+    保留此函数仅为向后兼容。
+
     预处理轨迹段，转换为固定长度的序列，并进行标签重映射。
     确保所有输出序列的长度都严格等于 target_length。
     注意：此函数不再进行归一化，归一化操作在 train_maso.py 中使用全局统计量完成。
@@ -55,9 +59,17 @@ def preprocess_segments(segments: List[Tuple[pd.DataFrame, str]],
     processed_segments = []
 
     MAPPING = {
-        'taxi': 'Car',
+        'taxi': 'Car & taxi',
+        'car': 'Car & taxi',
+        'drive': 'Car & taxi',
+        'bus': 'Bus',
+        'walk': 'Walk',
+        'bike': 'Bike',
+        'train': 'Train',
+        'subway': 'Subway',
+        'railway': 'Train',
+        'airplane': 'Airplane'
     }
-    NEW_CLASS_NAME = 'Car & taxi'
 
     feature_cols = ['latitude', 'longitude', 'speed', 'acceleration',
                     'bearing_change', 'distance', 'time_diff',
@@ -86,14 +98,11 @@ def preprocess_segments(segments: List[Tuple[pd.DataFrame, str]],
 
         mapped_label = MAPPING.get(label, label)
 
-        if mapped_label == 'Car':
-            final_label = NEW_CLASS_NAME
-        else:
-            final_label = mapped_label.capitalize() if mapped_label else mapped_label
+        final_label = mapped_label.capitalize() if mapped_label else mapped_label
 
         processed_segments.append((features, final_label))
 
-    print(f"\n标签重映射完成: 'taxi' 已并入 '{NEW_CLASS_NAME}'")
+    print(f"\n标签映射字典: {MAPPING}")
     return processed_segments
 
 

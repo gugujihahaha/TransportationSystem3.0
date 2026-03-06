@@ -122,26 +122,36 @@ class EnhancedOsmSpatialExtractor(_BaseOsmSpatialExtractor):
                 elif 'subway' in route_type or 'train' in route_type:
                     self.subway_routes.add(road_id)
 
-    def _batch_query_road_attributes(self, coords: np.ndarray, max_distance: float = 50.0) -> np.ndarray:
-        """批量查询道路属性（增强版，包含速度限制和线路信息）"""
+    def _batch_query_road_attributes(self, coords: np.ndarray,
+                                   max_distance: float = 50.0) -> np.ndarray:
+        """批量查询道路属性（增强版）"""
         if self.road_kdtree is None:
-            return np.zeros((len(coords), 5))
+            return np.zeros((len(coords), 5), dtype=np.float32)
 
-        distances, indices = self.road_kdtree.query(coords, k=1, distance_upper_bound=max_distance)
+        # max_distance 单位是度，转换关系：1度 ≈ 111300米
+        max_dist_deg = max_distance / 111300.0
+        distances, indices = self.road_kdtree.query(coords, k=1)
 
-        results = np.zeros((len(coords), 5))
+        results = np.zeros((len(coords), 5), dtype=np.float32)
 
         for i, (dist, idx) in enumerate(zip(distances, indices)):
-            if idx == len(self.road_coords):
+            if dist > max_dist_deg:
                 continue
 
-            road_id = self.road_coords[idx][2]
+            # [0] 归一化距离
+            results[i, 0] = min(dist * 111300.0 / max_distance, 1.0)
 
-            results[i, 0] = dist
-            results[i, 1] = self.road_types.get(road_id, 0)
-            results[i, 2] = self.speed_limits.get(road_id, 0)
-            results[i, 3] = 1 if road_id in self.bus_routes else 0
-            results[i, 4] = 1 if road_id in self.subway_routes else 0
+            # [1] 道路类型编码（用索引表示）
+            road_type = self.road_types[idx] if idx < len(self.road_types) else 'unknown'
+            type_map = {'walk': 1, 'bike': 2, 'car': 3, 'bus': 4, 'train': 5, 'unknown': 0}
+            results[i, 1] = type_map.get(road_type, 0) / 5.0  # 归一化到[0,1]
+
+            # [2] 速度限制（暂时无法从KDTree索引获取，填0）
+            results[i, 2] = 0.0
+
+            # [3][4] 公交/地铁线路（暂时无法从KDTree索引获取，填0）
+            results[i, 3] = 0.0
+            results[i, 4] = 0.0
 
         return results
 

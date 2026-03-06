@@ -84,6 +84,7 @@ class BaseDataAdapter(ABC):
         )
 
         # 初始化清洗器
+        # min_segment_length 统一由 self.cleaner.min_segment_length 管理
         self.cleaner = TrajectoryCleaner(**self.cleaning_params)
 
         # 统计信息
@@ -140,7 +141,7 @@ class BaseDataAdapter(ABC):
         """
         valid_segments = []
         discarded = 0
-        min_len = self.cleaning_params['min_segment_length']
+        min_len = self.cleaner.min_segment_length
 
         for seg in tqdm(base_segments, desc="[阶段1: 基础过滤]"):
             # 标签过滤
@@ -173,7 +174,7 @@ class BaseDataAdapter(ABC):
 
         Returns:
             (cleaned_segments, discarded_count)
-            cleaned_segments: List of (trajectory, datetime_series, label)
+            cleaned_segments: List of (trajectory, segment_stats, datetime_series, label)
         """
         cleaned_segments = []
         discarded = 0
@@ -191,11 +192,14 @@ class BaseDataAdapter(ABC):
                 cleaned_traj, self.target_length
             )
 
+            # 计算段级统计特征
+            segment_stats = BaseGeoLifePreprocessor.compute_segment_stats(cleaned_traj)
+
             # 同步时间序列
             if datetime_series is not None:
                 datetime_series = self._normalize_time_series(datetime_series)
 
-            cleaned_segments.append((cleaned_traj, datetime_series, label))
+            cleaned_segments.append((cleaned_traj, segment_stats, datetime_series, label))
 
         return cleaned_segments, discarded
 
@@ -228,11 +232,14 @@ class BaseDataAdapter(ABC):
                     padding = np.zeros((self.target_length - L, 9), dtype=np.float32)
                     trajectory = np.vstack([trajectory, padding])
 
+            # 计算段级统计特征
+            segment_stats = BaseGeoLifePreprocessor.compute_segment_stats(trajectory)
+
             # 时间序列规范化
             if datetime_series is not None:
                 datetime_series = self._normalize_time_series(datetime_series)
 
-            finalized.append((trajectory, datetime_series, label))
+            finalized.append((trajectory, segment_stats, datetime_series, label))
         return finalized
 
     # ============ 主入口 ============

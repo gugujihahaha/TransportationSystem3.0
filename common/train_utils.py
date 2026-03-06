@@ -106,3 +106,56 @@ def evaluate(
         zero_division=0,
     )
     return avg_loss, report, all_preds, all_labels
+
+
+def compute_class_weights(label_encoder, all_features_and_labels,
+                       label_index: int = -1,
+                       mode: str = 'inverse') -> torch.Tensor:
+    """
+    计算类别权重，用于 CrossEntropyLoss。
+
+    Args:
+        label_encoder: sklearn LabelEncoder，已 fit
+        all_features_and_labels: 训练数据列表，每个元素最后一项为 label_encoded
+        label_index: label 在每个元素 tuple 中的位置，默认 -1（最后一项）
+        mode: 权重计算方式
+            'inverse'       : w_i = N / (C * n_i)，标准反频率权重
+            'sqrt_inverse'  : w_i = sqrt(N / (C * n_i))，温和版，避免极端权重
+            'effective'     : 基于有效样本数（论文 Class-Balanced Loss 方法）
+
+    Returns:
+        weights: FloatTensor，shape (num_classes,)，已归一化使均值为1
+    """
+    import numpy as np
+
+    num_classes = len(label_encoder.classes_)
+    label_counts = np.zeros(num_classes, dtype=np.float64)
+
+    for item in all_features_and_labels:
+        label_idx = item[label_index]
+        label_counts[label_idx] += 1
+
+    # 防止除零
+    label_counts = np.where(label_counts == 0, 1, label_counts)
+    N = label_counts.sum()
+    C = num_classes
+
+    if mode == 'inverse':
+        weights = N / (C * label_counts)
+    elif mode == 'sqrt_inverse':
+        weights = np.sqrt(N / (C * label_counts))
+    elif mode == 'effective':
+        beta = 0.9999
+        effective_num = 1.0 - np.power(beta, label_counts)
+        weights = (1.0 - beta) / effective_num
+    else:
+        raise ValueError(f"Unknown mode: {mode}")
+
+    # 归一化：使均值为1，避免影响整体 loss scale
+    weights = weights / weights.mean()
+
+    print(f"\n类别权重 (mode={mode}):")
+    for i, cls in enumerate(label_encoder.classes_):
+        print(f"  {cls:15s}: count={int(label_counts[i]):5d}, weight={weights[i]:.4f}")
+
+    return torch.FloatTensor(weights)

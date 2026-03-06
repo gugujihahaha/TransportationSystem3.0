@@ -11,13 +11,14 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from common.base_model import BaseTransportationClassifier
+from common.base_model import (BaseTransportationClassifier,
+                                HierarchicalTransportationClassifier)
 
 
-class TransportationModeClassifier(BaseTransportationClassifier):
+class TransportationModeClassifier(HierarchicalTransportationClassifier):
     """
     exp1 分类器（纯轨迹版）。
-    输入：轨迹特征 (trajectory_feature_dim 维)，无空间/天气特征。
+    输入：轨迹特征 (trajectory_feature_dim 维），无空间/天气特征。
     """
 
     def __init__(
@@ -27,6 +28,9 @@ class TransportationModeClassifier(BaseTransportationClassifier):
         num_layers: int = 2,
         num_classes: int = 7,
         dropout: float = 0.3,
+        num_segments: int = 5,
+        local_hidden: int = 64,
+        global_hidden: int = 128,
     ):
         """
         Args:
@@ -35,6 +39,9 @@ class TransportationModeClassifier(BaseTransportationClassifier):
             num_layers: LSTM层数
             num_classes: 分类类别数（任务定义统一：Walk, Bike, Bus, Car&taxi, Train, Subway, Airplane）
             dropout: Dropout比率
+            num_segments: 序列分段数
+            local_hidden: 局部编码器隐藏维度
+            global_hidden: 全局编码器隐藏维度
         """
         super().__init__(
             input_dims=[trajectory_feature_dim],
@@ -42,6 +49,9 @@ class TransportationModeClassifier(BaseTransportationClassifier):
             num_layers=num_layers,
             num_classes=num_classes,
             dropout=dropout,
+            num_segments=num_segments,
+            local_hidden=local_hidden,
+            global_hidden=global_hidden,
         )
         self.trajectory_feature_dim = trajectory_feature_dim
 
@@ -57,9 +67,9 @@ class TransportationModeClassifier(BaseTransportationClassifier):
         """
         return super().forward(trajectory_features)
 
-    def predict(self, trajectory_features: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """预测类别和概率"""
-        return super().predict(trajectory_features)
+    def predict_proba(self, trajectory_features: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """推断类别和置信度（推理模式）。"""
+        return super().predict_proba(trajectory_features)
 
 
 class CNNLSTMModel(nn.Module):

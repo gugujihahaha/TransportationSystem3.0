@@ -25,6 +25,18 @@ import warnings
 warnings.filterwarnings('ignore')
 
 
+FEATURE_COLUMNS = [
+    'latitude', 'longitude', 'speed', 'acceleration',
+    'bearing_change', 'distance', 'time_diff',
+    'total_distance', 'total_time'
+]
+
+# 特征维度常量（供外部引用）
+POINT_FEATURE_DIM = 9   # 原始点级特征维度（不变）
+SEGMENT_STATS_DIM = 18  # 段级统计特征维度
+TOTAL_FEATURE_DIM = POINT_FEATURE_DIM + SEGMENT_STATS_DIM  # 27
+
+
 class BaseGeoLifePreprocessor:
     """GeoLife基础数据预处理器（所有实验共用）"""
 
@@ -343,6 +355,331 @@ class BaseGeoLifePreprocessor:
             segments = pickle.load(f)
 
         print(f"\n✅ 从缓存加载: {len(segments)} 个轨迹段")
+        return segments
+
+    @staticmethod
+    def compute_segment_stats(features: np.ndarray) -> np.ndarray:
+        """
+        计算轨迹段的统计特征（段级，与序列长度无关）。
+
+        基于已计算好的9维特征矩阵，提取能区分交通方式的统计量。
+
+        Args:
+            features: (N, 9) 特征矩阵，列顺序：
+                [0]latitude [1]longitude [2]speed [3]acceleration
+                [4]bearing_change [5]distance [6]time_diff
+                [7]total_distance [8]total_time
+
+        Returns:
+            stats: (18,) 统计特征向量
+
+        特征说明（共18维）：
+            [0]  speed_mean          速度均值
+            [1]  speed_std           速度标准差
+            [2]  speed_max           速度最大值
+            [3]  speed_cv            速度变异系数 = std/mean，区分 Bus/Car 关键特征
+            [4]  accel_mean          加速度均值（绝对值）
+            [5]  accel_std           加速度标准差
+            [6]  accel_max           加速度最大值（绝对值）
+            [7]  bearing_change_mean 方向变化均值，区分直线/曲线行驶
+            [8]  bearing_change_std  方向变化标准差
+            [9]  stop_ratio          停止比例（速度<0.5m/s 的点占比），Bus特征
+            [10] high_speed_ratio    高速比例（速度>15m/s 的点占比），Train/Airplane特征
+            [11] linearity           直线度 = 直线距离/累计距离，Walk特征
+            [12] total_distance      总行驶距离
+            [13] total_time          总行驶时间
+            [14] avg_segment_speed   平均段速度 = 总距离/总时间
+            [15] speed_entropy       速度分布熵，衡量速度变化规律性
+            [16] accel_sign_changes  加速度符号变化次数（归一化），Bus走走停停特征
+            [17] max_sustained_speed 最大持续高速时长比例，区分 Subway/Train
+        """
+        eps = 1e-8
+        N = len(features)
+
+        if N == 0:
+            return np.zeros(18, dtype=np.float32)
+
+        speed = features[:, 2].clip(0)
+        accel = np.abs(features[:, 3])
+        bearing = np.abs(features[:, 4])
+        distance = features[:, 5].clip(0)
+        time_diff = features[:, 6].clip(0)
+        total_dist = features[-1, 7] if features[-1, 7] > 0 else distance.sum()
+        total_time = features[-1, 8] if features[-1, 8] > 0 else time_diff.sum()
+
+        speed_mean = float(np.mean(speed))
+        speed_std  = float(np.std(speed))
+        speed_max  = float(np.max(speed))
+
+        speed_cv = speed_std / (speed_mean + eps)
+
+        accel_mean = float(np.mean(accel))
+        accel_std  = float(np.std(accel))
+        accel_max  = float(np.max(accel))
+
+        bearing_mean = float(np.mean(bearing))
+        bearing_std  = float(np.std(bearing))
+
+        stop_ratio = float(np.mean(speed < 0.5))
+
+        high_speed_ratio = float(np.mean(speed > 15.0))
+
+        if total_dist > eps:
+            lat_start, lon_start = features[0, 0], features[0, 1]
+            lat_end,   lon_end   = features[-1, 0], features[-1, 1]
+            straight_dist = np.sqrt(
+                ((lat_end - lat_start) * 111300) ** 2 +
+                ((lon_end - lon_start) * 111300 * np.cos(np.radians(lat_start))) ** 2
+            )
+            linearity = float(min(straight_dist / (total_dist + eps), 1.0))
+        else:
+            linearity = 0.0
+
+        total_distance    = float(total_dist)
+        total_time_val    = float(total_time)
+        avg_segment_speed = float(total_dist / (total_time + eps))
+
+        if speed_max > eps:
+            hist, _ = np.histogram(speed, bins=10, range=(0, speed_max + eps))
+            hist = hist / (hist.sum() + eps)
+            hist = hist[hist > 0]
+            speed_entropy = float(-np.sum(hist * np.log(hist + eps)))
+        else:
+            speed_entropy = 0.0
+
+        if N > 1:
+            raw_accel = features[:, 3]
+            sign_changes = np.sum(np.diff(np.sign(raw_accel)) != 0)
+            accel_sign_changes = float(sign_changes / (N - 1))
+        else:
+            accel_sign_changes = 0.0
+
+        high_speed_mask = speed > 10.0
+        max_sustained = 0
+        current_run = 0
+        for v in high_speed_mask:
+            if v:
+                current_run += 1
+                max_sustained = max(max_sustained, current_run)
+            else:
+                current_run = 0
+        max_sustained_speed = float(max_sustained / N)
+
+        stats = np.array([
+            speed_mean, speed_std, speed_max, speed_cv,
+            accel_mean, accel_std, accel_max,
+            bearing_mean, bearing_std,
+            stop_ratio, high_speed_ratio,
+            linearity,
+            total_distance, total_time_val, avg_segment_speed,
+            speed_entropy,
+            accel_sign_changes,
+            max_sustained_speed
+        ], dtype=np.float32)
+
+        stats = np.nan_to_num(stats, nan=0.0, posinf=0.0, neginf=0.0)
+
+        return stats
+
+    @staticmethod
+    def augment_segment(features: np.ndarray,
+                     label: str,
+                     augment_types: list = None) -> list:
+        """
+        对单个轨迹段做数据增强，返回增强后的样本列表。
+
+        用途：对少数类（Subway/Airplane）进行过采样，
+              增强样本多样性而不改变语义。
+
+        Args:
+            features: (N, 27) 原始特征数组
+            label: 类别标签字符串
+            augment_types: 增强类型列表，可选：
+                'time_warp'   : 时间轴随机拉伸/压缩（模拟不同速度）
+                'noise'       : 添加高斯噪声（模拟传感器误差）
+                'flip'        : 时间轴翻转（模拟反向行驶）
+                'scale'       : 速度/加速度维度随机缩放
+
+        Returns:
+            augmented: List of (features_aug, label)，不含原始样本
+        """
+        if augment_types is None:
+            augment_types = ['noise', 'scale']
+
+        augmented = []
+        N, D = features.shape
+
+        for aug_type in augment_types:
+            feat = features.copy()
+
+            if aug_type == 'time_warp':
+                # 在时间轴上随机插值，模拟不同采样率
+                warp_factor = np.random.uniform(0.8, 1.2)
+                new_len = max(int(N * warp_factor), 10)
+                indices = np.linspace(0, N - 1, new_len)
+                feat_warped = np.zeros((new_len, D), dtype=np.float32)
+                for d in range(D):
+                    feat_warped[:, d] = np.interp(indices, np.arange(N), feat[:, d])
+                # 重新规范化到原始长度
+                indices_back = np.linspace(0, new_len - 1, N)
+                for d in range(D):
+                    feat[:, d] = np.interp(indices_back, np.arange(new_len), feat_warped[:, d])
+
+            elif aug_type == 'noise':
+                # 只对运动特征维度（speed/accel/bearing等）加噪声，不动经纬度
+                noise_cols = [2, 3, 4, 5, 6]  # speed, accel, bearing, distance, time_diff
+                noise = np.random.normal(0, 0.05, (N, len(noise_cols))).astype(np.float32)
+                feat[:, noise_cols] += noise
+
+            elif aug_type == 'flip':
+                # 时间轴翻转：模拟反向轨迹
+                feat = feat[::-1].copy()
+
+            elif aug_type == 'scale':
+                # 速度和加速度维度随机缩放（模拟不同交通状况）
+                scale_cols = [2, 3]  # speed, acceleration
+                scale = np.random.uniform(0.85, 1.15)
+                feat[:, scale_cols] *= scale
+
+            augmented.append((feat.astype(np.float32), label))
+
+        return augmented
+
+    @staticmethod
+    def oversample_minority_classes(
+            segments: list,
+            target_ratio: float = 0.3,
+            minority_classes: list = None) -> list:
+        """
+        对少数类进行过采样，使其样本量达到多数类的 target_ratio 倍。
+
+        Args:
+            segments: List of (features, label) 或 (features, datetime, label)
+            target_ratio: 少数类目标样本量 = 多数类样本量 * target_ratio
+            minority_classes: 指定需要过采样的类别，None 则自动识别
+
+        Returns:
+            augmented_segments: 原始 + 增强样本的混合列表（已随机打乱）
+        """
+        import random
+
+        # 判断 segments 格式：(feat, label) 或 (feat, dt, label)
+        has_datetime = len(segments[0]) == 3
+
+        if has_datetime:
+            by_class = {}
+            for feat, dt, label in segments:
+                by_class.setdefault(label, []).append((feat, dt, label))
+        else:
+            by_class = {}
+            for feat, label in segments:
+                by_class.setdefault(label, []).append((feat, label))
+
+        # 统计各类样本数
+        class_counts = {cls: len(items) for cls, items in by_class.items()}
+        max_count = max(class_counts.values())
+        target_count = int(max_count * target_ratio)
+
+        # 自动识别少数类
+        if minority_classes is None:
+            minority_classes = [
+                cls for cls, cnt in class_counts.items()
+                if cnt < target_count
+            ]
+
+        print(f"\n过采样统计 (target_ratio={target_ratio}):")
+        for cls, cnt in sorted(class_counts.items()):
+            marker = " ← 需要增强" if cls in minority_classes else ""
+            print(f"  {cls:15s}: {cnt:5d}{marker}")
+
+        augmented = list(segments)
+
+        for cls in minority_classes:
+            items = by_class.get(cls, [])
+            if not items:
+                continue
+
+            needed = target_count - len(items)
+            if needed <= 0:
+                continue
+
+            added = 0
+            while added < needed:
+                # 随机选一个原始样本做增强
+                if has_datetime:
+                    src_feat, src_dt, src_label = random.choice(items)
+                else:
+                    src_feat, src_label = random.choice(items)
+
+                aug_results = BaseGeoLifePreprocessor.augment_segment(
+                    src_feat, src_label,
+                    augment_types=['noise', 'scale', 'time_warp']
+                )
+
+                for aug_feat, aug_label in aug_results:
+                    if added >= needed:
+                        break
+                    if has_datetime:
+                        augmented.append((aug_feat, src_dt, aug_label))
+                    else:
+                        augmented.append((aug_feat, aug_label))
+                    added += 1
+
+            print(f"  {cls:15s}: +{added} 个增强样本 → 共 {len(items) + added}")
+
+        random.shuffle(augmented)
+        print(f"\n增强后总样本数: {len(augmented)}（原始: {len(segments)}）")
+        return augmented
+
+
+class BaseGeoLifeDataLoader:
+    """
+    GeoLife 数据加载器基类（轻量版）。
+    
+    特征计算完全委托给 BaseGeoLifePreprocessor， 
+    供 exp1/src/data_loader.py 等继承使用。
+    """
+
+    def __init__(self, data_root: str):
+        self.data_root = data_root
+        self._preprocessor = BaseGeoLifePreprocessor(data_root)
+
+    def load_trajectory(self, file_path: str):
+        """加载轨迹文件并计算9维特征，委托给 BaseGeoLifePreprocessor。"""
+        return self._preprocessor._load_and_compute_features(file_path)
+
+    def load_labels(self, user_id: str):
+        """加载用户标签，委托给 BaseGeoLifePreprocessor。"""
+        return self._preprocessor._load_labels(user_id)
+
+    def get_all_users(self):
+        """获取所有用户ID，委托给 BaseGeoLifePreprocessor。"""
+        return self._preprocessor._get_all_users()
+
+    def segment_trajectory(self, trajectory, labels):
+        """
+        按标签分割轨迹（基础版，子类可覆盖）。
+        
+        参数：
+            trajectory: 含 datetime 列的 DataFrame
+            labels:     含 Start Time / End Time / Transportation Mode 列的 DataFrame
+        返回：
+            List of (segment_df, mode_str)
+        """
+        segments = []
+        if labels.empty:
+            return [(trajectory, 'unknown')]
+        for _, label_row in labels.iterrows():
+            start_time = label_row['Start Time']
+            end_time   = label_row['End Time']
+            mode       = label_row['Transportation Mode']
+            mask = (
+                (trajectory['datetime'] >= start_time) & 
+                (trajectory['datetime'] <= end_time)
+            )
+            seg = trajectory[mask].copy()
+            if len(seg) > 0:
+                segments.append((seg, mode))
         return segments
 
 
