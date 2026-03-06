@@ -123,13 +123,14 @@ class TrajectoryDataset(Dataset):
         return len(self.data)
 
     def __getitem__(self, idx):
-        trajectory_features, spatial_features, label_encoded = self.data[idx]
+        trajectory_features, spatial_features, segment_stats, label_encoded = self.data[idx]
 
         trajectory_tensor = torch.FloatTensor(trajectory_features)
         spatial_tensor = torch.FloatTensor(spatial_features)
+        stats_tensor = torch.FloatTensor(segment_stats)
         label_tensor = torch.LongTensor([label_encoded])[0]
 
-        return trajectory_tensor, spatial_tensor, label_tensor
+        return trajectory_tensor, spatial_tensor, stats_tensor, label_tensor
 
 
 # ============================================================
@@ -256,11 +257,11 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
     feature_extractor = FeatureExtractor(spatial_extractor)
     all_features_and_labels = []
 
-    for trajectory, label_str in tqdm(processed_segments, desc="[Exp3 特征提取]"):
+    for trajectory, segment_stats, label_str in tqdm(processed_segments, desc="[Exp3 特征提取]"):
         try:
             trajectory_features, spatial_features = feature_extractor.extract_features(trajectory)
             label_encoded = label_encoder.transform([label_str])[0]
-            all_features_and_labels.append((trajectory_features, spatial_features, label_encoded))
+            all_features_and_labels.append((trajectory_features, spatial_features, segment_stats, label_encoded))
         except Exception:
             continue
 
@@ -393,7 +394,7 @@ def main():
         print(f"  {cls:15s}: Train={train_count}, Val={val_count}, Test={test_count}")
 
     model = TransportationModeClassifier(
-        TRAJECTORY_FEATURE_DIM, SPATIAL_FEATURE_DIM, args.hidden_dim, args.num_layers, len(label_encoder.classes_), args.dropout,
+        TRAJECTORY_FEATURE_DIM, SPATIAL_FEATURE_DIM, 18, args.hidden_dim, args.num_layers, len(label_encoder.classes_), args.dropout,
         num_segments=5,
         local_hidden=64,
         global_hidden=128,

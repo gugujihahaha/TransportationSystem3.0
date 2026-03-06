@@ -164,9 +164,8 @@ class TrajectoryDatasetWithWeather(Dataset):
         return len(self.data)
 
     def __getitem__(self, idx):
-        trajectory_features, spatial_features, weather_features, label_encoded = self.data[idx]
+        trajectory_features, spatial_features, weather_features, segment_stats, label_encoded = self.data[idx]
 
-        # 确保数据类型和形状正确
         trajectory_tensor = torch.FloatTensor(
             np.nan_to_num(trajectory_features, nan=0.0, posinf=0.0, neginf=0.0)
         )
@@ -176,9 +175,10 @@ class TrajectoryDatasetWithWeather(Dataset):
         weather_tensor = torch.FloatTensor(
             np.nan_to_num(weather_features, nan=0.0, posinf=0.0, neginf=0.0)
         )
+        stats_tensor = torch.FloatTensor(segment_stats)
         label_tensor = torch.LongTensor([label_encoded])[0]
 
-        return trajectory_tensor, spatial_tensor, weather_tensor, label_tensor
+        return trajectory_tensor, spatial_tensor, weather_tensor, stats_tensor, label_tensor
 
 
 def normalize_features_safe(features: np.ndarray) -> np.ndarray:
@@ -365,6 +365,9 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
                 features = segment[feature_cols].values.astype(np.float32)
                 features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
 
+                # 计算段级统计特征
+                segment_stats = BaseGeoLifePreprocessor.compute_segment_stats(features)
+
                 current_length = len(features)
 
                 # 序列长度规范化
@@ -384,7 +387,7 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
                 else:
                     dates_resampled = dates.reset_index(drop=True)
 
-                processed_segments_with_time.append((features, dates_resampled, label))
+                processed_segments_with_time.append((features, segment_stats, dates_resampled, label))
             except Exception:
                 continue
 
@@ -422,7 +425,7 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
     success_count = 0
     degraded_count = 0
 
-    for trajectory, datetime_series, label_str in tqdm(processed_segments_with_time,
+    for trajectory, segment_stats, datetime_series, label_str in tqdm(processed_segments_with_time,
                                                         desc="[Exp4 特征提取]"):
         try:
             # 尝试完整特征提取
@@ -437,7 +440,7 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
 
             label_encoded = label_encoder.transform([label_str])[0]
             all_features_and_labels.append((
-                trajectory_features, spatial_features, weather_features, label_encoded
+                trajectory_features, spatial_features, weather_features, segment_stats, label_encoded
             ))
             success_count += 1
 
@@ -470,7 +473,7 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
 
                 label_encoded = label_encoder.transform([label_str])[0]
                 all_features_and_labels.append((
-                    trajectory_features, spatial_features, weather_features, label_encoded
+                    trajectory_features, spatial_features, weather_features, segment_stats, label_encoded
                 ))
                 degraded_count += 1
 
@@ -693,6 +696,7 @@ def main():
         trajectory_feature_dim=TRAJECTORY_FEATURE_DIM,
         spatial_feature_dim=SPATIAL_FEATURE_DIM,
         weather_feature_dim=WEATHER_FEATURE_DIM,
+        segment_stats_dim=18,
         hidden_dim=args.hidden_dim,
         num_layers=args.num_layers,
         num_classes=num_classes,
