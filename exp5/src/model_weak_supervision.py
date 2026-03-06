@@ -175,11 +175,14 @@ class TransportationModeClassifierExp5(nn.Module):
 
     def forward(self, trajectory_features: torch.Tensor,
                 spatial_features: torch.Tensor,
-                weather_features: torch.Tensor) -> torch.Tensor:
-        logits, _, _ = self.model.forward(trajectory_features, spatial_features, weather_features, return_context=True)
+                weather_features: torch.Tensor,
+                segment_stats: torch.Tensor = None) -> torch.Tensor:
+        logits, _, _ = self.model.forward(trajectory_features, spatial_features, weather_features,
+                                        segment_stats, return_context=True)
         return logits
 
     def predict_proba(self, trajectory_features: torch.Tensor,
                      spatial_features: torch.Tensor,
-                     weather_features: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        return self.model.predict_proba(trajectory_features, spatial_features, weather_features)
+                     weather_features: torch.Tensor,
+                     segment_stats: torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor]:
+        return self.model.predict(trajectory_features, spatial_features, weather_features, segment_stats)

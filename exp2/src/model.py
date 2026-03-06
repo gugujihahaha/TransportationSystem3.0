@@ -45,14 +45,15 @@ class TransportationModeClassifier(HierarchicalTransportationClassifier):
             global_hidden: 全局编码器隐藏维度
         """
         super().__init__(
-            input_dims=[trajectory_feature_dim, spatial_feature_dim, segment_stats_dim],
-            hidden_dims=[hidden_dim, hidden_dim // 2, hidden_dim // 4],
+            input_dims=[trajectory_feature_dim, spatial_feature_dim],
+            hidden_dims=[hidden_dim, hidden_dim // 2],
             num_layers=num_layers,
             num_classes=num_classes,
             dropout=dropout,
             num_segments=num_segments,
             local_hidden=local_hidden,
             global_hidden=global_hidden,
+            segment_stats_dim=segment_stats_dim,
         )
 
         # 保存参数供 checkpoint 序列化使用
@@ -62,7 +63,7 @@ class TransportationModeClassifier(HierarchicalTransportationClassifier):
 
     def forward(self, trajectory_features: torch.Tensor,
                 spatial_features: torch.Tensor,
-                segment_stats: torch.Tensor) -> torch.Tensor:
+                segment_stats: torch.Tensor = None) -> torch.Tensor:
         """
         前向传播
 
@@ -74,13 +75,15 @@ class TransportationModeClassifier(HierarchicalTransportationClassifier):
         Returns:
             logits: (batch_size, num_classes)
         """
-        return super().forward(trajectory_features, spatial_features, segment_stats)
+        return super().forward(trajectory_features, spatial_features,
+                           segment_stats=segment_stats)
 
     def predict_proba(self, trajectory_features: torch.Tensor,
                      spatial_features: torch.Tensor,
-                     segment_stats: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+                     segment_stats: torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor]:
         """推断类别和置信度（推理模式）。"""
-        return super().predict_proba(trajectory_features, spatial_features, segment_stats)
+        return super().predict_proba(trajectory_features, spatial_features,
+                                    segment_stats=segment_stats)
 
 
 class AttentionFusionModel(BaseTransportationClassifier):

@@ -45,7 +45,13 @@ def train_epoch(
         labels   = labels.to(device)
 
         optimizer.zero_grad()
-        logits = model(*features)
+        
+        if len(features) == 2 and features[1].dim() == 2:
+            trajectory_features, segment_stats = features
+            logits = model(trajectory_features, segment_stats=segment_stats)
+        else:
+            logits = model(*features)
+        
         loss   = criterion(logits, labels)
         loss.backward()
 
@@ -91,7 +97,12 @@ def evaluate(
             features = [f.to(device) for f in features]
             labels   = labels.to(device)
 
-            logits      = model(*features)
+            if len(features) == 2 and features[1].dim() == 2:
+                trajectory_features, segment_stats = features
+                logits      = model(trajectory_features, segment_stats=segment_stats)
+            else:
+                logits      = model(*features)
+            
             total_loss += criterion(logits, labels).item()
 
             preds = torch.argmax(logits, dim=1)
