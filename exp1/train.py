@@ -45,10 +45,11 @@ class TrajectoryDataset(Dataset):
         return len(self.segments)
 
     def __getitem__(self, idx):
-        features, label = self.segments[idx]
+        features, segment_stats, label = self.segments[idx]
         x = torch.FloatTensor(features)
+        stats = torch.FloatTensor(segment_stats)
         y = self.label_encoder.transform([label])[0]
-        return x, torch.LongTensor([y])
+        return x, stats, torch.LongTensor([y])
 
 
 # ============================================================
@@ -247,13 +248,14 @@ def main():
 
     print(f"\n类别分布:")
     for cls in label_encoder.classes_:
-        train_count = sum(1 for i in train_indices if segments[i][1] == cls)
-        val_count = sum(1 for i in val_indices if segments[i][1] == cls)
-        test_count = sum(1 for i in test_indices if segments[i][1] == cls)
+        train_count = sum(1 for i in train_indices if segments[i][2] == cls)
+        val_count = sum(1 for i in val_indices if segments[i][2] == cls)
+        test_count = sum(1 for i in test_indices if segments[i][2] == cls)
         print(f"  {cls:15s}: Train={train_count}, Val={val_count}, Test={test_count}")
 
     model = TransportationModeClassifier(
         trajectory_feature_dim=TRAJECTORY_FEATURE_DIM,
+        segment_stats_dim=18,
         hidden_dim=args.hidden_dim,
         num_layers=args.num_layers,
         num_classes=len(label_encoder.classes_),
@@ -267,7 +269,7 @@ def main():
     class_weights = compute_class_weights(
         label_encoder,
         all_features_and_labels,
-        label_index=1,
+        label_index=2,
         mode='sqrt_inverse'
     ).to(args.device)
     criterion = nn.CrossEntropyLoss(weight=class_weights)

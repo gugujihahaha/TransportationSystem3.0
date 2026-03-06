@@ -44,13 +44,13 @@ PROCESSED_FEATURE_CACHE_PATH = os.path.join(CACHE_DIR, 'processed_features.pkl')
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 class TrajectoryDataset(Dataset):
-    def __init__(self, all_features_and_labels: List[Tuple[np.ndarray, np.ndarray, int]]):
+    def __init__(self, all_features_and_labels: List[Tuple[np.ndarray, np.ndarray, np.ndarray, int]]):
         self.data = all_features_and_labels
     def __len__(self):
         return len(self.data)
     def __getitem__(self, idx):
-        trajectory_features, spatial_features, label_encoded = self.data[idx]
-        return torch.FloatTensor(trajectory_features), torch.FloatTensor(spatial_features), torch.LongTensor([label_encoded])[0]
+        trajectory_features, spatial_features, segment_stats, label_encoded = self.data[idx]
+        return torch.FloatTensor(trajectory_features), torch.FloatTensor(spatial_features), torch.FloatTensor(segment_stats), torch.LongTensor([label_encoded])[0]
 
 # ===== ✅ 修改 2：load_data 函数完整更新 =====
 def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_data: bool = True, cleaning_mode: str = 'balanced'):
@@ -168,11 +168,11 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
     print("\n========== 2.2: 特征提取 ==========")
     feature_extractor = FeatureExtractor(spatial_extractor)
     all_features_and_labels = []
-    for trajectory, label_str in tqdm(processed_segments, desc="[特征提取]"):
+    for trajectory, segment_stats, label_str in tqdm(processed_segments, desc="[特征提取]"):
         try:
             trajectory_features, spatial_features = feature_extractor.extract_features(trajectory)
             label_encoded = label_encoder.transform([label_str])[0]
-            all_features_and_labels.append((trajectory_features, spatial_features, label_encoded))
+            all_features_and_labels.append((trajectory_features, spatial_features, segment_stats, label_encoded))
         except: continue
 
     with open(PROCESSED_FEATURE_CACHE_PATH, 'wb') as f:
@@ -288,7 +288,7 @@ def main():
         print(f"  {cls:15s}: Train={train_count}, Val={val_count}, Test={test_count}")
 
     model = TransportationModeClassifier(
-        TRAJECTORY_FEATURE_DIM, SPATIAL_FEATURE_DIM, args.hidden_dim, args.num_layers, len(label_encoder.classes_), args.dropout,
+        TRAJECTORY_FEATURE_DIM, SPATIAL_FEATURE_DIM, 18, args.hidden_dim, args.num_layers, len(label_encoder.classes_), args.dropout,
         num_segments=5,
         local_hidden=64,
         global_hidden=128,

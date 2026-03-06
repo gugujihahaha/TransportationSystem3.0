@@ -23,6 +23,7 @@ class TransportationModeClassifierWithWeather(HierarchicalTransportationClassifi
         trajectory_feature_dim: int = 9,
         spatial_feature_dim: int = 15,
         weather_feature_dim: int = 12,
+        segment_stats_dim: int = 18,
         hidden_dim: int = 128,
         num_layers: int = 2,
         num_classes: int = 7,
@@ -32,8 +33,8 @@ class TransportationModeClassifierWithWeather(HierarchicalTransportationClassifi
         global_hidden: int = 128,
     ):
         super().__init__(
-            input_dims=[trajectory_feature_dim, spatial_feature_dim, weather_feature_dim],
-            hidden_dims=[hidden_dim, hidden_dim // 2, hidden_dim // 4],
+            input_dims=[trajectory_feature_dim, spatial_feature_dim, weather_feature_dim, segment_stats_dim],
+            hidden_dims=[hidden_dim, hidden_dim // 2, hidden_dim // 4, hidden_dim // 8],
             num_layers=num_layers,
             num_classes=num_classes,
             dropout=dropout,
@@ -46,10 +47,12 @@ class TransportationModeClassifierWithWeather(HierarchicalTransportationClassifi
         self.trajectory_feature_dim = trajectory_feature_dim
         self.spatial_feature_dim = spatial_feature_dim
         self.weather_feature_dim = weather_feature_dim
+        self.segment_stats_dim = segment_stats_dim
 
     def forward(self, trajectory_features: torch.Tensor,
                 spatial_features: torch.Tensor,
-                weather_features: torch.Tensor) -> torch.Tensor:
+                weather_features: torch.Tensor,
+                segment_stats: torch.Tensor) -> torch.Tensor:
         """
         前向传播
 
@@ -57,14 +60,16 @@ class TransportationModeClassifierWithWeather(HierarchicalTransportationClassifi
             trajectory_features: (batch_size, seq_len, 9)
             spatial_features: (batch_size, seq_len, 15)
             weather_features: (batch_size, seq_len, 12)
+            segment_stats: (batch_size, segment_stats_dim)
 
         Returns:
             logits: (batch_size, num_classes)
         """
-        return super().forward(trajectory_features, spatial_features, weather_features)
+        return super().forward(trajectory_features, spatial_features, weather_features, segment_stats)
 
     def predict_proba(self, trajectory_features: torch.Tensor,
                      spatial_features: torch.Tensor,
-                     weather_features: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+                     weather_features: torch.Tensor,
+                     segment_stats: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """预测类别和概率"""
-        return super().predict_proba(trajectory_features, spatial_features, weather_features)
+        return super().predict_proba(trajectory_features, spatial_features, weather_features, segment_stats)

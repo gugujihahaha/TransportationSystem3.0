@@ -36,6 +36,7 @@ class WeaklySupervisedContextModel(nn.Module):
                  trajectory_feature_dim: int = 9,
                  spatial_feature_dim: int = 15,
                  weather_feature_dim: int = 12,
+                 segment_stats_dim: int = 18,
                  hidden_dim: int = 128,
                  num_layers: int = 2,
                  num_classes: int = 7,
@@ -48,6 +49,7 @@ class WeaklySupervisedContextModel(nn.Module):
         self.trajectory_feature_dim = trajectory_feature_dim
         self.spatial_feature_dim    = spatial_feature_dim
         self.weather_feature_dim    = weather_feature_dim
+        self.segment_stats_dim      = segment_stats_dim
         self.hidden_dim             = hidden_dim
         self.num_classes            = num_classes
         self.context_loss_type      = context_loss_type
@@ -90,7 +92,7 @@ class WeaklySupervisedContextModel(nn.Module):
         )
         self.weather_attn = nn.Linear(hidden_dim // 2, 1)
 
-        context_dim = hidden_dim + hidden_dim // 2
+        context_dim = hidden_dim + hidden_dim // 2 + segment_stats_dim
         self.context_fusion = nn.Sequential(
             nn.Linear(context_dim, hidden_dim),
             nn.ReLU(),
@@ -117,6 +119,7 @@ class WeaklySupervisedContextModel(nn.Module):
     def forward(self, trajectory_features: torch.Tensor,
                 spatial_features: torch.Tensor,
                 weather_features: torch.Tensor,
+                segment_stats: torch.Tensor,
                 return_context: bool = False):
         traj_out, _   = self.trajectory_lstm(trajectory_features)
         traj_repr     = self._attention_pool(traj_out, self.traj_attn)
@@ -127,7 +130,7 @@ class WeaklySupervisedContextModel(nn.Module):
         weather_out, _ = self.weather_lstm(weather_features)
         weather_repr   = self._attention_pool(weather_out, self.weather_attn)
 
-        context_combined = torch.cat([spatial_repr, weather_repr], dim=1)
+        context_combined = torch.cat([spatial_repr, weather_repr, segment_stats], dim=1)
         context_repr     = self.context_fusion(context_combined)
 
         logits = self.classifier(traj_repr)
@@ -154,7 +157,7 @@ class WeaklySupervisedContextModel(nn.Module):
 
         return (loss_t2c + loss_c2t) / 2.0
 
-    def predict(self, trajectory_features, spatial_features, weather_features):
+    def predict(self, trajectory_features, spatial_features, weather_features, segment_stats):
         self.eval()
         with torch.no_grad():
             logits = self.forward(trajectory_features, spatial_features,
