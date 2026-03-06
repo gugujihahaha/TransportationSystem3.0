@@ -7,6 +7,9 @@
 
 from .base_preprocessor import BaseGeoLifePreprocessor
 from .base_adapter import BaseDataAdapter
+from .base_model import BaseTransportationClassifier
+from .train_utils import train_epoch, evaluate
+from .geolife_data_loader import BaseGeoLifeDataLoader
 from .exp1_adapter import Exp1DataAdapter
 from .exp2_adapter import Exp2DataAdapter
 from .exp3_adapter import Exp3DataAdapter
@@ -17,6 +20,10 @@ from .trajectory_cleaner import TrajectoryCleaner
 __all__ = [
     'BaseGeoLifePreprocessor',
     'BaseDataAdapter',
+    'BaseTransportationClassifier',
+    'train_epoch',
+    'evaluate',
+    'BaseGeoLifeDataLoader',
     'Exp1DataAdapter',
     'Exp2DataAdapter',
     'Exp3DataAdapter',

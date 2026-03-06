@@ -27,10 +27,10 @@ class TransportationPredictorExp4:
         self.class_names = self.label_encoder.classes_
         config = ckpt['model_config']
 
-        # 初始化模型架构 (Exp4: 轨迹 9 维 + 增强 KG 15 维 + 天气 12 维)
+        # 初始化模型架构 (Exp4: 轨迹 9 维 + 增强空间特征 15 维 + 天气 12 维)
         self.model = TransportationModeClassifierWithWeather(
             trajectory_feature_dim=config.get('trajectory_feature_dim', 9),
-            kg_feature_dim=config.get('kg_feature_dim', 15),
+            spatial_feature_dim=config.get('spatial_feature_dim', 15),
             weather_feature_dim=config.get('weather_feature_dim', 12),
             hidden_dim=config.get('hidden_dim', 128),
             num_layers=config.get('num_layers', 2),
@@ -43,29 +43,29 @@ class TransportationPredictorExp4:
 
         print(f"✅ Exp4 模型加载成功！")
         print(f"📊 特征配置: 轨迹={config.get('trajectory_feature_dim', 9)}维, "
-              f"KG={config.get('kg_feature_dim', 15)}维, "
+              f"空间特征={config.get('spatial_feature_dim', 15)}维, "
               f"天气={config.get('weather_feature_dim', 12)}维")
         print(f"🏷️  支持类别: {list(self.class_names)}")
 
-    def predict(self, traj_features, kg_features, weather_features):
+    def predict(self, traj_features, spatial_features, weather_features):
         """
         输入参数:
             traj_features: (seq_len, 9) 的轨迹特征矩阵
-            kg_features: (15,) 的增强知识图谱特征向量
+            spatial_features: (15,) 的增强OSM空间特征向量
             weather_features: (12,) 的天气特征向量
         返回:
             pred_label: 预测的交通方式字符串
             confidence: 置信度分数
         """
-        # 1. 轨迹特征维度处理 -> (1, seq_len, 9)
+        #1. 轨迹特征维度处理 -> (1, seq_len, 9)
         if traj_features.ndim == 2:
             traj_features = np.expand_dims(traj_features, axis=0)
 
-        # 2. KG 特征维度处理 -> (1, 1, 15)
-        if kg_features.ndim == 1:
-            kg_features = np.expand_dims(np.expand_dims(kg_features, axis=0), axis=1)
-        elif kg_features.ndim == 2:
-            kg_features = np.expand_dims(kg_features, axis=1)
+        # 2. 空间特征维度处理 -> (1, 1, 15)
+        if spatial_features.ndim == 1:
+            spatial_features = np.expand_dims(np.expand_dims(spatial_features, axis=0), axis=1)
+        elif spatial_features.ndim == 2:
+            spatial_features = np.expand_dims(spatial_features, axis=1)
 
         # 3. 天气特征维度处理 -> (1, 1, 12)
         if weather_features.ndim == 1:
@@ -75,12 +75,12 @@ class TransportationPredictorExp4:
 
         # 4. 转换为 Tensor
         traj_tensor = torch.FloatTensor(traj_features).to(self.device)
-        kg_tensor = torch.FloatTensor(kg_features).to(self.device)
+        spatial_tensor = torch.FloatTensor(spatial_features).to(self.device)
         weather_tensor = torch.FloatTensor(weather_features).to(self.device)
 
         # 5. 推理
         with torch.no_grad():
-            logits = self.model(traj_tensor, kg_tensor, weather_tensor)
+            logits = self.model(traj_tensor, spatial_tensor, weather_tensor)
             probs = torch.softmax(logits, dim=1)
             confidence, pred_idx = torch.max(probs, dim=1)
 
@@ -99,10 +99,10 @@ if __name__ == "__main__":
 
     # 模拟输入：
     dummy_traj = np.random.randn(50, 9)    # 50个点的轨迹
-    dummy_kg = np.random.randn(15)         # 15维增强KG特征
+    dummy_spatial = np.random.randn(15)         # 15维增强空间特征
     dummy_weather = np.random.randn(12)    # 12维天气特征
 
-    label, score = predictor.predict(dummy_traj, dummy_kg, dummy_weather)
+    label, score = predictor.predict(dummy_traj, dummy_spatial, dummy_weather)
 
     print("\n" + "=" * 40)
     print(f"【实验四预测结论】")

@@ -27,10 +27,10 @@ class TransportationPredictorExp2:
         self.class_names = self.label_encoder.classes_
         config = ckpt['model_config']
 
-        # 初始化模型架构 (Exp2: 轨迹 9 维 + KG 11 维)
+        # 初始化模型架构 (Exp2: 轨迹 9 维 + 空间特征 11 维)
         self.model = TransportationModeClassifier(
             trajectory_feature_dim=config['trajectory_feature_dim'],
-            kg_feature_dim=config['kg_feature_dim'],
+            spatial_feature_dim=config['spatial_feature_dim'],
             hidden_dim=config['hidden_dim'],
             num_layers=config['num_layers'],
             num_classes=config['num_classes'],
@@ -41,14 +41,14 @@ class TransportationPredictorExp2:
         self.model.eval()
 
         print(f"✅ Exp2 模型加载成功！")
-        print(f"📊 特征配置: 轨迹={config['trajectory_feature_dim']}维, KG={config['kg_feature_dim']}维")
+        print(f"📊 特征配置: 轨迹={config['trajectory_feature_dim']}维, 空间特征={config['spatial_feature_dim']}维")
         print(f"🏷️  支持类别: {list(self.class_names)}")
 
-    def predict(self, traj_features, kg_features):
+    def predict(self, traj_features, spatial_features):
         """
         输入参数:
             traj_features: (seq_len, 9) 的轨迹特征矩阵
-            kg_features: (11,) 的知识图谱特征向量
+            spatial_features: (11,) 的OSM空间特征向量
         返回:
             pred_label: 预测的交通方式字符串
             confidence: 置信度分数
@@ -57,20 +57,20 @@ class TransportationPredictorExp2:
         if traj_features.ndim == 2:
             traj_features = np.expand_dims(traj_features, axis=0)
 
-        # 2. KG 特征维度处理 (batch_size, 1, 11)
-        # 增加维度以满足模型内部 kg_out[:, -1, :] 的索引需求
-        if kg_features.ndim == 1:
-            kg_features = np.expand_dims(np.expand_dims(kg_features, axis=0), axis=1)
-        elif kg_features.ndim == 2:
-            kg_features = np.expand_dims(kg_features, axis=1)
+        # 2. 空间特征维度处理 (batch_size, 1, 11)
+        # 增加维度以满足模型内部 spatial_out[:, -1, :] 的索引需求
+        if spatial_features.ndim == 1:
+            spatial_features = np.expand_dims(np.expand_dims(spatial_features, axis=0), axis=1)
+        elif spatial_features.ndim == 2:
+            spatial_features = np.expand_dims(spatial_features, axis=1)
 
         # 3. 转换为 Tensor 并移动到设备
         traj_tensor = torch.FloatTensor(traj_features).to(self.device)
-        kg_tensor = torch.FloatTensor(kg_features).to(self.device)
+        spatial_tensor = torch.FloatTensor(spatial_features).to(self.device)
 
         # 4. 执行推理
         with torch.no_grad():
-            logits = self.model(traj_tensor, kg_tensor)
+            logits = self.model(traj_tensor, spatial_tensor)
             probs = torch.softmax(logits, dim=1)
             confidence, pred_idx = torch.max(probs, dim=1)
 
@@ -90,10 +90,10 @@ if __name__ == "__main__":
     # 模拟输入：
     # 轨迹特征: 长度50, 维度9
     dummy_traj = np.random.randn(50, 9)
-    # KG特征: 维度11
-    dummy_kg = np.random.randn(11)
+    # 空间特征: 维度11
+    dummy_spatial = np.random.randn(11)
 
-    label, score = predictor.predict(dummy_traj, dummy_kg)
+    label, score = predictor.predict(dummy_traj, dummy_spatial)
 
     print("\n" + "=" * 40)
     print(f"【实验二预测结论】")
