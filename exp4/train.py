@@ -45,7 +45,8 @@ os.chdir(SCRIPT_DIR)
 
 # 尝试导入 common 模块（可选）
 try:
-    from common import BaseGeoLifePreprocessor, Exp4DataAdapter, train_epoch, evaluate
+    from common import (BaseGeoLifePreprocessor, Exp4DataAdapter,
+                         train_epoch, evaluate, compute_class_weights)
     HAS_COMMON = True
 except ImportError:
     HAS_COMMON = False
@@ -396,6 +397,13 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
     if len(processed_segments_with_time) == 0:
         raise ValueError("没有有效的轨迹数据！请检查数据路径和格式。")
 
+    # 对少数类进行数据增强（仅对训练数据有效，此处对全量做增强后再split）
+    processed_segments_with_time = BaseGeoLifePreprocessor.oversample_minority_classes(
+        processed_segments_with_time,
+        target_ratio=0.3,
+        minority_classes=['Subway', 'Airplane']
+    )
+
     # 标签编码
     all_labels = [s[2] for s in processed_segments_with_time]
     label_encoder = LabelEncoder()
@@ -688,7 +696,10 @@ def main():
         hidden_dim=args.hidden_dim,
         num_layers=args.num_layers,
         num_classes=num_classes,
-        dropout=args.dropout
+        dropout=args.dropout,
+        num_segments=5,
+        local_hidden=64,
+        global_hidden=128,
     ).to(args.device)
 
     print(f"\n模型参数量: {sum(p.numel() for p in model.parameters()):,}")
@@ -700,7 +711,13 @@ def main():
     )
 
     # 损失函数
-    criterion = nn.CrossEntropyLoss()
+    class_weights = compute_class_weights(
+        label_encoder,
+        all_features_and_labels,
+        label_index=-1,
+        mode='sqrt_inverse'
+    ).to(args.device)
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
 
     # ========================================================
     # ✅ Early Stopping 配置
@@ -722,7 +739,7 @@ def main():
         )
 
         val_loss, report, _, _ = evaluate(
-            model, val_loader, criterion, args.device, label_encoder
+            model, val_loader, criterion, args.device, label_encoder.classes_
         )
         val_acc = report.get('accuracy', 0.0)
 
@@ -769,7 +786,7 @@ def main():
     print("=" * 80)
 
     test_loss, test_report, _, _ = evaluate(
-        model, test_loader, criterion, args.device, label_encoder
+        model, test_loader, criterion, args.device, label_encoder.classes_
     )
     test_acc = test_report.get('accuracy', 0.0)
 

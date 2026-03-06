@@ -24,8 +24,8 @@ from tqdm import tqdm
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from common import BaseGeoLifePreprocessor, Exp1DataAdapter
-# ===== 新增结束 =====
+from common import (BaseGeoLifePreprocessor, Exp1DataAdapter,
+                     train_epoch, evaluate, compute_class_weights)
 
 from src.data_loader import GeoLifeDataLoader, preprocess_segments
 from src.model import TransportationModeClassifier
@@ -133,55 +133,6 @@ def load_data(geolife_root: str, max_users: int = None, use_base_data: bool = Tr
 
 
 # ============================================================
-# Train / Eval
-# ============================================================
-def train_epoch(model, loader, criterion, optimizer, device):
-    model.train()
-    total_loss, correct, total = 0, 0, 0
-
-    for x, y in tqdm(loader, desc="Training Progress"):
-        x, y = x.to(device), y.squeeze().to(device)
-        optimizer.zero_grad()
-        logits = model(x)
-        loss = criterion(logits, y)
-        loss.backward()
-        optimizer.step()
-
-        total_loss += loss.item()
-        correct += (logits.argmax(1) == y).sum().item()
-        total += y.size(0)
-
-    return total_loss / len(loader), correct / total
-
-
-def evaluate(model, loader, criterion, device, label_encoder):
-    model.eval()
-    all_preds, all_labels = [], []
-    total_loss = 0
-
-    with torch.no_grad():
-        for x, y in tqdm(loader, desc="Validation Progress"):
-            x, y = x.to(device), y.squeeze().to(device)
-            logits = model(x)
-            loss = criterion(logits, y)
-            total_loss += loss.item()
-
-            all_preds.extend(logits.argmax(1).cpu().numpy())
-            all_labels.extend(y.cpu().numpy())
-
-    report = classification_report(
-        all_labels,
-        all_preds,
-        target_names=label_encoder.classes_,
-        labels=np.arange(len(label_encoder.classes_)),
-        zero_division=0,
-        output_dict=True
-    )
-
-    return total_loss / len(loader), report
-
-
-# ============================================================
 # Main
 # ============================================================
 def main():
@@ -215,6 +166,13 @@ def main():
     # 最终 7 类（任务定义统一）
     TARGET_MODES_FINAL = ['Walk', 'Bike', 'Car & taxi', 'Bus', 'Train', 'Subway', 'Airplane']
     segments = [s for s in segments if s[1] in TARGET_MODES_FINAL]
+
+    # 对少数类进行数据增强（仅对训练数据有效，此处对全量做增强后再split）
+    segments = BaseGeoLifePreprocessor.oversample_minority_classes(
+        segments,
+        target_ratio=0.3,
+        minority_classes=['Subway', 'Airplane']
+    )
 
     labels = [s[1] for s in segments]
     label_encoder = LabelEncoder()
@@ -295,14 +253,24 @@ def main():
         print(f"  {cls:15s}: Train={train_count}, Val={val_count}, Test={test_count}")
 
     model = TransportationModeClassifier(
-        input_dim=TRAJECTORY_FEATURE_DIM,
+        trajectory_feature_dim=TRAJECTORY_FEATURE_DIM,
         hidden_dim=args.hidden_dim,
         num_layers=args.num_layers,
         num_classes=len(label_encoder.classes_),
-        dropout=args.dropout
+        dropout=args.dropout,
+        num_segments=5,
+        local_hidden=64,
+        global_hidden=128,
     ).to(args.device)
 
-    criterion = nn.CrossEntropyLoss()
+    all_features_and_labels = segments
+    class_weights = compute_class_weights(
+        label_encoder,
+        all_features_and_labels,
+        label_index=1,
+        mode='sqrt_inverse'
+    ).to(args.device)
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     # ========================================================
@@ -324,7 +292,7 @@ def main():
 
         # 在验证集上评估
         val_loss, val_report = evaluate(
-            model, val_loader, criterion, args.device, label_encoder
+            model, val_loader, criterion, args.device, label_encoder.classes_
         )
         val_acc = val_report['accuracy']
 
@@ -342,7 +310,7 @@ def main():
                 "model_state_dict": model.state_dict(),
                 "label_encoder": label_encoder,
                 "model_config": {
-                    "input_dim": TRAJECTORY_FEATURE_DIM,
+                    "trajectory_feature_dim": TRAJECTORY_FEATURE_DIM,
                     "hidden_dim": args.hidden_dim,
                     "num_layers": args.num_layers,
                     "num_classes": len(label_encoder.classes_),
@@ -366,7 +334,7 @@ def main():
     print("=" * 80)
 
     test_loss, test_report = evaluate(
-        model, test_loader, criterion, args.device, label_encoder
+        model, test_loader, criterion, args.device, label_encoder.classes_
     )
     test_acc = test_report['accuracy']
 

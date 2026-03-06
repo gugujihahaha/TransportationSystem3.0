@@ -1,3 +1,11 @@
+"""
+轨迹数据清洗器
+
+输入数据格式：9维特征矩阵，与 base_preprocessor.py 的 FEATURE_COLUMNS 对应
+列索引: [0]latitude [1]longitude [2]speed [3]acceleration
+        [4]bearing_change [5]distance [6]time_diff
+        [7]total_distance [8]total_time
+"""
 import numpy as np
 import pandas as pd
 from typing import Dict, List, Tuple
@@ -97,8 +105,9 @@ class TrajectoryCleaner:
 
         Args:
             trajectory: 轨迹特征矩阵 (n_points, 9)
-                列索引: [lat, lon, speed, accel, bearing_change,
-                         distance, time_diff, total_distance, total_time]
+                列索引: [0]latitude [1]longitude [2]speed [3]acceleration
+                        [4]bearing_change [5]distance [6]time_diff
+                        [7]total_distance [8]total_time
             label: 交通方式标签
 
         Returns:

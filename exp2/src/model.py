@@ -11,10 +11,11 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from common.base_model import BaseTransportationClassifier
+from common.base_model import (BaseTransportationClassifier,
+                                HierarchicalTransportationClassifier)
 
 
-class TransportationModeClassifier(BaseTransportationClassifier):
+class TransportationModeClassifier(HierarchicalTransportationClassifier):
     """交通方式分类器 - 任务定义统一 num_classes = 7"""
 
     def __init__(
@@ -25,6 +26,9 @@ class TransportationModeClassifier(BaseTransportationClassifier):
         num_layers: int = 2,
         num_classes: int = 7,
         dropout: float = 0.3,
+        num_segments: int = 5,
+        local_hidden: int = 64,
+        global_hidden: int = 128,
     ):
         """
         Args:
@@ -34,6 +38,9 @@ class TransportationModeClassifier(BaseTransportationClassifier):
             num_layers: LSTM层数
             num_classes: 分类类别数（任务定义统一：Walk, Bike, Bus, Car&taxi, Train, Subway, Airplane）
             dropout: Dropout比率
+            num_segments: 序列分段数
+            local_hidden: 局部编码器隐藏维度
+            global_hidden: 全局编码器隐藏维度
         """
         super().__init__(
             input_dims=[trajectory_feature_dim, spatial_feature_dim],
@@ -41,6 +48,9 @@ class TransportationModeClassifier(BaseTransportationClassifier):
             num_layers=num_layers,
             num_classes=num_classes,
             dropout=dropout,
+            num_segments=num_segments,
+            local_hidden=local_hidden,
+            global_hidden=global_hidden,
         )
 
         # 保存参数供 checkpoint 序列化使用
@@ -61,10 +71,10 @@ class TransportationModeClassifier(BaseTransportationClassifier):
         """
         return super().forward(trajectory_features, spatial_features)
 
-    def predict(self, trajectory_features: torch.Tensor,
-                spatial_features: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """预测类别和概率"""
-        return super().predict(trajectory_features, spatial_features)
+    def predict_proba(self, trajectory_features: torch.Tensor,
+                     spatial_features: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """推断类别和置信度（推理模式）。"""
+        return super().predict_proba(trajectory_features, spatial_features)
 
 
 class AttentionFusionModel(BaseTransportationClassifier):

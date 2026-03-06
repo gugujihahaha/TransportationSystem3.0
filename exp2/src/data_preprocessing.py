@@ -13,7 +13,7 @@ import json
 import warnings
 from tqdm import tqdm
 
-from common.geolife_data_loader import BaseGeoLifeDataLoader
+from common.base_preprocessor import BaseGeoLifeDataLoader
 
 pd.options.mode.chained_assignment = None
 
@@ -177,6 +177,33 @@ class OSMDataLoader:
 
         print(f"提取到 {len(pois)} 个POI")
         return pd.DataFrame(pois)
+
+    def extract_transit_routes(self, osm_data: Dict) -> pd.DataFrame:
+        """提取公交/地铁线路信息"""
+        routes = []
+
+        for feature in osm_data.get('features', []):
+            props = feature.get('properties', {})
+            geometry = feature.get('geometry', {})
+
+            route = props.get('route', '')
+            highway = props.get('highway', '')
+            railway = props.get('railway', '')
+
+            if route in ('bus', 'subway', 'train') or railway in ('rail', 'subway'):
+                route_info = {
+                    'id': props.get('@id', '') or props.get('id', ''),
+                    'type': route or railway or highway,
+                    'name': props.get('name', ''),
+                    'road_id': props.get('@id', '') or props.get('id', ''),
+                    'geometry_type': geometry.get('type', ''),
+                }
+                routes.append(route_info)
+
+        print(f"提取到 {len(routes)} 条公交/地铁线路")
+        return pd.DataFrame(routes) if routes else pd.DataFrame(
+            columns=['id', 'type', 'name', 'road_id', 'geometry_type']
+        )
 
 
 def preprocess_trajectory_segments(segments: List[Tuple[pd.DataFrame, str]],

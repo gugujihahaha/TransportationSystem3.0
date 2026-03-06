@@ -106,7 +106,7 @@ if __name__ == "__main__":
     dummy_spatial = np.random.randn(15)         # 15维增强空间特征
     dummy_weather = np.random.randn(12)    # 12维天气特征
 
-    label, score = predictor.predict(dummy_traj, dummy_spatial, dummy_weather)
+    label, score = predictor.predict_proba(dummy_traj, dummy_spatial, dummy_weather)
 
     print("\n" + "=" * 40)
     print(f"【实验五预测结论】")

@@ -45,7 +45,7 @@ from exp4.src.feature_extraction_weather import FeatureExtractorWithWeather
 from exp5.src.model_weak_supervision import WeaklySupervisedContextModel
 
 # 通用训练工具
-from common.train_utils import evaluate
+from common.train_utils import evaluate, compute_class_weights
 
 # ========================== 特征维度常量 ==========================
 TRAJECTORY_FEATURE_DIM = 9
@@ -406,6 +406,13 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
     if len(processed_segments_with_time) == 0:
         raise ValueError("没有有效的轨迹数据！请检查数据路径和格式。")
 
+    # 对少数类进行数据增强（仅对训练数据有效，此处对全量做增强后再split）
+    processed_segments_with_time = BaseGeoLifePreprocessor.oversample_minority_classes(
+        processed_segments_with_time,
+        target_ratio=0.3,
+        minority_classes=['Subway', 'Airplane']
+    )
+
     # 标签编码
     all_labels = [s[2] for s in processed_segments_with_time]
     label_encoder = LabelEncoder()
@@ -508,7 +515,9 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
 
 
 def train_epoch(model, dataloader, criterion, optimizer, device,
-                max_grad_norm: float = 1.0, context_loss_weight: float = 0.1):
+                max_grad_norm: float = 1.0,
+                context_loss_weight: float = 0.05,
+                temperature: float = 0.07):
     """训练一个 epoch（支持弱监督上下文损失）
 
     Args:
@@ -543,16 +552,13 @@ def train_epoch(model, dataloader, criterion, optimizer, device,
 
             optimizer.zero_grad()
 
-            # 前向传播（获取轨迹表示和上下文表示）
-            logits, trajectory_repr, context_repr = model(
+            logits, traj_z, context_z = model(
                 traj_f, spatial_f, weather_f, return_context=True
             )
 
-            # 计算分类损失（交叉熵）
             ce_loss = criterion(logits, labels)
 
-            # 计算上下文一致性损失（embedding-level约束）
-            context_loss = model.compute_context_loss(trajectory_repr, context_repr)
+            context_loss = model.compute_context_loss(traj_z, context_z)
 
             # 总损失 = CE + λ * L_context
             total_batch_loss = ce_loss + context_loss_weight * context_loss
@@ -735,8 +741,9 @@ def main():
         num_layers=args.num_layers,
         num_classes=num_classes,
         dropout=args.dropout,
-        context_loss_type='mse',
-        context_loss_weight=0.05
+        context_loss_type='infonce',
+        context_loss_weight=0.05,
+        temperature=0.07
     ).to(args.device)
 
     print(f"\n模型参数量: {sum(p.numel() for p in model.parameters()):,}")
@@ -745,7 +752,13 @@ def main():
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='min', factor=0.5, patience=5
     )
-    criterion = nn.CrossEntropyLoss()
+    class_weights = compute_class_weights(
+        label_encoder,
+        all_features_and_labels,
+        label_index=-1,
+        mode='sqrt_inverse'
+    ).to(args.device)
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
 
     # 上下文损失权重 λ
     context_loss_weight = 0.05
@@ -765,7 +778,8 @@ def main():
         train_loss, train_acc, train_ce_loss, train_context_loss = train_epoch(
             model, train_loader, criterion, optimizer, args.device,
             max_grad_norm=args.max_grad_norm,
-            context_loss_weight=context_loss_weight
+            context_loss_weight=context_loss_weight,
+            temperature=0.07
         )
 
         # 验证（仅使用分类损失）
@@ -797,8 +811,9 @@ def main():
                     'num_layers': args.num_layers,
                     'num_classes': num_classes,
                     'dropout': args.dropout,
-                    'context_loss_type': 'mse',
-                    'context_loss_weight': context_loss_weight
+                    'context_loss_type': 'infonce',
+                    'context_loss_weight': context_loss_weight,
+                    'temperature': 0.07,
                 },
                 'cleaning_stats': cleaning_stats,
                 'cleaning_mode': args.cleaning_mode

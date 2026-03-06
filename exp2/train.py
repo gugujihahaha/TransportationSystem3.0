@@ -18,7 +18,8 @@ import sys
 
 # ===== ✅ 修改 1：支持基础数据导入 =====
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from common import BaseGeoLifePreprocessor, Exp2DataAdapter, train_epoch, evaluate
+from common import (BaseGeoLifePreprocessor, Exp2DataAdapter,
+                     train_epoch, evaluate, compute_class_weights)
 # =====================================
 
 try:
@@ -110,6 +111,13 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
         processed_segments = adapter.process_segments(base_segments)
         cleaning_stats = adapter.get_cleaning_stats()
 
+        # 对少数类进行数据增强（仅对训练数据有效，此处对全量做增强后再split）
+        processed_segments = BaseGeoLifePreprocessor.oversample_minority_classes(
+            processed_segments,
+            target_ratio=0.3,
+            minority_classes=['Subway', 'Airplane']
+        )
+
         all_labels_str = [label for _, label in processed_segments]
         label_encoder = LabelEncoder().fit(all_labels_str)
         print(f"✅ 基础数据适配完成: {len(processed_segments)} 个段")
@@ -144,6 +152,13 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
             processed_segments = preprocess_trajectory_segments(all_segments, min_length=10)
             final_seven_modes = {'Walk', 'Bike', 'Bus', 'Car & taxi', 'Train', 'Airplane', 'Other'}
             processed_segments = [(t, l) for t, l in processed_segments if l in final_seven_modes]
+
+            # 对少数类进行数据增强（仅对训练数据有效，此处对全量做增强后再split）
+            processed_segments = BaseGeoLifePreprocessor.oversample_minority_classes(
+                processed_segments,
+                target_ratio=0.3,
+                minority_classes=['Subway', 'Airplane']
+            )
 
             label_encoder = LabelEncoder().fit([l for _, l in processed_segments])
             with open(PROCESSED_SEGMENTS_CACHE_PATH, 'wb') as f:
@@ -273,12 +288,21 @@ def main():
         print(f"  {cls:15s}: Train={train_count}, Val={val_count}, Test={test_count}")
 
     model = TransportationModeClassifier(
-        TRAJECTORY_FEATURE_DIM, SPATIAL_FEATURE_DIM, args.hidden_dim, args.num_layers, len(label_encoder.classes_), args.dropout
+        TRAJECTORY_FEATURE_DIM, SPATIAL_FEATURE_DIM, args.hidden_dim, args.num_layers, len(label_encoder.classes_), args.dropout,
+        num_segments=5,
+        local_hidden=64,
+        global_hidden=128,
     ).to(args.device)
 
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
-    criterion = nn.CrossEntropyLoss()
+    class_weights = compute_class_weights(
+        label_encoder,
+        all_features_and_labels,
+        label_index=-1,
+        mode='sqrt_inverse'
+    ).to(args.device)
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
 
     # ========================================================
     # ✅ Early Stopping 配置
@@ -292,7 +316,7 @@ def main():
 
         train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, args.device)
 
-        val_loss, report, _, _ = evaluate(model, val_loader, criterion, args.device, label_encoder)
+        val_loss, report, _, _ = evaluate(model, val_loader, criterion, args.device, label_encoder.classes_)
         val_acc = report['accuracy']
 
         # 在训练循环结束后再打印上一轮指标汇总
@@ -323,7 +347,7 @@ def main():
     print("最终测试集评估")
     print("=" * 80)
 
-    test_loss, test_report, _, _ = evaluate(model, test_loader, criterion, args.device, label_encoder)
+    test_loss, test_report, _, _ = evaluate(model, test_loader, criterion, args.device, label_encoder.classes_)
     test_acc = test_report['accuracy']
 
     print(f"\nTest Loss: {test_loss:.4f} | Test Acc: {test_acc:.4f}")
