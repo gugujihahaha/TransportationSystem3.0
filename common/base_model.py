@@ -143,6 +143,7 @@ class HierarchicalTransportationClassifier(BaseTransportationClassifier):
         num_segments: int = 5,
         local_hidden: int = 64,
         global_hidden: int = 128,
+        segment_stats_dim: int = 0,
     ):
         super().__init__(
             input_dims=input_dims,
@@ -155,6 +156,7 @@ class HierarchicalTransportationClassifier(BaseTransportationClassifier):
         self.num_segments = num_segments
         self.local_hidden = local_hidden
         self.global_hidden = global_hidden
+        self.segment_stats_dim = segment_stats_dim
 
         # 为每个输入模态建立局部编码器
         self.local_encoders = nn.ModuleList([
@@ -182,18 +184,21 @@ class HierarchicalTransportationClassifier(BaseTransportationClassifier):
         # 全局 Attention
         self.global_attn = nn.Linear(global_hidden * 2, 1)
 
-        # 分类器（替换父类的 classifier）
+        # 分类器输入维度 = 全局编码维度 + 静态特征维度
+        classifier_input_dim = global_hidden * 2 + segment_stats_dim
         self.classifier = nn.Sequential(
-            nn.Linear(global_hidden * 2, global_hidden),
+            nn.Linear(classifier_input_dim, global_hidden),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(global_hidden, num_classes)
         )
 
-    def forward(self, *inputs: torch.Tensor) -> torch.Tensor:
+    def forward(self, *inputs: torch.Tensor,
+                segment_stats: torch.Tensor = None) -> torch.Tensor:
         """
         Args:
             inputs: 每个元素形状 (batch, seq_len, input_dim_i)
+            segment_stats: (batch, segment_stats_dim) 静态统计特征
 
         Returns:
             logits: (batch, num_classes)
@@ -233,15 +238,20 @@ class HierarchicalTransportationClassifier(BaseTransportationClassifier):
         attn_weights = torch.softmax(self.global_attn(global_out), dim=1)
         global_repr  = (attn_weights * global_out).sum(dim=1)
 
+        # 拼接静态统计特征
+        if segment_stats is not None and self.segment_stats_dim > 0:
+            global_repr = torch.cat([global_repr, segment_stats], dim=1)
+
         # 分类
         logits = self.classifier(global_repr)
         return logits
 
-    def predict_proba(self, *inputs: torch.Tensor):
+    def predict_proba(self, *inputs: torch.Tensor,
+                     segment_stats: torch.Tensor = None):
         """预测类别和概率"""
         self.eval()
         with torch.no_grad():
-            logits = self.forward(*inputs)
+            logits = self.forward(*inputs, segment_stats=segment_stats)
             probs  = torch.softmax(logits, dim=1)
             preds  = torch.argmax(probs, dim=1)
         return preds, probs

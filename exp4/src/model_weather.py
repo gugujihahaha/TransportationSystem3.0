@@ -33,14 +33,15 @@ class TransportationModeClassifierWithWeather(HierarchicalTransportationClassifi
         global_hidden: int = 128,
     ):
         super().__init__(
-            input_dims=[trajectory_feature_dim, spatial_feature_dim, weather_feature_dim, segment_stats_dim],
-            hidden_dims=[hidden_dim, hidden_dim // 2, hidden_dim // 4, hidden_dim // 8],
+            input_dims=[trajectory_feature_dim, spatial_feature_dim, weather_feature_dim],
+            hidden_dims=[hidden_dim, hidden_dim // 2, hidden_dim // 4],
             num_layers=num_layers,
             num_classes=num_classes,
             dropout=dropout,
             num_segments=num_segments,
             local_hidden=local_hidden,
             global_hidden=global_hidden,
+            segment_stats_dim=segment_stats_dim,
         )
 
         # 保存参数供 checkpoint 序列化使用
@@ -52,7 +53,7 @@ class TransportationModeClassifierWithWeather(HierarchicalTransportationClassifi
     def forward(self, trajectory_features: torch.Tensor,
                 spatial_features: torch.Tensor,
                 weather_features: torch.Tensor,
-                segment_stats: torch.Tensor) -> torch.Tensor:
+                segment_stats: torch.Tensor = None) -> torch.Tensor:
         """
         前向传播
 
@@ -65,11 +66,13 @@ class TransportationModeClassifierWithWeather(HierarchicalTransportationClassifi
         Returns:
             logits: (batch_size, num_classes)
         """
-        return super().forward(trajectory_features, spatial_features, weather_features, segment_stats)
+        return super().forward(trajectory_features, spatial_features, weather_features,
+                           segment_stats=segment_stats)
 
     def predict_proba(self, trajectory_features: torch.Tensor,
                      spatial_features: torch.Tensor,
                      weather_features: torch.Tensor,
-                     segment_stats: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+                     segment_stats: torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor]:
         """预测类别和概率"""
-        return super().predict_proba(trajectory_features, spatial_features, weather_features, segment_stats)
+        return super().predict_proba(trajectory_features, spatial_features, weather_features,
+                                    segment_stats=segment_stats)
