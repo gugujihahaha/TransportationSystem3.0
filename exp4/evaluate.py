@@ -1,6 +1,6 @@
 """
-Exp4 评估脚本 (稳定版)
-适配 train.py 稳定版的缓存路径
+Exp4 评估脚本 (数据清洗 + 弱监督上下文增强)
+在 Exp4 基础上添加清洗统计输出
 """
 import os
 import sys
@@ -23,7 +23,7 @@ os.chdir(SCRIPT_DIR)
 # ==============================================================================
 
 # 导入 Exp4 专用模型与 Dataset
-from src.model_weather import TransportationModeClassifierWithWeather
+from src.model_weak_supervision import WeaklySupervisedContextModel
 from train import TrajectoryDatasetWithWeather
 
 # 设置中文字体 (防止图片乱码)
@@ -36,16 +36,16 @@ def main():
     # PyCharm 直接运行配置区域
     # ========================================================================
 
-    # 模型路径 - 稳定版模型
-    MODEL_PATH = 'checkpoints/exp4_model.pth'
+    # 模型路径 - Exp4模型 (balanced 模式)
+    MODEL_PATH = 'checkpoints/exp4_model_balanced.pth'
 
-    # 缓存路径 - 稳定版缓存 (v2_stable)
-    CACHE_PATH = 'cache/processed_features_weather_v2_stable.pkl'
+    # 缓存路径 - Exp4缓存 (v5_balanced)
+    CACHE_PATH = 'cache/processed_features_weather_v5_balanced.pkl'
 
     # 备用缓存路径列表（按优先级）
     ALTERNATIVE_CACHE_PATHS = [
-        'cache/processed_features_weather_v1.pkl',  # 旧版本
-        'cache/processed_features_exp4.pkl',  # 其他命名
+        'cache/processed_features_weather_v5_cleaning.pkl',  # cleaning 模式
+        'cache/processed_features_weather_v5.pkl',  # 其他命名
     ]
 
     OUTPUT_DIR = 'evaluation_results'
@@ -54,7 +54,7 @@ def main():
     # ========================================================================
 
     print("\n" + "=" * 60)
-    print("Exp4 模型评估 (稳定版)")
+    print("Exp4 模型评估 (数据清洗 + 弱监督上下文增强)")
     print("=" * 60)
     print(f"设备: {DEVICE}")
 
@@ -93,22 +93,26 @@ def main():
     print(f"     - 天气特征维度: {config['weather_feature_dim']}")
     print(f"     - 类别数: {config['num_classes']}")
     print(f"     - 类别: {list(class_names)}")
+    print(f"     - 上下文损失类型: {config.get('context_loss_type', 'mse')}")
+    print(f"     - 上下文损失权重: {config.get('context_loss_weight', 0.05)}")
 
-    model = TransportationModeClassifierWithWeather(
+    model = WeaklySupervisedContextModel(
         trajectory_feature_dim=config['trajectory_feature_dim'],
         spatial_feature_dim=config['spatial_feature_dim'],
         weather_feature_dim=config['weather_feature_dim'],
         hidden_dim=config['hidden_dim'],
         num_layers=config['num_layers'],
         num_classes=config['num_classes'],
-        dropout=config.get('dropout', 0.3)
+        dropout=config.get('dropout', 0.3),
+        context_loss_type=config.get('context_loss_type', 'mse'),
+        context_loss_weight=config.get('context_loss_weight', 0.05)
     ).to(DEVICE)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
     print("   ✓ 模型加载完成")
 
     # 2. 加载特征缓存
-    print(f"\n[2/5] 正在加载特征缓存...")
+    print(f"\n[2/6] 正在加载特征缓存...")
 
     # 尝试多个缓存路径
     cache_paths_to_try = [CACHE_PATH] + ALTERNATIVE_CACHE_PATHS
@@ -130,7 +134,6 @@ def main():
     print(f"   ✓ 找到缓存: {CACHE_PATH}")
 
     with open(CACHE_PATH, 'rb') as f:
-        # 训练脚本保存格式为 (all_features, label_encoder, cleaning_stats)
         cache_data = pickle.load(f)
         if len(cache_data) == 3:
             all_features, cached_label_encoder, cleaning_stats = cache_data
@@ -139,43 +142,6 @@ def main():
             cleaning_stats = {}
 
     print(f"   ✓ 加载完成: {len(all_features)} 个样本")
-
-    # 显示清洗统计
-    if cleaning_stats:
-        print(f"\n{'=' * 60}")
-        print("数据清洗统计")
-        print(f"{'=' * 60}")
-        before = cleaning_stats.get('before', {})
-        after = cleaning_stats.get('after', {})
-        cleaner = cleaning_stats.get('cleaner', {})
-
-        if before:
-            print(f"\n第一阶段（基础预处理）:")
-            print(f"  输入轨迹段数: {before.get('total_segments', 0)}")
-            print(f"  输入点数: {before.get('total_points', 0)}")
-
-        if after:
-            print(f"\n第二阶段（深度清洗）:")
-            print(f"  有效轨迹段数: {after.get('valid_segments', 0)}")
-            print(f"  第一阶段丢弃: {after.get('stage1_discarded', 0)}")
-            print(f"  第二阶段丢弃: {after.get('stage2_discarded', 0)}")
-            print(f"  总丢弃: {after.get('total_discarded', 0)}")
-            print(f"  保留率: {after.get('retention_rate', 0):.2%}")
-
-        if cleaner:
-            print(f"\n清洗操作详情:")
-            print(f"  物理异常修复: {cleaner.get('physical_anomalies_fixed', 0)}")
-            print(f"  时间间隔插值: {cleaner.get('time_gaps_filled', 0)}")
-            print(f"  轨迹平滑优化: {cleaner.get('trajectory_smoothed', 0)}")
-            print(f"  方向异常修正: {cleaner.get('bearing_anomalies_fixed', 0)}")
-
-        discard_reasons = cleaning_stats.get('discard_reasons', {})
-        if discard_reasons:
-            print(f"\n丢弃原因分布:")
-            for reason, count in discard_reasons.items():
-                print(f"  {reason}: {count}")
-
-        print(f"{'=' * 60}\n")
 
     # 3. 准备测试数据
     print(f"\n[3/5] 正在准备测试数据...")
@@ -202,12 +168,14 @@ def main():
     y_true, y_pred, y_probs = [], [], []
 
     with torch.no_grad():
-        for traj, spatial, weather, labels in tqdm(test_loader, desc="Evaluation Progress"):
+        for traj, spatial, weather, labels in tqdm(test_loader, desc="Evaluation Progress", leave=True):
             traj = traj.to(DEVICE)
             spatial = spatial.to(DEVICE)
             weather = weather.to(DEVICE)
 
-            logits = model(traj, spatial, weather)
+            output = model(traj, spatial, weather)
+            
+            logits = output if not isinstance(output, tuple) else output[0]
             probs = torch.softmax(logits, dim=1)
             preds = torch.argmax(logits, dim=1)
 
@@ -269,7 +237,7 @@ def main():
             cm, annot=True, fmt='d', cmap='Blues',
             xticklabels=class_names, yticklabels=class_names
         )
-        plt.title('Exp4 Confusion Matrix (Trajectory + Spatial Features + Weather)', fontsize=14)
+        plt.title('Exp4 Confusion Matrix (Data Cleaning + Weak Supervision)', fontsize=14)
         plt.xlabel('Predicted')
         plt.ylabel('True')
         plt.tight_layout()

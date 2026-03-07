@@ -69,7 +69,11 @@ class OsmSpatialExtractor:
             'residential': 'car',
             'bus_stop': 'bus',
             'station': 'train',
-            'parking': 'car'
+            'subway_entrance': 'subway',
+            'rail': 'train',
+            'subway': 'subway',
+            'parking': 'car',
+            'taxi': 'car'
         }
 
         # KDTree 索引
@@ -286,14 +290,14 @@ class OsmSpatialExtractor:
                                      第0列=纬度，第1列=经度。
 
         返回:
-            np.ndarray: 形状 (N, 11) 的特征矩阵，
+            np.ndarray: 形状 (N, 12) 的特征矩阵，
                         dtype=float32，不含 NaN 或 Inf。
         """
         if self.road_kdtree is None or self.poi_kdtree is None:
-            return np.zeros((trajectory.shape[0], 11), dtype=np.float32)
+            return np.zeros((trajectory.shape[0], 12), dtype=np.float32)
 
         N = trajectory.shape[0]
-        spatial_features = np.zeros((N, 11), dtype=np.float32)
+        spatial_features = np.zeros((N, 12), dtype=np.float32)
 
         uncached_indices = []
         uncached_coords = []
@@ -396,8 +400,8 @@ class OsmSpatialExtractor:
         distances = distances * 111300.0  # 转换为米
 
         # 构建 one-hot 编码
-        type_names = ['walk', 'bike', 'car', 'bus', 'train', 'unknown']
-        road_type_features = np.zeros((N, 6), dtype=np.float32)
+        type_names = ['walk', 'bike', 'car', 'bus', 'train', 'subway', 'unknown']
+        road_type_features = np.zeros((N, 7), dtype=np.float32)
 
         for i in range(N):
             if distances[i] < max_distance:
@@ -406,7 +410,7 @@ class OsmSpatialExtractor:
                     idx = type_names.index(road_type)
                     road_type_features[i, idx] = 1.0
             else:
-                road_type_features[i, 5] = 1.0  # unknown
+                road_type_features[i, 6] = 1.0  # unknown
 
         return road_type_features
 

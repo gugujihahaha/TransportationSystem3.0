@@ -20,8 +20,8 @@ class TransportationModeClassifier(HierarchicalTransportationClassifier):
 
     def __init__(
         self,
-        trajectory_feature_dim: int = 9,
-        spatial_feature_dim: int = 11,
+        trajectory_feature_dim: int = 21,
+        spatial_feature_dim: int = 1,
         segment_stats_dim: int = 18,
         hidden_dim: int = 128,
         num_layers: int = 2,

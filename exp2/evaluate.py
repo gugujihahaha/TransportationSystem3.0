@@ -31,9 +31,18 @@ plt.rcParams['axes.unicode_minus'] = False
 # 1. 数据集定义
 # ------------------------------------------------------------
 class DualFeatureDataset(Dataset):
-    def __init__(self, segments, label_encoder):
+    def __init__(self, segments, label_encoder,
+                 traj_mean=None, traj_std=None,
+                 spatial_mean=None, spatial_std=None,
+                 stats_mean=None, stats_std=None):
         self.segments = segments
         self.label_encoder = label_encoder
+        self.traj_mean = traj_mean
+        self.traj_std = traj_std
+        self.spatial_mean = spatial_mean
+        self.spatial_std = spatial_std
+        self.stats_mean = stats_mean
+        self.stats_std = stats_std
 
     def __len__(self):
         return len(self.segments)
@@ -42,9 +51,20 @@ class DualFeatureDataset(Dataset):
         # 适配训练脚本保存的格式: (traj_feat, spatial_feat, stats, label_encoded)
         traj_features, spatial_features, segment_stats, label_encoded = self.segments[idx]
 
-        traj_tensor = torch.FloatTensor(traj_features)
-        spatial_tensor = torch.FloatTensor(spatial_features)
-        stats_tensor = torch.FloatTensor(segment_stats)
+        traj = traj_features.copy().astype(np.float32)
+        spatial = spatial_features.copy().astype(np.float32)
+        stats = segment_stats.copy().astype(np.float32)
+
+        if self.traj_mean is not None:
+            traj = (traj - self.traj_mean) / self.traj_std
+        if self.spatial_mean is not None:
+            spatial = (spatial - self.spatial_mean) / self.spatial_std
+        if self.stats_mean is not None:
+            stats = (stats - self.stats_mean) / self.stats_std
+
+        traj_tensor = torch.FloatTensor(traj)
+        spatial_tensor = torch.FloatTensor(spatial)
+        stats_tensor = torch.FloatTensor(stats)
         label_tensor = torch.LongTensor([label_encoded])[0]
 
         return traj_tensor, spatial_tensor, stats_tensor, label_tensor
@@ -96,6 +116,14 @@ def main():
     label_encoder = checkpoint['label_encoder']
     config = checkpoint['model_config']
     class_names = label_encoder.classes_
+
+    norm_params = checkpoint.get('norm_params', {})
+    traj_mean = norm_params.get('traj_mean', None)
+    traj_std = norm_params.get('traj_std', None)
+    spatial_mean = norm_params.get('spatial_mean', None)
+    spatial_std = norm_params.get('spatial_std', None)
+    stats_mean = norm_params.get('stats_mean', None)
+    stats_std = norm_params.get('stats_std', None)
 
     print(f"   模型配置:")
     print(f"     - 轨迹特征维度: {config['trajectory_feature_dim']}")
@@ -190,14 +218,22 @@ def main():
 
     # 3. 准备测试数据
     print(f"\n[3/5] 正在准备测试数据...")
-    dataset = DualFeatureDataset(all_features, cached_label_encoder)
+    dataset = DualFeatureDataset(
+        all_features, cached_label_encoder,
+        traj_mean=traj_mean, traj_std=traj_std,
+        spatial_mean=spatial_mean, spatial_std=spatial_std,
+        stats_mean=stats_mean, stats_std=stats_std
+    )
     labels_for_stratify = [item[3] for item in all_features]
-
-    _, test_indices = train_test_split(
-        range(len(dataset)),
-        test_size=0.2,
-        random_state=42,
+    all_indices = np.arange(len(all_features))
+    train_indices, temp_indices = train_test_split(
+        all_indices, test_size=0.3, random_state=42,
         stratify=labels_for_stratify
+    )
+    temp_labels = [labels_for_stratify[i] for i in temp_indices]
+    val_indices, test_indices = train_test_split(
+        temp_indices, test_size=0.6667, random_state=42,
+        stratify=temp_labels
     )
 
     test_loader = DataLoader(

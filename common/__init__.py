@@ -10,7 +10,6 @@ from .adapters import (
     Exp2DataAdapter,
     Exp3DataAdapter,
     Exp4DataAdapter,
-    Exp5DataAdapter,
 )
 from .trajectory_cleaner import TrajectoryCleaner
 from .base_model import BaseTransportationClassifier
@@ -24,7 +23,6 @@ __all__ = [
     'Exp2DataAdapter',
     'Exp3DataAdapter',
     'Exp4DataAdapter',
-    'Exp5DataAdapter',
     'TrajectoryCleaner',
     'BaseTransportationClassifier',
     'train_epoch',

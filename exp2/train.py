@@ -31,8 +31,8 @@ except ImportError:
     pass
 
 # 特征维度常量
-TRAJECTORY_FEATURE_DIM = 9
-SPATIAL_FEATURE_DIM = 11
+TRAJECTORY_FEATURE_DIM = 21   # 9轨迹 + 12空间
+SPATIAL_FEATURE_DIM = 1       # 占位，不实际使用
 FIXED_SEQUENCE_LENGTH = 50
 
 # 缓存配置
@@ -60,18 +60,18 @@ class TrajectoryDataset(Dataset):
         return len(self.data)
 
     def __getitem__(self, idx):
-        trajectory_features, spatial_features, segment_stats, label_encoded = self.data[idx]
+        trajectory_features, _, segment_stats, label_encoded = self.data[idx]
 
         # 归一化
         if self.traj_mean is not None:
             trajectory_features = (trajectory_features - self.traj_mean) / self.traj_std
-        if self.spatial_mean is not None:
-            spatial_features = (spatial_features - self.spatial_mean) / self.spatial_std
         if self.stats_mean is not None:
             segment_stats = (segment_stats - self.stats_mean) / self.stats_std
 
+        # spatial已融合进traj，placeholder不需要归一化
+        placeholder = np.zeros((trajectory_features.shape[0], 1), dtype=np.float32)
         return (torch.FloatTensor(trajectory_features),
-                torch.FloatTensor(spatial_features),
+                torch.FloatTensor(placeholder),
                 torch.FloatTensor(segment_stats),
                 torch.LongTensor([label_encoded])[0])
 
@@ -219,7 +219,7 @@ def main():
 
     parser.add_argument('--max_users', type=int, default=None)
     parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--epochs', type=int, default=50)
+    parser.add_argument('--epochs', type=int, default=150)
     parser.add_argument('--lr', type=float, default=0.0003)
     parser.add_argument('--hidden_dim', type=int, default=128)
     parser.add_argument('--num_layers', type=int, default=2)
@@ -265,20 +265,14 @@ def main():
     from common.train_utils import compute_feature_stats
     train_segments = [all_features_and_labels[i] for i in train_indices]
     traj_list = [s[0] for s in train_segments]
-    spatial_list = [s[1] for s in train_segments]
     stats_list = [s[2] for s in train_segments]
 
     traj_all = np.vstack(traj_list)
-    spatial_all = np.vstack(spatial_list)
     stats_all = np.vstack(stats_list)
 
     traj_mean = traj_all.mean(axis=0).astype(np.float32)
     traj_std = traj_all.std(axis=0).astype(np.float32)
     traj_std = np.where(traj_std < 1e-6, 1.0, traj_std)
-
-    spatial_mean = spatial_all.mean(axis=0).astype(np.float32)
-    spatial_std = spatial_all.std(axis=0).astype(np.float32)
-    spatial_std = np.where(spatial_std < 1e-6, 1.0, spatial_std)
 
     stats_mean = stats_all.mean(axis=0).astype(np.float32)
     stats_std = stats_all.std(axis=0).astype(np.float32)
@@ -286,7 +280,6 @@ def main():
 
     norm_params = {
         'traj_mean': traj_mean, 'traj_std': traj_std,
-        'spatial_mean': spatial_mean, 'spatial_std': spatial_std,
         'stats_mean': stats_mean, 'stats_std': stats_std
     }
     print(f"\n✅ 归一化统计量计算完成（基于 {len(train_indices)} 个训练样本）")
@@ -295,7 +288,6 @@ def main():
     dataset = TrajectoryDataset(
         all_features_and_labels,
         traj_mean=traj_mean, traj_std=traj_std,
-        spatial_mean=spatial_mean, spatial_std=spatial_std,
         stats_mean=stats_mean, stats_std=stats_std
     )
 
@@ -446,7 +438,11 @@ def main():
                 'norm_params': norm_params,
                 'resume': True,
                 'model_config': {
-                    'trajectory_feature_dim': TRAJECTORY_FEATURE_DIM, 'spatial_feature_dim': SPATIAL_FEATURE_DIM,
+                    'fused_input': True,
+                    'trajectory_feature_dim': 9,
+                    'spatial_feature_dim': 12,
+                    'combined_dim': 21,
+                    'input_dim': TRAJECTORY_FEATURE_DIM,
                     'hidden_dim': args.hidden_dim, 'num_layers': args.num_layers, 'num_classes': len(label_encoder.classes_), 'dropout': args.dropout
                 }
             }, os.path.join(args.save_dir, 'exp2_model.pth'))
@@ -465,6 +461,14 @@ def main():
     print("\n" + "=" * 80)
     print("最终测试集评估")
     print("=" * 80)
+
+    # 加载最佳checkpoint进行最终评估
+    best_ckpt = torch.load(
+        os.path.join(args.save_dir, 'exp2_model.pth'),
+        map_location=args.device, weights_only=False
+    )
+    model.load_state_dict(best_ckpt['model_state_dict'])
+    print("✅ 已加载最佳checkpoint进行最终评估")
 
     test_loss, test_report, all_preds, all_labels = evaluate(model, test_loader, criterion, args.device, label_encoder.classes_)
     test_acc = test_report['accuracy']

@@ -5,13 +5,13 @@ Exp4 预测器 (独立版)
 import torch
 import numpy as np
 import os
-from src.model_weather import TransportationModeClassifierWithWeather
+from src.model_weak_supervision import WeaklySupervisedContextModel
 
 
 class TransportationPredictorExp4:
     def __init__(self, checkpoint_path="checkpoints/exp4_model.pth"):
         """
-        初始化实验四预测器
+        初始化实验五预测器
         :param checkpoint_path: 训练好的模型权重路径（包含 label_encoder）
         """
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -28,14 +28,17 @@ class TransportationPredictorExp4:
         config = ckpt['model_config']
 
         # 初始化模型架构 (Exp4: 轨迹 9 维 + 增强空间特征 15 维 + 天气 12 维)
-        self.model = TransportationModeClassifierWithWeather(
+        # 弱监督约束策略：空间特征和天气特征不直接参与分类，而是通过一致性损失约束轨迹表示
+        self.model = WeaklySupervisedContextModel(
             trajectory_feature_dim=config.get('trajectory_feature_dim', 9),
             spatial_feature_dim=config.get('spatial_feature_dim', 15),
             weather_feature_dim=config.get('weather_feature_dim', 12),
             hidden_dim=config.get('hidden_dim', 128),
             num_layers=config.get('num_layers', 2),
             num_classes=config.get('num_classes', 7),
-            dropout=config.get('dropout', 0.3)
+            dropout=config.get('dropout', 0.3),
+            context_loss_type=config.get('context_loss_type', 'mse'),
+            context_loss_weight=config.get('context_loss_weight', 0.05)
         ).to(self.device)
 
         self.model.load_state_dict(ckpt["model_state_dict"])
@@ -45,6 +48,7 @@ class TransportationPredictorExp4:
         print(f"📊 特征配置: 轨迹={config.get('trajectory_feature_dim', 9)}维, "
               f"空间特征={config.get('spatial_feature_dim', 15)}维, "
               f"天气={config.get('weather_feature_dim', 12)}维")
+        print(f"🔗 融合策略: 弱监督约束 (context_loss_weight={config.get('context_loss_weight', 0.05)})")
         print(f"🏷️  支持类别: {list(self.class_names)}")
 
     def predict(self, traj_features, spatial_features, weather_features):
@@ -57,7 +61,7 @@ class TransportationPredictorExp4:
             pred_label: 预测的交通方式字符串
             confidence: 置信度分数
         """
-        #1. 轨迹特征维度处理 -> (1, seq_len, 9)
+        # 1. 轨迹特征维度处理 -> (1, seq_len, 9)
         if traj_features.ndim == 2:
             traj_features = np.expand_dims(traj_features, axis=0)
 
@@ -105,7 +109,7 @@ if __name__ == "__main__":
     label, score = predictor.predict_proba(dummy_traj, dummy_spatial, dummy_weather)
 
     print("\n" + "=" * 40)
-    print(f"【实验四预测结论】")
+    print(f"【实验五预测结论】")
     print(f"识别模式: {label}")
     print(f"置信水平: {score:.4%}")
     print("=" * 40)
