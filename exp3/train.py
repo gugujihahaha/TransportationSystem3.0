@@ -47,6 +47,10 @@ from common.train_utils import compute_feature_stats
 from src.weather_preprocessing import WeatherDataProcessor
 from src.model_weather import TransportationModeClassifierWithWeather
 
+# exp2 模块（复用空间特征提取器）
+from exp2.src.feature_extraction import FeatureExtractor
+from exp2.src.osm_feature_extractor import OsmSpatialExtractor
+
 # ========================== 特征维度常量 ==========================
 TRAJECTORY_FEATURE_DIM = 21   # 复用exp2：9轨迹+12空间，点级融合
 WEATHER_FEATURE_DIM    = 10   # 日级天气特征
@@ -56,9 +60,9 @@ FIXED_SEQUENCE_LENGTH  = 50
 
 # ========================== 缓存配置 ==========================
 CACHE_DIR = 'cache'
-SPATIAL_CACHE_PATH      = os.path.join(CACHE_DIR, 'spatial_data.pkl')         # 复用exp2
-SPATIAL_GRID_CACHE_PATH = os.path.join(CACHE_DIR, 'spatial_grid_cache.pkl')   # 复用exp2
-WEATHER_CACHE_PATH      = os.path.join(CACHE_DIR, 'weather_processor.pkl')
+EXP2_SPATIAL_CACHE   = os.path.join(PARENT_DIR, 'exp2', 'cache', 'spatial_data.pkl')
+EXP2_GRID_CACHE      = os.path.join(PARENT_DIR, 'exp2', 'cache', 'spatial_grid_cache.pkl')
+WEATHER_CACHE_PATH    = os.path.join(CACHE_DIR, 'weather_processor.pkl')
 PROCESSED_FEATURE_CACHE = os.path.join(CACHE_DIR, 'processed_features_exp3.pkl')
 os.makedirs(CACHE_DIR, exist_ok=True)
 # ==============================================================
@@ -113,11 +117,12 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
               max_users=None, use_base_data=True, cleaning_mode='balanced'):
     """
     加载数据策略：
-    1. 轨迹+空间特征：直接复用 exp2 的 processed_features.pkl（已有21维融合特征）
-    2. 天气特征：新增，从 daily CSV 加载后广播到序列
-    3. 两者在此处拼接
+    1. 用 Exp3DataAdapter 处理 base_segments，得到带时间戳的 processed_with_time
+    2. 加载 exp2 的空间特征提取器对象（复用网格缓存）
+    3. 在同一个循环里处理每个segment，提取21维融合特征和天气特征
+    4. NaN过滤后保存 exp3 完整缓存
 
-    注意：exp3 不重新提取空间特征，直接读取 exp2 的缓存，保证特征一致性。
+    控制变量：exp3 = exp2的空间特征（完全一致）+ 新增天气特征
     """
 
     # ===== 优先检查 exp3 完整缓存 =====
@@ -149,24 +154,29 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
         with open(WEATHER_CACHE_PATH, 'wb') as f:
             pickle.dump(weather_processor, f, protocol=pickle.HIGHEST_PROTOCOL)
 
-    # ===== 读取 exp2 的轨迹+空间特征缓存 =====
-    # exp2 缓存格式: (traj_feat_21dim, spatial_placeholder, stats_18dim, label_encoded)
-    exp2_cache = os.path.join(PARENT_DIR, 'exp2', 'cache', 'processed_features.pkl')
-    print(f"\n========== 加载 Exp2 特征 (复用空间特征) ==========")
-    if not os.path.exists(exp2_cache):
+    # ===== 加载 exp2 的空间特征提取器对象 =====
+    print(f"\n========== 加载 Exp2 空间特征提取器 ==========")
+    if not os.path.exists(EXP2_SPATIAL_CACHE):
         raise FileNotFoundError(
-            f"找不到 exp2 特征缓存: {exp2_cache}\n"
+            f"找不到 exp2 空间特征提取器: {EXP2_SPATIAL_CACHE}\n"
             "请先确保 exp2/train.py 已经运行并生成缓存。"
         )
-    with open(exp2_cache, 'rb') as f:
-        exp2_raw, label_encoder, cleaning_stats = pickle.load(f)
-    print(f"✅ exp2 特征加载完成: {len(exp2_raw)} 个样本")
+    
+    with open(EXP2_SPATIAL_CACHE, 'rb') as f:
+        spatial_extractor = pickle.load(f)
+    
+    # 加载 exp2 的网格缓存
+    if os.path.exists(EXP2_GRID_CACHE):
+        spatial_extractor.load_cache(EXP2_GRID_CACHE)
+        print(f"✅ exp2 网格缓存加载完成: {EXP2_GRID_CACHE}")
+    else:
+        print(f"⚠️ exp2 网格缓存不存在: {EXP2_GRID_CACHE}")
+    
+    # 初始化 exp2 的特征提取器
+    feature_extractor = FeatureExtractor(spatial_extractor)
+    print("✅ exp2 特征提取器初始化完成")
 
-    # ===== 为每个样本添加天气特征 =====
-    # exp2 格式: (traj_21dim, spatial_placeholder, stats, label_encoded)
-    # 需要确定每个轨迹的时间戳（从 exp2 缓存里没有时间信息）
-    # 解决方案：重新用 base_segments 获取时间信息，与 exp2 样本一一对应
-
+    # ===== 用 Exp3DataAdapter 处理 base_segments =====
     BASE_DATA_PATH = os.path.join(PARENT_DIR, 'data', 'processed', 'base_segments.pkl')
     if not os.path.exists(BASE_DATA_PATH):
         raise FileNotFoundError(
@@ -174,39 +184,40 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
             "请先运行 scripts/generate_base_data.py"
         )
 
-    print(f"\n========== 从基础数据获取时间信息 ==========")
+    print(f"\n========== 处理基础数据 ==========")
     base_segments = BaseGeoLifePreprocessor.load_from_cache(BASE_DATA_PATH)
     adapter = Exp3DataAdapter(enable_cleaning=True, cleaning_mode=cleaning_mode)
     processed_with_time = adapter.process_segments(base_segments)
     cleaning_stats = adapter.get_cleaning_stats()
 
-    # 同步过滤：exp2_raw 和 processed_with_time 必须一一对应
+    # ===== 过滤类别 =====
     TARGET_MODES = {'Walk', 'Bike', 'Bus', 'Car & taxi', 'Train', 'Subway'}
+    processed_filtered = [s for s in processed_with_time if s[3] in TARGET_MODES]
+    print(f"✅ 过滤后样本数: {len(processed_filtered)}")
 
-    paired = [
-        (e2, pt) for e2, pt in zip(exp2_raw, processed_with_time)
-        if pt[3] in TARGET_MODES  # pt[3] 是 label_str
-    ]
-
-    if len(paired) == 0:
-        raise ValueError("过滤后没有有效样本")
-
-    exp2_raw_filtered = [p[0] for p in paired]
-    processed_filtered = [p[1] for p in paired]
-
-    print(f"过滤后样本数: {len(paired)}")
-    print(f"\n========== 拼接天气特征 ==========")
-
+    # ===== 在同一个循环里处理每个segment =====
+    print(f"\n========== 提取特征并拼接天气 ==========")
+    
+    # 初始化 label_encoder
+    all_labels = [s[3] for s in processed_filtered]
+    label_encoder = LabelEncoder()
+    label_encoder.fit(all_labels)
+    
     all_data = []
     zero_weather = np.zeros((FIXED_SEQUENCE_LENGTH, WEATHER_FEATURE_DIM), dtype=np.float32)
-
-    # exp2_raw 格式:          (traj_21dim, placeholder, stats_18dim, label_encoded)
-    # processed_with_time 格式: (traj_9dim, stats_18dim, datetime_series, label_str)
-    for (traj_21, _, stats, label_encoded), (_, _, datetime_series, _) in tqdm(
-            zip(exp2_raw_filtered, processed_filtered), desc="[拼接天气特征]",
-            total=len(paired)):
+    
+    for traj_9, stats, datetime_series, label_str in tqdm(
+            processed_filtered, desc="[提取特征]",
+            total=len(processed_filtered)):
         try:
-            # 获取天气特征 (N, 10)
+            # 提取21维融合特征（复用exp2的空间查询缓存）
+            traj_21, _ = feature_extractor.extract_features(traj_9)
+            
+            # NaN过滤
+            if np.isnan(traj_21).any() or np.isinf(traj_21).any():
+                continue
+            
+            # 获取天气特征
             if datetime_series is not None and len(datetime_series) > 0:
                 weather_feat = weather_processor.get_weather_features_for_trajectory(
                     datetime_series
@@ -221,14 +232,19 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
                         weather_feat = np.vstack([weather_feat, pad])
             else:
                 weather_feat = zero_weather.copy()
-
+            
             weather_feat = np.nan_to_num(weather_feat, nan=0.0, posinf=0.0, neginf=0.0)
+            
+            # 编码标签
+            label_encoded = label_encoder.transform([label_str])[0]
+            
+            # exp3 最终格式: (traj_21dim, weather_10dim, stats_18dim, label_encoded)
             all_data.append((traj_21, weather_feat, stats, label_encoded))
-
+            
         except Exception as e:
-            all_data.append((traj_21, zero_weather.copy(), stats, label_encoded))
+            continue
 
-    print(f"✅ 拼接完成: {len(all_data)} 个样本")
+    print(f"✅ 特征提取完成: {len(all_data)} 个样本")
 
     # 保存缓存
     with open(PROCESSED_FEATURE_CACHE, 'wb') as f:
