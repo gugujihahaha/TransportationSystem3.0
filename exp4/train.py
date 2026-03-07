@@ -414,6 +414,13 @@ def main():
     os.makedirs(args.save_dir, exist_ok=True)
     CHECKPOINT_PATH = os.path.join(args.save_dir, 'exp4_model.pth')
 
+    # 训练曲线保存
+    os.makedirs("logs", exist_ok=True)
+    csv_path = os.path.join("logs", 'exp4_training_log.csv')
+    csv_file = open(csv_path, 'w', newline='')
+    csv_writer = csv.writer(csv_file)
+    csv_writer.writerow(['epoch', 'train_loss', 'train_acc', 'val_loss', 'val_acc', 'lr'])
+
     # 加载历史最佳模型
     best_val_acc = 0.0
     if os.path.exists(CHECKPOINT_PATH):
@@ -424,19 +431,21 @@ def main():
             best_val_acc = checkpoint.get('val_acc', 0.0)
             print(f"✅ 加载历史最佳权重，val_acc={best_val_acc:.4f}")
         except Exception as e:
-            print(f"⚠️ 加载失败: {e}")
+            print(f"⚠️ 历史模型加载失败（{e}），从零开始")
 
-    # 训练曲线保存
-    csv_path = os.path.join(args.save_dir, 'training_curve_exp4.csv')
-    csv_file = open(csv_path, 'w', newline='')
-    csv_writer = csv.writer(csv_file)
-    csv_writer.writerow(['epoch', 'train_loss', 'train_acc', 'val_loss', 'val_acc', 'lr'])
+    epochs_no_improve = 0
+
+    # 连续 NaN 检测计数器
+    consecutive_nan_count = 0
+    MAX_CONSECUTIVE_NAN = 3  # 连续3次NaN则停止训练
 
     print("\n" + "=" * 80)
     print("开始训练")
     print("=" * 80)
 
     for epoch in range(args.epochs):
+        print(f"\nEpoch {epoch+1}/{args.epochs}")
+
         # Warmup 阶段
         if epoch < warmup_epochs:
             warmup_scheduler.step()
@@ -445,6 +454,7 @@ def main():
             # warmup 结束时 reset plateau 计数器
             if epoch == warmup_epochs:
                 plateau_scheduler.num_bad_epochs = 0
+                print("🔄 Warmup 结束，重置 ReduceLROnPlateau 状态")
             current_lr = optimizer.param_groups[0]['lr']
 
         # 训练一个 epoch
@@ -452,6 +462,26 @@ def main():
             model, train_loader, criterion, optimizer, DEVICE,
             context_loss_weight=args.context_loss_weight
         )
+
+        # NaN 检测
+        if np.isnan(train_loss) or np.isinf(train_loss):
+            consecutive_nan_count += 1
+            print(f"⚠️ 检测到训练损失异常（{train_loss}），连续NaN次数: {consecutive_nan_count}/{MAX_CONSECUTIVE_NAN}")
+
+            if consecutive_nan_count >= MAX_CONSECUTIVE_NAN:
+                print(f"🛑 连续{MAX_CONSECUTIVE_NAN}次NaN，停止训练")
+                break
+
+            if os.path.exists(CHECKPOINT_PATH):
+                try:
+                    prev = torch.load(CHECKPOINT_PATH, map_location=DEVICE, weights_only=False)
+                    model.load_state_dict(prev['model_state_dict'])
+                    print(f"✅ 已恢复到最佳模型")
+                except Exception as e:
+                    print(f"⚠️ 模型恢复失败（{e}），从零开始")
+            continue  # 跳过本轮，不降lr
+        else:
+            consecutive_nan_count = 0  # 正常训练，重置计数器
 
         # 验证
         val_loss, val_acc, _, _ = evaluate(
@@ -466,6 +496,13 @@ def main():
             new_lr = optimizer.param_groups[0]['lr']
             if old_lr != new_lr:
                 print(f"📉 学习率调整: {old_lr:.6f} → {new_lr:.6f}")
+
+        # 在训练循环结束后再打印上一轮指标汇总
+        print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f}")
+        print(f"Val   Loss: {val_loss:.4f} | Val   Acc: {val_acc:.4f}")
+
+        current_lr = optimizer.param_groups[0]['lr']
+        print(f"当前学习率: {current_lr:.6f}")
 
         # 保存最佳模型
         if val_acc > best_val_acc:
@@ -487,23 +524,20 @@ def main():
                     'temperature': args.temperature,
                 }
             }, CHECKPOINT_PATH)
-            print(f"✓ 保存最佳模型 (val_acc={val_acc:.4f})")
+            print("✓ 保存最佳模型（基于验证集）")
         else:
             epochs_no_improve += 1
+            print(f"⏳ 验证准确率未改善: {epochs_no_improve}/{args.patience}")
 
         # 记录训练曲线
-        csv_writer.writerow([epoch + 1, train_loss, train_acc, val_loss, val_acc, current_lr])
+        csv_writer.writerow([epoch + 1, f"{train_loss:.4f}", f"{train_acc:.4f}",
+                          f"{val_loss:.4f}", f"{val_acc:.4f}",
+                          f"{optimizer.param_groups[0]['lr']:.6f}"])
         csv_file.flush()
-
-        # 打印进度
-        print(f"\nEpoch {epoch + 1}/{args.epochs}")
-        print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f}")
-        print(f"Val   Loss: {val_loss:.4f} | Val   Acc: {val_acc:.4f}")
-        print(f"学习率: {current_lr:.6f}")
 
         # Early stopping
         if epochs_no_improve >= args.patience:
-            print(f"\n⏹️ Early stopping (patience={args.patience})")
+            print(f"\n🛑 Early stopping 触发（patience={args.patience}）")
             break
 
     csv_file.close()
@@ -513,35 +547,37 @@ def main():
     print("最终测试集评估")
     print("=" * 80)
 
-    # 加载最佳模型
+    # 加载最佳checkpoint进行最终评估
     if os.path.exists(CHECKPOINT_PATH):
-        print("✅ 已加载最佳 checkpoint")
+        print("✅ 已加载最佳checkpoint进行最终评估")
         checkpoint = torch.load(CHECKPOINT_PATH, map_location=DEVICE, weights_only=False)
         model.load_state_dict(checkpoint['model_state_dict'])
 
-    test_loss, test_acc, _, _ = evaluate(
-        model, test_loader, criterion, DEVICE,
-        label_names=None, use_cca=False  # 测试时不计算 CCA 损失
+    test_loss, test_acc, test_report, all_preds, all_labels = evaluate(
+        model, test_loader, criterion, DEVICE, label_encoder.classes_
     )
 
     print(f"\nTest Loss: {test_loss:.4f} | Test Acc: {test_acc:.4f}")
+    print("\n各类别详细指标:")
+    for cls in label_encoder.classes_:
+        if cls in test_report:
+            metrics = test_report[cls]
+            print(f"  {cls:15s}: P={metrics['precision']:.4f}, R={metrics['recall']:.4f}, F1={metrics['f1-score']:.4f}")
 
-    # 打印各类别指标
-    model.eval()
-    y_true, y_pred = [], []
-    with torch.no_grad():
-        for traj, stats, labels in test_loader:
-            traj = traj.to(DEVICE)
-            stats = stats.to(DEVICE)
-            logits = model(traj, segment_stats=stats, return_context=False)
-            preds = torch.argmax(logits, dim=1)
-            y_true.extend(labels.cpu().numpy())
-            y_pred.extend(preds.cpu().numpy())
-
-    from sklearn.metrics import classification_report
-    print(f"\n各类别指标:")
-    print(classification_report(y_true, y_pred, target_names=label_encoder.classes_,
-                             zero_division=0, digits=4))
+    # 混淆矩阵
+    from sklearn.metrics import confusion_matrix
+    cm = confusion_matrix(all_labels, all_preds)
+    print("\n混淆矩阵（行=真实，列=预测）:")
+    classes = label_encoder.classes_
+    print(f"{'':15s}", end="")
+    for c in classes:
+        print(f"{c[:6]:>8s}", end="")
+    print()
+    for i, row in enumerate(cm):
+        print(f"{classes[i]:15s}", end="")
+        for val in row:
+            print(f"{val:8d}", end="")
+        print()
 
     print(f"\n最佳验证准确率: {best_val_acc:.4f}")
     print(f"模型保存路径:   {CHECKPOINT_PATH}")
