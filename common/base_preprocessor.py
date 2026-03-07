@@ -554,7 +554,7 @@ class BaseGeoLifePreprocessor:
         对少数类进行过采样，使其样本量达到多数类的 target_ratio 倍。
 
         Args:
-            segments: List of (features, label) 或 (features, datetime, label)
+            segments: List of (features, label) 或 (features, datetime, label) 或 (traj, weather, stats, label)
             target_ratio: 少数类目标样本量 = 多数类样本量 * target_ratio
             minority_classes: 指定需要过采样的类别，None 则自动识别
 
@@ -563,13 +563,19 @@ class BaseGeoLifePreprocessor:
         """
         import random
 
-        # 判断 segments 格式：(feat, label) 或 (feat, dt, label)
-        has_datetime = len(segments[0]) == 3
+        # 判断 segments 格式：(feat, label), (feat, dt, label), (traj, weather, stats, label)
+        num_elements = len(segments[0])
+        has_datetime = num_elements == 3
+        has_weather = num_elements == 4
 
         if has_datetime:
             by_class = {}
             for feat, dt, label in segments:
                 by_class.setdefault(label, []).append((feat, dt, label))
+        elif has_weather:
+            by_class = {}
+            for traj, weather, stats, label in segments:
+                by_class.setdefault(label, []).append((traj, weather, stats, label))
         else:
             by_class = {}
             for feat, label in segments:
@@ -608,19 +614,35 @@ class BaseGeoLifePreprocessor:
                 # 随机选一个原始样本做增强
                 if has_datetime:
                     src_feat, src_dt, src_label = random.choice(items)
+                elif has_weather:
+                    src_traj, src_weather, src_stats, src_label = random.choice(items)
                 else:
                     src_feat, src_label = random.choice(items)
 
-                aug_results = BaseGeoLifePreprocessor.augment_segment(
-                    src_feat, src_label,
-                    augment_types=['noise', 'scale', 'time_warp']
-                )
+                # 只对轨迹特征进行增强
+                if has_weather:
+                    aug_results = BaseGeoLifePreprocessor.augment_segment(
+                        src_traj, src_label,
+                        augment_types=['noise', 'scale', 'time_warp']
+                    )
+                elif has_datetime:
+                    aug_results = BaseGeoLifePreprocessor.augment_segment(
+                        src_feat, src_label,
+                        augment_types=['noise', 'scale', 'time_warp']
+                    )
+                else:
+                    aug_results = BaseGeoLifePreprocessor.augment_segment(
+                        src_feat, src_label,
+                        augment_types=['noise', 'scale', 'time_warp']
+                    )
 
                 for aug_feat, aug_label in aug_results:
                     if added >= needed:
                         break
                     if has_datetime:
                         augmented.append((aug_feat, src_dt, aug_label))
+                    elif has_weather:
+                        augmented.append((aug_feat, src_weather, src_stats, aug_label))
                     else:
                         augmented.append((aug_feat, aug_label))
                     added += 1

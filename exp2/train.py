@@ -129,12 +129,6 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
         TARGET_MODES = ['Walk', 'Bike', 'Bus', 'Car & taxi', 'Train', 'Subway']
         processed_segments = [s for s in processed_segments if s[2] in TARGET_MODES]
 
-        processed_segments = BaseGeoLifePreprocessor.oversample_minority_classes(
-            processed_segments,
-            target_ratio=0.3,
-            minority_classes=['Subway', 'Train']
-        )
-
         all_labels_str = [label for _, _, label in processed_segments]
         label_encoder = LabelEncoder().fit(all_labels_str)
         print(f"✅ 基础数据适配完成: {len(processed_segments)} 个段")
@@ -169,13 +163,6 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
             processed_segments = preprocess_trajectory_segments(all_segments, min_length=10)
             final_six_modes = {'Walk', 'Bike', 'Bus', 'Car & taxi', 'Train', 'Subway'}
             processed_segments = [(t, l) for t, l in processed_segments if l in final_six_modes]
-
-            # 对少数类进行数据增强（仅对训练数据有效，此处对全量做增强后再split）
-            processed_segments = BaseGeoLifePreprocessor.oversample_minority_classes(
-                processed_segments,
-                target_ratio=0.3,
-                minority_classes=['Subway', 'Train']
-            )
 
             label_encoder = LabelEncoder().fit([l for _, l in processed_segments])
             with open(PROCESSED_SEGMENTS_CACHE_PATH, 'wb') as f:
@@ -225,7 +212,7 @@ def main():
     parser.add_argument('--num_layers', type=int, default=2)
     parser.add_argument('--dropout', type=float, default=0.3)
     parser.add_argument('--weight_decay', type=float, default=1e-4)
-    parser.add_argument('--patience', type=int, default=10)
+    parser.add_argument('--patience', type=int, default=25)
     parser.add_argument('--save_dir', type=str, default=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'checkpoints'))
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
@@ -261,11 +248,27 @@ def main():
         stratify=temp_labels
     )
 
-    # 第二步：用训练集计算归一化统计量
-    from common.train_utils import compute_feature_stats
+    # 第二步：对训练集进行数据增强（避免数据泄露）
     train_segments = [all_features_and_labels[i] for i in train_indices]
-    traj_list = [s[0] for s in train_segments]
-    stats_list = [s[2] for s in train_segments]
+    train_labels_str = [labels_stratify[i] for i in train_indices]
+    
+    # 构造训练集的 segments 格式 (traj, stats, label)
+    train_segments_for_oversample = [(s[0], s[2], train_labels_str[i]) for i, s in enumerate(train_segments)]
+    train_segments_oversampled = BaseGeoLifePreprocessor.oversample_minority_classes(
+        train_segments_for_oversample,
+        target_ratio=0.3,
+        minority_classes=['Subway', 'Train']
+    )
+    
+    # 将增强后的 segments 转换回特征格式
+    train_features_oversampled = []
+    for traj, stats, label_str in train_segments_oversampled:
+        label_encoded = label_encoder.transform([label_str])[0]
+        train_features_oversampled.append((traj, None, stats, label_encoded))
+    
+    # 第三步：用训练集计算归一化统计量
+    traj_list = [s[0] for s in train_features_oversampled]
+    stats_list = [s[2] for s in train_features_oversampled]
 
     traj_all = np.vstack(traj_list)
     stats_all = np.vstack(stats_list)
@@ -282,44 +285,53 @@ def main():
         'traj_mean': traj_mean, 'traj_std': traj_std,
         'stats_mean': stats_mean, 'stats_std': stats_std
     }
-    print(f"\n✅ 归一化统计量计算完成（基于 {len(train_indices)} 个训练样本）")
+    print(f"\n✅ 归一化统计量计算完成（基于 {len(train_features_oversampled)} 个训练样本）")
 
-    # 第三步：创建带归一化的 dataset
+    # 第四步：创建包含所有数据的 dataset（验证集和测试集使用原始数据）
+    all_features = train_features_oversampled + [all_features_and_labels[i] for i in val_indices] + [all_features_and_labels[i] for i in test_indices]
     dataset = TrajectoryDataset(
-        all_features_and_labels,
+        all_features,
         traj_mean=traj_mean, traj_std=traj_std,
         stats_mean=stats_mean, stats_std=stats_std
     )
 
+    # 更新索引：训练集在前，验证集在中间，测试集在后
+    new_train_indices = list(range(len(train_features_oversampled)))
+    new_val_indices = list(range(len(train_features_oversampled), len(train_features_oversampled) + len(val_indices)))
+    new_test_indices = list(range(len(train_features_oversampled) + len(val_indices), len(all_features)))
+
     print(f"\n✅ 数据集大小:")
     print(f"  总样本数: {len(dataset)}")
-    print(f"  特征样本数: {len(all_features_and_labels)}")
+    print(f"  训练样本数: {len(new_train_indices)}")
+    print(f"  验证样本数: {len(new_val_indices)}")
+    print(f"  测试样本数: {len(new_test_indices)}")
 
     train_loader = DataLoader(
-        torch.utils.data.Subset(dataset, train_indices),
+        torch.utils.data.Subset(dataset, new_train_indices),
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=0
     )
     val_loader = DataLoader(
-        torch.utils.data.Subset(dataset, val_indices),
+        torch.utils.data.Subset(dataset, new_val_indices),
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=0
     )
     test_loader = DataLoader(
-        torch.utils.data.Subset(dataset, test_indices),
+        torch.utils.data.Subset(dataset, new_test_indices),
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=0
     )
 
     print(f"\n✅ 数据加载完成:")
-    print(f"  Train: {len(train_indices)} 样本")
-    print(f"  Val:   {len(val_indices)} 样本")
-    print(f"  Test:  {len(test_indices)} 样本")
+    print(f"  Train: {len(new_train_indices)} 样本")
+    print(f"  Val:   {len(new_val_indices)} 样本")
+    print(f"  Test:  {len(new_test_indices)} 样本")
     print(f"  训练批次总数: {len(train_loader)}")
     print(f"  验证批次总数: {len(val_loader)}")
+    print(f"  测试批次总数: {len(test_loader)}")
 
     print(f"\n类别分布:")
     for cls in label_encoder.classes_:
@@ -393,7 +405,7 @@ def main():
             print(f"⚠️ 历史模型加载失败（{e}），从零开始")
 
     epochs_no_improve = 0
-    patience = 25
+    patience = args.patience
     os.makedirs("checkpoints", exist_ok=True)
 
     # 连续 NaN 检测计数器
@@ -465,6 +477,10 @@ def main():
         if epoch < 10:
             warmup_scheduler.step()
         else:
+            # warmup 结束后，重置 plateau_scheduler 的内部状态
+            if epoch == 10:
+                plateau_scheduler.num_bad_epochs = 0
+                print("🔄 Warmup 结束，重置 ReduceLROnPlateau 状态")
             plateau_scheduler.step(val_acc)
 
         current_lr = optimizer.param_groups[0]['lr']

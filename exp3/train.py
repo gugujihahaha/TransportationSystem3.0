@@ -1,757 +1,383 @@
 """
-训练脚本 (Exp3 - 天气实验)
-增加天气数据到特征中
+训练脚本 (Exp3 - 轨迹+空间+天气)
 
-稳定性增强:
-1. 全面的缺失数据处理（天气、空间特征）
-2. 梯度裁剪和数值稳定性
-3. NaN/Inf 检测和处理
-4. 样本保留策略（不丢弃任何样本）
-5. 降级特征提取
+与 exp2 的关系：
+    - 轨迹特征完全复用 exp2 的点级融合特征 (21维)
+    - 新增天气特征通道 (10维，日级别广播到序列)
+    - 控制变量：模型结构、超参数、数据划分方式与 exp2 一致
+
+已修复的Bug：
+    1. oversample 移到 split 之后，只对训练集做，避免测试集数据泄露
+    2. early stopping 改为监控 val_acc（与exp1/exp2一致）
+    3. plateau_scheduler mode='max'（监控acc）
+    4. plateau 在 warmup 结束时 reset 内部计数器
+    5. labels_stratify 取正确的索引（-1）
+    6. evaluate.py 的 split 方式与 train.py 保持一致（70/10/20）
+    7. patience 使用 args.patience，不硬编码
 """
 import os
 import sys
 import argparse
+import csv
+import pickle
+import warnings
+import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import classification_report
 from tqdm import tqdm
-import pickle
-import warnings
-import hashlib
-import json
-from datetime import datetime
-import numpy as np
-import pandas as pd
 
-# ========================== 路径设置 (PyCharm 兼容) ==========================
-# 获取当前脚本所在目录
+# ========================== 路径设置 ==========================
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# 将 exp3 目录添加到 Python 路径
 sys.path.insert(0, SCRIPT_DIR)
-
-# 将上级目录也添加到路径（用于 common 模块）
 PARENT_DIR = os.path.dirname(SCRIPT_DIR)
 sys.path.insert(0, PARENT_DIR)
-
-# 切换工作目录到脚本所在目录（确保相对路径正确）
 os.chdir(SCRIPT_DIR)
-# ==============================================================================
+# ==============================================================
 
-# 尝试导入 common 模块（可选）
-try:
-    from common import (BaseGeoLifePreprocessor, Exp3DataAdapter,
-                         train_epoch, evaluate, compute_class_weights)
-    HAS_COMMON = True
-except ImportError:
-    HAS_COMMON = False
-    print("⚠️ common 模块未找到，将使用传统数据加载模式")
+from common import (BaseGeoLifePreprocessor, Exp3DataAdapter,
+                    train_epoch, evaluate, compute_class_weights)
+from common.train_utils import compute_feature_stats
 
-# 导入 Exp3/4 的模块
-from src.data_preprocessing import GeoLifeDataLoader, OSMDataLoader, preprocess_trajectory_segments
-from src.osm_feature_extractor import EnhancedOsmSpatialExtractor
+# exp3专用模块
 from src.weather_preprocessing import WeatherDataProcessor
-from src.feature_extraction_weather import FeatureExtractorWithWeather
 from src.model_weather import TransportationModeClassifierWithWeather
 
 # ========================== 特征维度常量 ==========================
-TRAJECTORY_FEATURE_DIM = 9
-SPATIAL_FEATURE_DIM = 15
-WEATHER_FEATURE_DIM = 12
-TOTAL_FEATURE_DIM = TRAJECTORY_FEATURE_DIM + SPATIAL_FEATURE_DIM + WEATHER_FEATURE_DIM  # 36
-FIXED_SEQUENCE_LENGTH = 50
+TRAJECTORY_FEATURE_DIM = 21   # 复用exp2：9轨迹+12空间，点级融合
+WEATHER_FEATURE_DIM    = 10   # 日级天气特征
+SPATIAL_PLACEHOLDER    = 1    # exp2的占位符，exp3直接继承
+FIXED_SEQUENCE_LENGTH  = 50
 # ==================================================================
 
 # ========================== 缓存配置 ==========================
-CACHE_VERSION = "v2_stable"
 CACHE_DIR = 'cache'
-SPATIAL_CACHE_PATH = os.path.join(CACHE_DIR, f'spatial_data_{CACHE_VERSION}.pkl')
-SPATIAL_GRID_CACHE_PATH = os.path.join(CACHE_DIR, f'spatial_grid_cache_{CACHE_VERSION}.pkl')
-WEATHER_CACHE_PATH = os.path.join(CACHE_DIR, f'weather_data_{CACHE_VERSION}.pkl')
-PROCESSED_FEATURE_CACHE_PATH = os.path.join(CACHE_DIR, f'processed_features_weather_{CACHE_VERSION}.pkl')
-META_CACHE_PATH = os.path.join(CACHE_DIR, 'cache_meta_weather.json')
+SPATIAL_CACHE_PATH      = os.path.join(CACHE_DIR, 'spatial_data.pkl')         # 复用exp2
+SPATIAL_GRID_CACHE_PATH = os.path.join(CACHE_DIR, 'spatial_grid_cache.pkl')   # 复用exp2
+WEATHER_CACHE_PATH      = os.path.join(CACHE_DIR, 'weather_processor.pkl')
+PROCESSED_FEATURE_CACHE = os.path.join(CACHE_DIR, 'processed_features_exp3.pkl')
 os.makedirs(CACHE_DIR, exist_ok=True)
+# ==============================================================
 
 
-def compute_file_hash(filepath: str) -> str:
-    """计算文件 MD5 哈希"""
-    try:
-        hash_md5 = hashlib.md5()
-        with open(filepath, "rb") as f:
-            for chunk in iter(lambda: f.read(4096), b""):
-                hash_md5.update(chunk)
-        return hash_md5.hexdigest()
-    except Exception:
-        return "unknown"
-
-
-def save_cache_metadata(osm_path: str, weather_path: str, geolife_root: str,
-                        num_segments: int, label_encoder: LabelEncoder):
-    """保存缓存元数据"""
-    meta = {
-        "version": CACHE_VERSION,
-        "experiment": "exp3_stable",
-        "created_at": datetime.now().isoformat(),
-        "osm_file": osm_path,
-        "osm_file_hash": compute_file_hash(osm_path),
-        "weather_file": weather_path,
-        "weather_file_hash": compute_file_hash(weather_path),
-        "geolife_root": geolife_root,
-        "spatial_feature_dim": SPATIAL_FEATURE_DIM,
-        "trajectory_feature_dim": TRAJECTORY_FEATURE_DIM,
-        "weather_feature_dim": WEATHER_FEATURE_DIM,
-        "total_feature_dim": TOTAL_FEATURE_DIM,
-        "num_segments": num_segments,
-        "num_classes": len(label_encoder.classes_),
-        "classes": label_encoder.classes_.tolist()
-    }
-
-    try:
-        with open(META_CACHE_PATH, 'w') as f:
-            json.dump(meta, f, indent=2)
-        print(f"✓ 缓存元数据已保存: {META_CACHE_PATH}")
-    except Exception as e:
-        print(f"⚠️ 元数据保存失败: {e}")
-
-
-def validate_cache(osm_path: str, weather_path: str) -> bool:
-    """验证缓存是否有效"""
-    if not os.path.exists(META_CACHE_PATH):
-        return False
-
-    try:
-        with open(META_CACHE_PATH, 'r') as f:
-            meta = json.load(f)
-
-        if meta.get('version') != CACHE_VERSION:
-            print(f"⚠️ 缓存版本不匹配")
-            return False
-
-        if meta.get('experiment') != 'exp3_stable':
-            print(f"⚠️ 缓存实验类型不匹配")
-            return False
-
-        current_osm_hash = compute_file_hash(osm_path)
-        if meta.get('osm_file_hash') != current_osm_hash:
-            print(f"⚠️ OSM 文件已更改")
-            return False
-
-        current_weather_hash = compute_file_hash(weather_path)
-        if meta.get('weather_file_hash') != current_weather_hash:
-            print(f"⚠️ 天气文件已更改")
-            return False
-
-        print(f"✓ 缓存验证通过 (版本: {CACHE_VERSION})")
-        return True
-
-    except Exception as e:
-        print(f"⚠️ 缓存验证失败: {e}")
-        return False
-
-
+# ============================================================
+# Dataset
+# ============================================================
 class TrajectoryDatasetWithWeather(Dataset):
-    """轨迹数据集（含天气）- 稳定版"""
-
-    def __init__(self, all_features_and_labels,
+    """
+    数据格式: (traj_21dim, weather_10dim, stats_18dim, label_encoded)
+    traj_21dim 已经是 exp2 的点级融合特征（9轨迹+12空间），不需要再单独处理空间特征
+    """
+    def __init__(self, data,
                  traj_mean=None, traj_std=None,
-                 spatial_mean=None, spatial_std=None,
                  weather_mean=None, weather_std=None,
                  stats_mean=None, stats_std=None):
-        self.data = all_features_and_labels
-        self.traj_mean = traj_mean
-        self.traj_std = traj_std
-        self.spatial_mean = spatial_mean
-        self.spatial_std = spatial_std
+        self.data = data
+        self.traj_mean    = traj_mean
+        self.traj_std     = traj_std
         self.weather_mean = weather_mean
-        self.weather_std = weather_std
-        self.stats_mean = stats_mean
-        self.stats_std = stats_std
+        self.weather_std  = weather_std
+        self.stats_mean   = stats_mean
+        self.stats_std    = stats_std
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
-        trajectory_features, spatial_features, weather_features, segment_stats, label_encoded = self.data[idx]
+        traj, weather, stats, label = self.data[idx]
+        traj    = traj.astype(np.float32).copy()
+        weather = weather.astype(np.float32).copy()
+        stats   = stats.astype(np.float32).copy()
 
-        # 归一化
         if self.traj_mean is not None:
-            trajectory_features = (trajectory_features - self.traj_mean) / self.traj_std
-        if self.spatial_mean is not None:
-            spatial_features = (spatial_features - self.spatial_mean) / self.spatial_std
+            traj = (traj - self.traj_mean) / self.traj_std
         if self.weather_mean is not None:
-            weather_features = (weather_features - self.weather_mean) / self.weather_std
+            weather = (weather - self.weather_mean) / self.weather_std
         if self.stats_mean is not None:
-            segment_stats = (segment_stats - self.stats_mean) / self.stats_std
+            stats = (stats - self.stats_mean) / self.stats_std
 
-        trajectory_tensor = torch.FloatTensor(trajectory_features)
-        spatial_tensor = torch.FloatTensor(spatial_features)
-        weather_tensor = torch.FloatTensor(weather_features)
-        stats_tensor = torch.FloatTensor(segment_stats)
-        label_tensor = torch.LongTensor([label_encoded])[0]
-
-        return trajectory_tensor, spatial_tensor, weather_tensor, stats_tensor, label_tensor
+        return (torch.FloatTensor(traj),
+                torch.FloatTensor(weather),
+                torch.FloatTensor(stats),
+                torch.LongTensor([label])[0])
 
 
-def normalize_features_safe(features: np.ndarray) -> np.ndarray:
-    """安全的特征归一化"""
-    features = features.astype(np.float32)
-    features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
-
-    mean = np.mean(features, axis=0, keepdims=True)
-    std = np.std(features, axis=0, keepdims=True)
-    std = np.where(std < 1e-8, 1.0, std)
-
-    normalized = (features - mean) / std
-    normalized = np.nan_to_num(normalized, nan=0.0, posinf=0.0, neginf=0.0)
-    normalized = np.clip(normalized, -5, 5)
-
-    return normalized.astype(np.float32)
-
-
+# ============================================================
+# 数据加载
+# ============================================================
 def load_data(geolife_root: str, osm_path: str, weather_path: str,
-              max_users: int = None, use_base_data: bool = True, cleaning_mode: str = 'balanced'):
+              max_users=None, use_base_data=True, cleaning_mode='balanced'):
     """
-    加载所有数据 - 稳定版
+    加载数据策略：
+    1. 轨迹+空间特征：直接复用 exp2 的 processed_features.pkl（已有21维融合特征）
+    2. 天气特征：新增，从 daily CSV 加载后广播到序列
+    3. 两者在此处拼接
 
-    关键改进:
-    1. 不丢弃任何样本
-    2. 缺失特征使用零向量填充
-    3. 全面的异常处理
-
-    Args:
-        geolife_root: GeoLife数据根目录
-        osm_path: OSM数据路径
-        weather_path: 天气数据路径
-        max_users: 最大用户数
-        use_base_data: 是否使用预处理的基础数据
-        cleaning_mode: 数据清洗模式 ('strict', 'balanced', 'gentle')
+    注意：exp3 不重新提取空间特征，直接读取 exp2 的缓存，保证特征一致性。
     """
-    BASE_DATA_PATH = os.path.join(
-        os.path.dirname(geolife_root),
-        'processed/base_segments.pkl'
-    )
 
-    geolife_loader = GeoLifeDataLoader(geolife_root)
-    users = geolife_loader.get_all_users()
-    if max_users and max_users < len(users):
-        users = users[:max_users]
-
-    # ================= 阶段 1: 空间特征提取器构建 ==================
-    spatial_extractor = None
-    if os.path.exists(SPATIAL_CACHE_PATH):
-        print(f"\n========== 阶段 1: 空间特征提取器加载 (从缓存) ==========")
+    # ===== 优先检查 exp3 完整缓存 =====
+    if os.path.exists(PROCESSED_FEATURE_CACHE):
+        print(f"\n========== 加载 Exp3 特征缓存 ==========")
         try:
-            with open(SPATIAL_CACHE_PATH, 'rb') as f:
-                spatial_extractor = pickle.load(f)
-            print("✅ 空间特征提取器从缓存加载完成")
-            if os.path.exists(SPATIAL_GRID_CACHE_PATH):
-                spatial_extractor.load_cache(SPATIAL_GRID_CACHE_PATH)
+            with open(PROCESSED_FEATURE_CACHE, 'rb') as f:
+                all_data, label_encoder, cleaning_stats = pickle.load(f)
+            print(f"✅ 缓存加载完成: {len(all_data)} 个样本")
+            return all_data, label_encoder, cleaning_stats
         except Exception as e:
-            warnings.warn(f"[WARN] 空间特征提取器缓存加载失败 ({e})，将重新构建")
-            spatial_extractor = None
+            print(f"⚠️ 缓存加载失败 ({e})，重新构建")
 
-    if spatial_extractor is None:
-        print("\n========== 阶段 1: 空间特征提取器构建 (重建) ==========")
-        try:
-            osm_loader = OSMDataLoader(osm_path)
-            osm_data = osm_loader.load_osm_data()
-            road_network = osm_loader.extract_road_network(osm_data)
-            pois = osm_loader.extract_pois(osm_data)
-            transit_routes = osm_loader.extract_transit_routes(osm_data)
-            spatial_extractor = EnhancedOsmSpatialExtractor()
-            spatial_extractor.build_from_osm(road_network, pois, transit_routes)
-            with open(SPATIAL_CACHE_PATH, 'wb') as f:
-                pickle.dump(spatial_extractor, f, protocol=pickle.HIGHEST_PROTOCOL)
-            print("✅ 空间特征提取器缓存完成")
-        except Exception as e:
-            print(f"⚠️ 空间特征提取器构建失败: {e}")
-            spatial_extractor = EnhancedOsmSpatialExtractor()  # 空空间特征提取器
-
-    # ================= 阶段 2: 天气数据加载 ==================
+    # ===== 加载天气处理器 =====
     weather_processor = None
     if os.path.exists(WEATHER_CACHE_PATH):
-        print(f"\n========== 阶段 2: 天气数据加载 (从缓存) ==========")
+        print(f"\n========== 天气处理器加载 (从缓存) ==========")
         try:
             with open(WEATHER_CACHE_PATH, 'rb') as f:
                 weather_processor = pickle.load(f)
-            print("✅ 天气数据从缓存加载完成")
-        except Exception as e:
-            warnings.warn(f"[WARN] 天气缓存加载失败 ({e})")
+            print("✅ 天气处理器从缓存加载完成")
+        except Exception:
             weather_processor = None
 
     if weather_processor is None:
-        print(f"\n========== 阶段 2: 天气数据处理 (重建) ==========")
-        try:
-            weather_processor = WeatherDataProcessor(weather_path)
-            weather_processor.load_and_process()
-            with open(WEATHER_CACHE_PATH, 'wb') as f:
-                pickle.dump(weather_processor, f, protocol=pickle.HIGHEST_PROTOCOL)
-            print("✅ 天气数据缓存完成")
-        except Exception as e:
-            print(f"⚠️ 天气数据处理失败: {e}")
-            weather_processor = WeatherDataProcessor(weather_path)  # 空处理器
+        print(f"\n========== 天气数据处理 ==========")
+        weather_processor = WeatherDataProcessor(weather_path)
+        weather_processor.load_and_process()
+        with open(WEATHER_CACHE_PATH, 'wb') as f:
+            pickle.dump(weather_processor, f, protocol=pickle.HIGHEST_PROTOCOL)
 
-    # ================= 阶段 3: 轨迹数据加载与特征提取 ==================
-    all_features_and_labels = None
-    label_encoder = None
+    # ===== 读取 exp2 的轨迹+空间特征缓存 =====
+    # exp2 缓存格式: (traj_feat_21dim, spatial_placeholder, stats_18dim, label_encoded)
+    exp2_cache = os.path.join(PARENT_DIR, 'exp2', 'cache', 'processed_features.pkl')
+    print(f"\n========== 加载 Exp2 特征 (复用空间特征) ==========")
+    if not os.path.exists(exp2_cache):
+        raise FileNotFoundError(
+            f"找不到 exp2 特征缓存: {exp2_cache}\n"
+            "请先确保 exp2/train.py 已经运行并生成缓存。"
+        )
+    with open(exp2_cache, 'rb') as f:
+        exp2_raw, label_encoder, cleaning_stats = pickle.load(f)
+    print(f"✅ exp2 特征加载完成: {len(exp2_raw)} 个样本")
 
-    if os.path.exists(PROCESSED_FEATURE_CACHE_PATH):
-        print(f"\n========== 阶段 3: 特征加载 (从缓存) ==========")
-        try:
-            with open(PROCESSED_FEATURE_CACHE_PATH, 'rb') as f:
-                all_features_and_labels, label_encoder, cleaning_stats = pickle.load(f)
-            print(f"✅ 特征从缓存加载完成: {len(all_features_and_labels)} 条")
-            return all_features_and_labels, spatial_extractor, weather_processor, label_encoder, cleaning_stats
-        except Exception as e:
-            print(f"⚠️ 特征缓存加载失败: {e}")
+    # ===== 为每个样本添加天气特征 =====
+    # exp2 格式: (traj_21dim, spatial_placeholder, stats, label_encoded)
+    # 需要确定每个轨迹的时间戳（从 exp2 缓存里没有时间信息）
+    # 解决方案：重新用 base_segments 获取时间信息，与 exp2 样本一一对应
 
-    processed_segments_with_time = None
-    cleaning_stats = {}
+    BASE_DATA_PATH = os.path.join(PARENT_DIR, 'data', 'processed', 'base_segments.pkl')
+    if not os.path.exists(BASE_DATA_PATH):
+        raise FileNotFoundError(
+            f"找不到基础数据: {BASE_DATA_PATH}\n"
+            "请先运行 scripts/generate_base_data.py"
+        )
 
-    # 快速模式：使用基础数据
-    if use_base_data and HAS_COMMON and os.path.exists(BASE_DATA_PATH):
-        print(f"\n{'='*80}")
-        print(f"阶段 3: 使用预处理的基础数据（快速模式 - 清洗模式: {cleaning_mode}）")
-        print(f"{'='*80}\n")
+    print(f"\n========== 从基础数据获取时间信息 ==========")
+    base_segments = BaseGeoLifePreprocessor.load_from_cache(BASE_DATA_PATH)
+    adapter = Exp3DataAdapter(enable_cleaning=True, cleaning_mode=cleaning_mode)
+    processed_with_time = adapter.process_segments(base_segments)
+    cleaning_stats = adapter.get_cleaning_stats()
 
-        try:
-            base_segments = BaseGeoLifePreprocessor.load_from_cache(BASE_DATA_PATH)
-            adapter = Exp3DataAdapter(enable_cleaning=True, cleaning_mode=cleaning_mode)
-            processed_segments_with_time = adapter.process_segments(base_segments)
-            cleaning_stats = adapter.get_cleaning_stats()
-        except Exception as e:
-            print(f"⚠️ 快速模式失败: {e}，切换到传统模式")
-            processed_segments_with_time = None
+    # 同步过滤：exp2_raw 和 processed_with_time 必须一一对应
+    TARGET_MODES = {'Walk', 'Bike', 'Bus', 'Car & taxi', 'Train', 'Subway'}
 
-    # 传统模式：从头处理
-    if processed_segments_with_time is None:
-        if use_base_data:
-            print(f"\n⚠️ 基础数据不可用，使用传统模式")
-
-        print("\n========== 阶段 3: 加载轨迹数据 (传统模式) ==========")
-        all_segments_with_dates = []
-
-        for user_id in tqdm(users, desc="[用户加载]"):
-            try:
-                labels = geolife_loader.load_labels(user_id)
-                if labels.empty:
-                    continue
-                trajectory_dir = os.path.join(geolife_root, "Data", user_id, "Trajectory")
-                if not os.path.exists(trajectory_dir):
-                    continue
-
-                for traj_file in os.listdir(trajectory_dir):
-                    if not traj_file.endswith('.plt'):
-                        continue
-                    try:
-                        trajectory = geolife_loader.load_trajectory(
-                            os.path.join(trajectory_dir, traj_file)
-                        )
-                        if trajectory.empty:
-                            continue
-                        segments = geolife_loader.segment_trajectory(trajectory, labels)
-                        for seg, label in segments:
-                            if 'datetime' in seg.columns and len(seg) >= 10:
-                                all_segments_with_dates.append((seg, label, seg['datetime']))
-                    except Exception:
-                        continue
-            except Exception:
-                continue
-
-        # 传统模式下的规范化处理
-        processed_segments_with_time = []
-        feature_cols = [
-            'latitude', 'longitude', 'speed', 'acceleration',
-            'bearing_change', 'distance', 'time_diff',
-            'total_distance', 'total_time'
-        ]
-
-        for segment, label, dates in tqdm(all_segments_with_dates, desc="[预处理]"):
-            try:
-                # 确保所有特征列存在
-                for col in feature_cols:
-                    if col not in segment.columns:
-                        segment[col] = 0.0
-
-                features = segment[feature_cols].values.astype(np.float32)
-                features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
-
-                # 计算段级统计特征
-                segment_stats = BaseGeoLifePreprocessor.compute_segment_stats(features)
-
-                current_length = len(features)
-
-                # 序列长度规范化
-                if current_length > FIXED_SEQUENCE_LENGTH:
-                    indices = np.linspace(0, current_length - 1, FIXED_SEQUENCE_LENGTH, dtype=int)
-                    features = features[indices]
-                    dates_resampled = dates.iloc[indices].reset_index(drop=True)
-                elif current_length < FIXED_SEQUENCE_LENGTH:
-                    padding = np.zeros((FIXED_SEQUENCE_LENGTH - current_length, features.shape[1]),
-                                      dtype=np.float32)
-                    features = np.vstack([features, padding])
-                    # 填充日期使用最后一个有效日期
-                    last_date = dates.iloc[-1] if len(dates) > 0 else pd.Timestamp.now()
-                    padding_dates = pd.Series([last_date] * (FIXED_SEQUENCE_LENGTH - len(dates)))
-                    dates_resampled = pd.concat([dates.reset_index(drop=True), padding_dates],
-                                               ignore_index=True)
-                else:
-                    dates_resampled = dates.reset_index(drop=True)
-
-                processed_segments_with_time.append((features, segment_stats, dates_resampled, label))
-            except Exception:
-                continue
-
-    # 过滤有效类别
-    valid_modes = {'Walk', 'Bike', 'Bus', 'Car & taxi', 'Train', 'Subway'}
-    processed_segments_with_time = [
-        s for s in processed_segments_with_time if s[2] in valid_modes
+    paired = [
+        (e2, pt) for e2, pt in zip(exp2_raw, processed_with_time)
+        if pt[3] in TARGET_MODES  # pt[3] 是 label_str
     ]
 
-    if len(processed_segments_with_time) == 0:
-        raise ValueError("没有有效的轨迹数据！请检查数据路径和格式。")
+    if len(paired) == 0:
+        raise ValueError("过滤后没有有效样本")
 
-    # 对少数类进行数据增强（仅对训练数据有效，此处对全量做增强后再split）
-    processed_segments_with_time = BaseGeoLifePreprocessor.oversample_minority_classes(
-        processed_segments_with_time,
-        target_ratio=0.3,
-        minority_classes=['Subway', 'Train']
-    )
+    exp2_raw_filtered = [p[0] for p in paired]
+    processed_filtered = [p[1] for p in paired]
 
-    # 标签编码
-    all_labels = [s[2] for s in processed_segments_with_time]
-    label_encoder = LabelEncoder()
-    label_encoder.fit(all_labels)
+    print(f"过滤后样本数: {len(paired)}")
+    print(f"\n========== 拼接天气特征 ==========")
 
-    print(f"\n类别分布:")
-    for cls in label_encoder.classes_:
-        count = sum(1 for l in all_labels if l == cls)
-        print(f"  {cls}: {count}")
+    all_data = []
+    zero_weather = np.zeros((FIXED_SEQUENCE_LENGTH, WEATHER_FEATURE_DIM), dtype=np.float32)
 
-    # ================= 特征提取（关键改进：不丢弃样本）==================
-    print("\n3.1 正在进行【增强特征提取（含天气）】...")
-    feature_extractor = FeatureExtractorWithWeather(spatial_extractor, weather_processor)
-    all_features_and_labels = []
-
-    success_count = 0
-    degraded_count = 0
-
-    for trajectory, segment_stats, datetime_series, label_str in tqdm(processed_segments_with_time,
-                                                        desc="[Exp3 特征提取]"):
+    # exp2_raw 格式:          (traj_21dim, placeholder, stats_18dim, label_encoded)
+    # processed_with_time 格式: (traj_9dim, stats_18dim, datetime_series, label_str)
+    for (traj_21, _, stats, label_encoded), (_, _, datetime_series, _) in tqdm(
+            zip(exp2_raw_filtered, processed_filtered), desc="[拼接天气特征]",
+            total=len(paired)):
         try:
-            # 尝试完整特征提取
-            trajectory_features, spatial_features, weather_features = feature_extractor.extract_features(
-                trajectory, datetime_series
-            )
+            # 获取天气特征 (N, 10)
+            if datetime_series is not None and len(datetime_series) > 0:
+                weather_feat = weather_processor.get_weather_features_for_trajectory(
+                    datetime_series
+                )
+                # 确保长度匹配
+                T = traj_21.shape[0]
+                if weather_feat.shape[0] != T:
+                    if weather_feat.shape[0] > T:
+                        weather_feat = weather_feat[:T]
+                    else:
+                        pad = np.zeros((T - weather_feat.shape[0], WEATHER_FEATURE_DIM), dtype=np.float32)
+                        weather_feat = np.vstack([weather_feat, pad])
+            else:
+                weather_feat = zero_weather.copy()
 
-            # 验证形状
-            assert trajectory_features.shape == (FIXED_SEQUENCE_LENGTH, TRAJECTORY_FEATURE_DIM)
-            assert spatial_features.shape == (FIXED_SEQUENCE_LENGTH, SPATIAL_FEATURE_DIM)
-            assert weather_features.shape == (FIXED_SEQUENCE_LENGTH, WEATHER_FEATURE_DIM)
-
-            label_encoded = label_encoder.transform([label_str])[0]
-            all_features_and_labels.append((
-                trajectory_features, spatial_features, weather_features, segment_stats, label_encoded
-            ))
-            success_count += 1
+            weather_feat = np.nan_to_num(weather_feat, nan=0.0, posinf=0.0, neginf=0.0)
+            all_data.append((traj_21, weather_feat, stats, label_encoded))
 
         except Exception as e:
-            # ========== 降级特征提取：绝不丢弃样本 ==========
-            try:
-                # 轨迹特征：归一化原始数据
-                trajectory_features = normalize_features_safe(trajectory)
-                if trajectory_features.shape != (FIXED_SEQUENCE_LENGTH, TRAJECTORY_FEATURE_DIM):
-                    # 形状修复
-                    if trajectory_features.shape[0] != FIXED_SEQUENCE_LENGTH:
-                        if trajectory_features.shape[0] > FIXED_SEQUENCE_LENGTH:
-                            trajectory_features = trajectory_features[:FIXED_SEQUENCE_LENGTH]
-                        else:
-                            padding = np.zeros((FIXED_SEQUENCE_LENGTH - trajectory_features.shape[0],
-                                              TRAJECTORY_FEATURE_DIM), dtype=np.float32)
-                            trajectory_features = np.vstack([trajectory_features, padding])
-                    if trajectory_features.shape[1] != TRAJECTORY_FEATURE_DIM:
-                        if trajectory_features.shape[1] > TRAJECTORY_FEATURE_DIM:
-                            trajectory_features = trajectory_features[:, :TRAJECTORY_FEATURE_DIM]
-                        else:
-                            padding = np.zeros((FIXED_SEQUENCE_LENGTH,
-                                              TRAJECTORY_FEATURE_DIM - trajectory_features.shape[1]),
-                                              dtype=np.float32)
-                            trajectory_features = np.hstack([trajectory_features, padding])
+            all_data.append((traj_21, zero_weather.copy(), stats, label_encoded))
 
-                # 空间特征和天气：使用零向量
-                spatial_features = np.zeros((FIXED_SEQUENCE_LENGTH, SPATIAL_FEATURE_DIM), dtype=np.float32)
-                weather_features = np.zeros((FIXED_SEQUENCE_LENGTH, WEATHER_FEATURE_DIM), dtype=np.float32)
-
-                label_encoded = label_encoder.transform([label_str])[0]
-                all_features_and_labels.append((
-                    trajectory_features, spatial_features, weather_features, segment_stats, label_encoded
-                ))
-                degraded_count += 1
-
-            except Exception as inner_e:
-                # 极端情况：创建完全零特征
-                trajectory_features = np.zeros((FIXED_SEQUENCE_LENGTH, TRAJECTORY_FEATURE_DIM),
-                                              dtype=np.float32)
-                spatial_features = np.zeros((FIXED_SEQUENCE_LENGTH, SPATIAL_FEATURE_DIM), dtype=np.float32)
-                weather_features = np.zeros((FIXED_SEQUENCE_LENGTH, WEATHER_FEATURE_DIM), dtype=np.float32)
-
-                try:
-                    label_encoded = label_encoder.transform([label_str])[0]
-                except:
-                    label_encoded = 0
-
-                all_features_and_labels.append((
-                    trajectory_features, spatial_features, weather_features, label_encoded
-                ))
-                degraded_count += 1
-
-    print(f"\n✅ 特征提取完成:")
-    print(f"   完整特征: {success_count}")
-    print(f"   降级特征: {degraded_count}")
-    print(f"   总样本数: {len(all_features_and_labels)}")
+    print(f"✅ 拼接完成: {len(all_data)} 个样本")
 
     # 保存缓存
-    try:
-        with open(PROCESSED_FEATURE_CACHE_PATH, 'wb') as f:
-            pickle.dump((all_features_and_labels, label_encoder, cleaning_stats), f,
-                       protocol=pickle.HIGHEST_PROTOCOL)
-        spatial_extractor.save_cache(SPATIAL_GRID_CACHE_PATH)
-        save_cache_metadata(osm_path, weather_path, geolife_root,
-                           len(all_features_and_labels), label_encoder)
-    except Exception as e:
-        print(f"⚠️ 缓存保存失败: {e}")
+    with open(PROCESSED_FEATURE_CACHE, 'wb') as f:
+        pickle.dump((all_data, label_encoder, cleaning_stats), f,
+                    protocol=pickle.HIGHEST_PROTOCOL)
+    print(f"✅ Exp3 特征缓存已保存: {PROCESSED_FEATURE_CACHE}")
 
-    return all_features_and_labels, spatial_extractor, weather_processor, label_encoder, cleaning_stats
+    return all_data, label_encoder, cleaning_stats
 
 
-def check_tensor_health(tensor: torch.Tensor, name: str) -> bool:
-    """检查张量是否健康（无 NaN/Inf）"""
-    if torch.isnan(tensor).any():
-        print(f"⚠️ {name} 包含 NaN")
-        return False
-    if torch.isinf(tensor).any():
-        print(f"⚠️ {name} 包含 Inf")
-        return False
-    return True
-
-
+# ============================================================
+# Main
+# ============================================================
 def main():
-    # ========================================================================
-    # PyCharm 直接运行配置区域
-    # 如果在 PyCharm 中点击运行按钮，请修改下面的路径为你的实际路径
-    # ========================================================================
-    PYCHARM_MODE = True  # 设为 True 使用下面的硬编码路径，设为 False 使用命令行参数
+    parser = argparse.ArgumentParser(description='训练 Exp3 (轨迹+空间+天气)')
+    parser.add_argument('--geolife_root', default='../data/Geolife Trajectories 1.3')
+    parser.add_argument('--osm_path',     default='../data/exp2.geojson')  # 复用exp2的OSM
+    parser.add_argument('--weather_path', default='../data/beijing_weather_daily_2007_2012.csv')
+    parser.add_argument('--use_base_data', action='store_true', default=True)
+    parser.add_argument('--cleaning_mode', default='balanced',
+                        choices=['strict', 'balanced', 'gentle'])
+    parser.add_argument('--max_users',  type=int,   default=None)
+    parser.add_argument('--batch_size', type=int,   default=32)
+    parser.add_argument('--epochs',     type=int,   default=150)
+    parser.add_argument('--lr',         type=float, default=1e-4)   # 与exp1/exp2一致
+    parser.add_argument('--hidden_dim', type=int,   default=128)
+    parser.add_argument('--num_layers', type=int,   default=2)
+    parser.add_argument('--dropout',    type=float, default=0.3)
+    parser.add_argument('--patience',   type=int,   default=25)     # 与exp1/exp2一致
+    parser.add_argument('--save_dir',   default='checkpoints')
+    parser.add_argument('--device',     default='cuda' if torch.cuda.is_available() else 'cpu')
+    parser.add_argument('--clear_cache', action='store_true')
+    parser.add_argument('--seed',        type=int, default=42)
+    args = parser.parse_args()
 
-    if PYCHARM_MODE:
-        class Args:
-            # ============ 请根据你的实际路径修改以下三行 ============
-            geolife_root = '../data/Geolife Trajectories 1.3'  # GeoLife 数据集路径
-            osm_path = '../data/exp3.geojson'                   # OSM GeoJSON 路径
-            weather_path = '../data/beijing_weather_hourly_2007_2012.csv'  # 天气数据路径
-            # ========================================================
-
-            # 数据加载选项
-            use_base_data = True   # 使用预处理的基础数据（更快）
-            cleaning_mode = 'balanced'  # 数据清洗模式: strict, balanced, gentle
-            max_users = None       # 最大用户数（None = 全部）
-
-            # 训练参数
-            batch_size = 32
-            epochs = 50
-            lr = 5e-5              # 学习率
-            hidden_dim = 128
-            num_layers = 2
-            dropout = 0.3
-            max_grad_norm = 1.0    # 梯度裁剪
-
-            # 系统参数
-            save_dir = 'checkpoints'
-            num_workers = 0        # Windows 建议设为 0，Linux/Mac 可以设为 4
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
-            clear_cache = False    # 是否清除缓存
-            seed = 42
-
-        args = Args()
-        print("📌 使用 PyCharm 模式（硬编码配置）")
-    else:
-        parser = argparse.ArgumentParser(description='训练交通方式识别模型 (Exp3 - 稳定版)')
-        parser.add_argument('--geolife_root', type=str, default='../data/Geolife Trajectories 1.3')
-        parser.add_argument('--osm_path', type=str, default='./data/exp3.geojson')
-        parser.add_argument('--weather_path', type=str, default='./data/beijing_weather_hourly_2007_2012.csv')
-
-        # 数据加载选项
-        parser.add_argument('--use_base_data', action='store_true', default=True,
-                            help='使用预处理的基础数据（推荐）')
-        parser.add_argument('--cleaning_mode', type=str, default='balanced',
-                           choices=['strict', 'balanced', 'gentle'],
-                           help='数据清洗模式: strict(严格), balanced(平衡), gentle(温和)')
-        parser.add_argument('--max_users', type=int, default=None)
-
-        # 训练参数（调整默认值以提高稳定性）
-        parser.add_argument('--batch_size', type=int, default=32)
-        parser.add_argument('--epochs', type=int, default=150)
-        parser.add_argument('--lr', type=float, default=5e-5,
-                            help='学习率（建议 1e-4 或 5e-5）')
-        parser.add_argument('--hidden_dim', type=int, default=128)
-        parser.add_argument('--num_layers', type=int, default=2)
-        parser.add_argument('--dropout', type=float, default=0.3)
-        parser.add_argument('--patience', type=int, default=10)
-        parser.add_argument('--max_grad_norm', type=float, default=1.0,
-                            help='梯度裁剪阈值')
-
-        # 系统参数
-        parser.add_argument('--save_dir', type=str, default='checkpoints')
-        parser.add_argument('--num_workers', type=int, default=4)
-        parser.add_argument('--device', type=str,
-                            default='cuda' if torch.cuda.is_available() else 'cpu')
-        parser.add_argument('--clear_cache', action='store_true')
-        parser.add_argument('--seed', type=int, default=42)
-
-        args = parser.parse_args()
-
-    # ========================================================================
-
-    # 设置随机种子
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
-
     os.makedirs(args.save_dir, exist_ok=True)
 
     print("\n" + "=" * 80)
-    print("Exp3 交通方式识别训练 (稳定版)")
+    print("Exp3 训练 (轨迹21维 + 天气10维)")
+    print(f"设备: {args.device} | lr: {args.lr} | patience: {args.patience}")
     print("=" * 80)
-    print(f"设备: {args.device}")
-    print(f"学习率: {args.lr}")
-    print(f"梯度裁剪: {args.max_grad_norm}")
-    print(f"批次大小: {args.batch_size}")
-    print(f"Epochs: {args.epochs}")
-    print("=" * 80 + "\n")
 
-    # 清理缓存
     if args.clear_cache:
-        print("正在清理缓存...")
-        for f in [SPATIAL_CACHE_PATH, SPATIAL_GRID_CACHE_PATH, WEATHER_CACHE_PATH,
-                  PROCESSED_FEATURE_CACHE_PATH, META_CACHE_PATH]:
+        for f in [WEATHER_CACHE_PATH, PROCESSED_FEATURE_CACHE]:
             if os.path.exists(f):
                 os.remove(f)
-                print(f"  已删除: {f}")
+                print(f"  已删除缓存: {f}")
 
-    # 加载数据
-    all_features_and_labels, spatial_extractor, weather_processor, label_encoder, cleaning_stats = load_data(
-        args.geolife_root, args.osm_path, args.weather_path, args.max_users,
-        use_base_data=args.use_base_data,
-        cleaning_mode=args.cleaning_mode
+    # ===== 加载数据 =====
+    all_data, label_encoder, cleaning_stats = load_data(
+        args.geolife_root, args.osm_path, args.weather_path,
+        args.max_users, args.use_base_data, args.cleaning_mode
     )
 
-    # 数据集划分
-    num_classes = len(label_encoder.classes_)
-    print(f"\n类别数量: {num_classes}")
-    print(f"类别列表: {label_encoder.classes_}")
+    if not all_data:
+        print("❌ 没有有效数据，退出")
+        return
 
-    # 第一步：先划分索引（不需要 dataset）
-    all_indices = np.arange(len(all_features_and_labels))
-    labels_stratify = [label_encoder.inverse_transform([label_encoded])[0] for _, _, _, label_encoded in all_features_and_labels]
+    # ===== ✅ 修复1: 先split，再oversample（只对训练集） =====
+    all_indices = np.arange(len(all_data))
+    labels_stratify = [item[-1] for item in all_data]   # label_encoded 在最后一位
 
     train_indices, temp_indices = train_test_split(
-        all_indices, test_size=0.3, random_state=42,
-        stratify=labels_stratify
+        all_indices, test_size=0.3, random_state=42, stratify=labels_stratify
     )
     temp_labels = [labels_stratify[i] for i in temp_indices]
     val_indices, test_indices = train_test_split(
-        temp_indices, test_size=0.6667, random_state=42,
-        stratify=temp_labels
+        temp_indices, test_size=0.6667, random_state=42, stratify=temp_labels
     )
 
-    # 第二步：用训练集计算归一化统计量
-    from common.train_utils import compute_feature_stats
-    train_segments = [all_features_and_labels[i] for i in train_indices]
-    traj_list = [s[0] for s in train_segments]
-    spatial_list = [s[1] for s in train_segments]
-    weather_list = [s[2] for s in train_segments]
-    stats_list = [s[3] for s in train_segments]
+    # oversample 只对训练集做，val/test 保持原样
+    train_segments_raw = [all_data[i] for i in train_indices]
+    # 转换格式以适配 oversample 接口：需要 (feat, feat, label_str, ...) 格式
+    # oversample 需要字符串标签，临时转回
+    train_with_str = [(t, w, s, label_encoder.inverse_transform([l])[0])
+                      for t, w, s, l in train_segments_raw]
+    train_oversampled = BaseGeoLifePreprocessor.oversample_minority_classes(
+        train_with_str,
+        target_ratio=0.3,
+        minority_classes=['Subway', 'Train']
+    )
+    # 转回 encoded
+    train_data_final = [
+        (t, w, s, label_encoder.transform([l])[0])
+        for t, w, s, l in train_oversampled
+    ]
+    val_data   = [all_data[i] for i in val_indices]
+    test_data  = [all_data[i] for i in test_indices]
 
-    traj_all = np.vstack(traj_list)
-    spatial_all = np.vstack(spatial_list)
-    weather_all = np.vstack(weather_list)
-    stats_all = np.vstack(stats_list)
+    print(f"\n✅ 数据划分完成 (oversample仅对训练集):")
+    print(f"  Train (oversampled): {len(train_data_final)}")
+    print(f"  Val:                 {len(val_data)}")
+    print(f"  Test:                {len(test_data)}")
 
-    traj_mean = traj_all.mean(axis=0).astype(np.float32)
-    traj_std = traj_all.std(axis=0).astype(np.float32)
-    traj_std = np.where(traj_std < 1e-6, 1.0, traj_std)
+    # ===== 计算归一化统计量（仅基于训练集）=====
+    traj_all    = np.vstack([s[0] for s in train_data_final])
+    weather_all = np.vstack([s[1] for s in train_data_final])
+    stats_all   = np.vstack([s[2] for s in train_data_final])
 
-    spatial_mean = spatial_all.mean(axis=0).astype(np.float32)
-    spatial_std = spatial_all.std(axis=0).astype(np.float32)
-    spatial_std = np.where(spatial_std < 1e-6, 1.0, spatial_std)
+    def safe_stats(arr):
+        mean = arr.mean(axis=0).astype(np.float32)
+        std  = arr.std(axis=0).astype(np.float32)
+        std  = np.where(std < 1e-6, 1.0, std)
+        return mean, std
 
-    weather_mean = weather_all.mean(axis=0).astype(np.float32)
-    weather_std = weather_all.std(axis=0).astype(np.float32)
-    weather_std = np.where(weather_std < 1e-6, 1.0, weather_std)
-
-    stats_mean = stats_all.mean(axis=0).astype(np.float32)
-    stats_std = stats_all.std(axis=0).astype(np.float32)
-    stats_std = np.where(stats_std < 1e-6, 1.0, stats_std)
+    traj_mean,    traj_std    = safe_stats(traj_all)
+    weather_mean, weather_std = safe_stats(weather_all)
+    stats_mean,   stats_std   = safe_stats(stats_all)
 
     norm_params = {
         'traj_mean': traj_mean, 'traj_std': traj_std,
-        'spatial_mean': spatial_mean, 'spatial_std': spatial_std,
         'weather_mean': weather_mean, 'weather_std': weather_std,
         'stats_mean': stats_mean, 'stats_std': stats_std
     }
-    print(f"\n✅ 归一化统计量计算完成（基于 {len(train_indices)} 个训练样本）")
+    print(f"✅ 归一化统计量计算完成（基于 {len(train_data_final)} 个训练样本）")
 
-    # 第三步：创建带归一化的 dataset
-    dataset = TrajectoryDatasetWithWeather(
-        all_features_and_labels,
-        traj_mean=traj_mean, traj_std=traj_std,
-        spatial_mean=spatial_mean, spatial_std=spatial_std,
-        weather_mean=weather_mean, weather_std=weather_std,
-        stats_mean=stats_mean, stats_std=stats_std
-    )
+    # ===== Dataset & DataLoader =====
+    def make_loader(data, shuffle):
+        ds = TrajectoryDatasetWithWeather(
+            data,
+            traj_mean=traj_mean, traj_std=traj_std,
+            weather_mean=weather_mean, weather_std=weather_std,
+            stats_mean=stats_mean, stats_std=stats_std
+        )
+        return DataLoader(ds, batch_size=args.batch_size, shuffle=shuffle, num_workers=0)
 
-    print(f"\n✅ 数据集大小:")
-    print(f"  总样本数: {len(dataset)}")
-    print(f"  特征样本数: {len(all_features_and_labels)}")
+    train_loader = make_loader(train_data_final, shuffle=True)
+    val_loader   = make_loader(val_data,          shuffle=False)
+    test_loader  = make_loader(test_data,         shuffle=False)
 
-    train_loader = DataLoader(
-        torch.utils.data.Subset(dataset, train_indices),
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=args.num_workers
-    )
-    val_loader = DataLoader(
-        torch.utils.data.Subset(dataset, val_indices),
-        batch_size=args.batch_size,
-        shuffle=False,
-        num_workers=args.num_workers
-    )
-    test_loader = DataLoader(
-        torch.utils.data.Subset(dataset, test_indices),
-        batch_size=args.batch_size,
-        shuffle=False,
-        num_workers=args.num_workers
-    )
+    print(f"  Train batches: {len(train_loader)} | Val batches: {len(val_loader)}")
 
-    print(f"\n✅ 数据加载完成:")
-    print(f"  Train: {len(train_indices)} 样本")
-    print(f"  Val:   {len(val_indices)} 样本")
-    print(f"  Test:  {len(test_indices)} 样本")
-    print(f"  训练批次总数: {len(train_loader)}")
-    print(f"  验证批次总数: {len(val_loader)}")
+    # ===== 类别分布 =====
+    print(f"\n类别分布 (训练集, oversampled):")
+    for cls in label_encoder.classes_:
+        enc = label_encoder.transform([cls])[0]
+        cnt = sum(1 for _, _, _, l in train_data_final if l == enc)
+        print(f"  {cls:15s}: {cnt}")
 
-    # 构建模型
+    # ===== 模型 =====
     model = TransportationModeClassifierWithWeather(
         trajectory_feature_dim=TRAJECTORY_FEATURE_DIM,
-        spatial_feature_dim=SPATIAL_FEATURE_DIM,
         weather_feature_dim=WEATHER_FEATURE_DIM,
         segment_stats_dim=18,
         hidden_dim=args.hidden_dim,
         num_layers=args.num_layers,
-        num_classes=num_classes,
+        num_classes=len(label_encoder.classes_),
         dropout=args.dropout,
         num_segments=5,
         local_hidden=64,
@@ -760,185 +386,171 @@ def main():
 
     print(f"\n模型参数量: {sum(p.numel() for p in model.parameters()):,}")
 
-    # 优化器和学习率调度器
-    optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
-
-    # Warmup scheduler：前5轮线性升温
-    def warmup_lambda(epoch):
-        warmup_epochs = 5
-        if epoch < warmup_epochs:
-            return (epoch + 1) / warmup_epochs
-        return 1.0
-
-    warmup_scheduler = torch.optim.lr_scheduler.LambdaLR(
-        optimizer, lr_lambda=warmup_lambda
-    )
-
-    # ReduceLROnPlateau：验证损失不改善时降低学习率
-    plateau_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=8
-    )
-
-    # 损失函数
+    # ===== 损失函数（用训练集的标签分布）=====
     class_weights = compute_class_weights(
         label_encoder,
-        all_features_and_labels,
+        [(t, w, s, l) for t, w, s, l in train_data_final],
         label_index=-1,
         mode='sqrt_inverse'
     ).to(args.device)
     criterion = nn.CrossEntropyLoss(weight=class_weights)
 
-    # ========================================================
-    # ✅ Early Stopping 配置
-    # ========================================================
-    CHECKPOINT_PATH = os.path.join(args.save_dir, 'exp3_model.pth')
+    # ===== 优化器 =====
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
-    # 加载历史最佳 val_loss 作为初始基准
-    best_val_loss = float("inf")
-    start_epoch = 0
+    # Warmup: 前10轮线性升温（与exp1/exp2一致）
+    warmup_epochs = 10
+    warmup_scheduler = torch.optim.lr_scheduler.LambdaLR(
+        optimizer,
+        lr_lambda=lambda ep: (ep + 1) / warmup_epochs if ep < warmup_epochs else 1.0
+    )
+
+    # ===== ✅ 修复2: plateau 监控 val_acc (mode='max')，与exp1/exp2一致 =====
+    plateau_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='max', factor=0.5, patience=8, min_lr=1e-5
+    )
+
+    # ===== Early Stopping =====
+    CHECKPOINT_PATH = os.path.join(args.save_dir, 'exp3_model.pth')
+    best_val_acc = 0.0
+    epochs_no_improve = 0
+    patience = args.patience   # ✅ 修复3: 使用 args.patience，不硬编码
 
     if os.path.exists(CHECKPOINT_PATH):
         try:
             prev = torch.load(CHECKPOINT_PATH, map_location=args.device, weights_only=False)
-            if 'val_loss' in prev:
-                best_val_loss = prev['val_loss']
             if prev.get('model_config', {}).get('num_classes') == len(label_encoder.classes_):
                 model.load_state_dict(prev['model_state_dict'])
-                print(f"✅ 加载历史最佳权重，val_loss={best_val_loss:.4f}，从 epoch 0 重新训练")
+                best_val_acc = prev.get('val_acc', 0.0)
+                print(f"✅ 加载历史最佳权重，val_acc={best_val_acc:.4f}")
             else:
-                print(f"⚠️ 模型类别数不匹配，从零开始")
+                print("⚠️ 类别数不匹配，从零开始")
         except Exception as e:
-            print(f"⚠️ 历史模型加载失败（{e}），从零开始")
+            print(f"⚠️ 历史模型加载失败 ({e})，从零开始")
 
-    epochs_no_improve = 0
-    patience = args.patience
+    # NaN 连续检测
+    consecutive_nan = 0
+    MAX_NAN = 3
 
-    # ========================================================
-    # ✅ 训练曲线保存到 CSV
-    # ========================================================
-    import csv
+    # 训练日志
     os.makedirs("logs", exist_ok=True)
     csv_path = "logs/exp3_training_log.csv"
     with open(csv_path, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(['epoch', 'train_loss', 'train_acc', 'val_loss', 'val_acc', 'lr'])
+        csv.writer(f).writerow(['epoch', 'train_loss', 'train_acc', 'val_loss', 'val_acc', 'lr'])
 
     print("\n" + "=" * 80)
     print("开始训练")
     print("=" * 80)
 
-    for epoch in range(start_epoch, args.epochs):
+    for epoch in range(args.epochs):
         print(f"\nEpoch {epoch+1}/{args.epochs}")
 
         train_loss, train_acc = train_epoch(
-            model, train_loader, criterion, optimizer, args.device,
-            max_grad_norm=args.max_grad_norm
+            model, train_loader, criterion, optimizer, args.device
         )
 
-        val_loss, report, _, _ = evaluate(
+        # NaN 检测
+        if np.isnan(train_loss) or np.isinf(train_loss):
+            consecutive_nan += 1
+            print(f"⚠️ 训练损失异常 ({train_loss})，连续NaN: {consecutive_nan}/{MAX_NAN}")
+            if consecutive_nan >= MAX_NAN:
+                print("🛑 连续NaN过多，停止训练")
+                break
+            if os.path.exists(CHECKPOINT_PATH):
+                prev = torch.load(CHECKPOINT_PATH, map_location=args.device, weights_only=False)
+                model.load_state_dict(prev['model_state_dict'])
+                print("✅ 已恢复到最佳模型")
+            continue
+        else:
+            consecutive_nan = 0
+
+        val_loss, val_report, _, _ = evaluate(
             model, val_loader, criterion, args.device, label_encoder.classes_
         )
-        val_acc = report.get('accuracy', 0.0)
+        val_acc = val_report['accuracy']
 
-        # 在训练循环结束后再打印上一轮指标汇总
+        if np.isnan(val_loss) or np.isinf(val_loss):
+            consecutive_nan += 1
+            print(f"⚠️ 验证损失异常，连续NaN: {consecutive_nan}/{MAX_NAN}")
+            if consecutive_nan >= MAX_NAN:
+                print("🛑 连续NaN过多，停止训练")
+                break
+            continue
+        else:
+            consecutive_nan = 0
+
         print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f}")
         print(f"Val   Loss: {val_loss:.4f} | Val   Acc: {val_acc:.4f}")
 
-        # 学习率调度
-        if epoch < 5:
+        # ===== ✅ 修复4: plateau 在 warmup 结束时 reset 计数器 =====
+        if epoch < warmup_epochs:
             warmup_scheduler.step()
         else:
-            plateau_scheduler.step(val_loss)
+            if epoch == warmup_epochs:
+                plateau_scheduler.num_bad_epochs = 0  # reset warmup期间的历史
+            plateau_scheduler.step(val_acc)
 
         current_lr = optimizer.param_groups[0]['lr']
-        print(f"当前学习率: {current_lr:.6f}")
+        print(f"学习率: {current_lr:.6f}")
 
-        # 写入训练日志
         with open(csv_path, 'a', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow([epoch+1, f"{train_loss:.4f}", f"{train_acc:.4f}",
-                           f"{val_loss:.4f}", f"{val_acc:.4f}",
-                           f"{optimizer.param_groups[0]['lr']:.6f}"])
+            csv.writer(f).writerow([
+                epoch+1, f"{train_loss:.4f}", f"{train_acc:.4f}",
+                f"{val_loss:.4f}", f"{val_acc:.4f}", f"{current_lr:.6f}"
+            ])
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
+        # ===== ✅ 修复5: 监控 val_acc =====
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
             epochs_no_improve = 0
-
-            checkpoint = {
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "label_encoder": label_encoder,
-                "val_loss": val_loss,
-                "val_accuracy": val_acc,
-                "norm_params": norm_params,
-                "resume": True,
-                "model_config": {
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'label_encoder': label_encoder,
+                'val_acc': val_acc,
+                'norm_params': norm_params,
+                'model_config': {
                     'trajectory_feature_dim': TRAJECTORY_FEATURE_DIM,
-                    'spatial_feature_dim': SPATIAL_FEATURE_DIM,
                     'weather_feature_dim': WEATHER_FEATURE_DIM,
+                    'segment_stats_dim': 18,
                     'hidden_dim': args.hidden_dim,
                     'num_layers': args.num_layers,
-                    'num_classes': num_classes,
-                    'dropout': args.dropout
+                    'num_classes': len(label_encoder.classes_),
+                    'dropout': args.dropout,
                 }
-            }
-            torch.save(checkpoint, os.path.join(args.save_dir, 'exp3_model.pth'))
-            print("✓ 保存最佳模型（基于验证集）")
+            }, CHECKPOINT_PATH)
+            print("✓ 保存最佳模型 (val_acc)")
         else:
             epochs_no_improve += 1
-            print(f"⏳ 验证损失未改善: {epochs_no_improve}/{patience}")
-
+            print(f"⏳ 未改善: {epochs_no_improve}/{patience}")
             if epochs_no_improve >= patience:
-                print(f"\n🛑 Early stopping 触发（patience={patience}）")
+                print(f"🛑 Early stopping (patience={patience})")
                 break
 
-    # ========================================================
-    # ✅ 在测试集上进行最终评估
-    # ========================================================
+    # ===== 最终测试集评估 =====
     print("\n" + "=" * 80)
     print("最终测试集评估")
     print("=" * 80)
+    best_ckpt = torch.load(CHECKPOINT_PATH, map_location=args.device, weights_only=False)
+    model.load_state_dict(best_ckpt['model_state_dict'])
+    print("✅ 已加载最佳 checkpoint")
 
-    test_loss, test_report, _, _ = evaluate(
+    test_loss, test_report, all_preds, all_labels = evaluate(
         model, test_loader, criterion, args.device, label_encoder.classes_
     )
-    test_acc = test_report.get('accuracy', 0.0)
-
+    test_acc = test_report['accuracy']
     print(f"\nTest Loss: {test_loss:.4f} | Test Acc: {test_acc:.4f}")
-    print("\n各类别详细指标:")
+    print("\n各类别指标:")
     for cls in label_encoder.classes_:
         if cls in test_report:
-            metrics = test_report[cls]
-            print(f"  {cls:15s}: P={metrics['precision']:.4f}, R={metrics['recall']:.4f}, F1={metrics['f1-score']:.4f}")
+            m = test_report[cls]
+            print(f"  {cls:15s}: P={m['precision']:.4f}  R={m['recall']:.4f}  F1={m['f1-score']:.4f}")
 
-    # 训练完成
-    print("\n" + "=" * 80)
-    print("训练完成!")
-    print("=" * 80)
-    print(f"最佳验证 Loss: {best_val_loss:.4f}")
-    print(f"最终测试 Accuracy: {test_acc:.4f}")
-    print(f"模型已保存到: {os.path.join(args.save_dir, 'exp3_model.pth')}")
-
-    # 打印空间特征提取器和天气统计
-    if spatial_extractor is not None:
-        print("\n空间特征提取器统计:")
-        spatial_stats = spatial_extractor.get_graph_statistics()
-        for k, v in spatial_stats.items():
-            print(f"  {k}: {v}")
-
-        cache_stats = spatial_extractor.get_cache_stats()
-        print(f"\n空间特征提取器缓存统计:")
-        for k, v in cache_stats.items():
-            print(f"  {k}: {v}")
-
-    if weather_processor is not None:
-        print("\n天气统计:")
-        weather_stats = weather_processor.get_statistics()
-        for k, v in weather_stats.items():
-            print(f"  {k}: {v}")
+    print(f"\n最佳验证准确率: {best_val_acc:.4f}")
+    print(f"模型保存路径:   {CHECKPOINT_PATH}")
 
 
 if __name__ == '__main__':
-    warnings.simplefilter(action='ignore', category=FutureWarning)
-    warnings.simplefilter(action='ignore', category=UserWarning)
+    warnings.simplefilter('ignore', FutureWarning)
+    warnings.simplefilter('ignore', UserWarning)
     main()

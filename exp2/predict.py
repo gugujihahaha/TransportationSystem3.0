@@ -28,9 +28,11 @@ class TransportationPredictorExp2:
         config = ckpt['model_config']
 
         # 初始化模型架构 (Exp2: 轨迹 9 维 + 空间特征 11 维)
+        input_dim = config.get('input_dim', config.get('combined_dim', 21))
+        spatial_dim = 1  # 占位符，固定为1
         self.model = TransportationModeClassifier(
-            trajectory_feature_dim=config['trajectory_feature_dim'],
-            spatial_feature_dim=config['spatial_feature_dim'],
+            trajectory_feature_dim=input_dim,
+            spatial_feature_dim=spatial_dim,
             hidden_dim=config['hidden_dim'],
             num_layers=config['num_layers'],
             num_classes=config['num_classes'],
