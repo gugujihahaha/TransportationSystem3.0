@@ -57,17 +57,15 @@ class DualFeatureDataset(Dataset):
 
         if self.traj_mean is not None:
             traj = (traj - self.traj_mean) / self.traj_std
-        if self.spatial_mean is not None:
-            spatial = (spatial - self.spatial_mean) / self.spatial_std
         if self.stats_mean is not None:
             stats = (stats - self.stats_mean) / self.stats_std
 
-        traj_tensor = torch.FloatTensor(traj)
-        spatial_tensor = torch.FloatTensor(spatial)
-        stats_tensor = torch.FloatTensor(stats)
-        label_tensor = torch.LongTensor([label_encoded])[0]
-
-        return traj_tensor, spatial_tensor, stats_tensor, label_tensor
+        # spatial已融合进traj，placeholder不需要归一化
+        placeholder = np.zeros((traj.shape[0], 1), dtype=np.float32)
+        return (torch.FloatTensor(traj),
+                torch.FloatTensor(placeholder),
+                torch.FloatTensor(stats),
+                torch.LongTensor([label_encoded])[0])
 
 
 def main():
@@ -84,7 +82,7 @@ def main():
     ]
 
     print("\n" + "=" * 60)
-    print("Exp2 模型评估 (轨迹 + 基础OSM空间特征)")
+    print("Exp2 模型评估 (点级融合：轨迹 + OSM空间特征)")
     print("=" * 60)
     print(f"设备: {DEVICE}")
 
@@ -125,18 +123,28 @@ def main():
     stats_mean = norm_params.get('stats_mean', None)
     stats_std = norm_params.get('stats_std', None)
 
+    # 兼容处理：支持新旧 checkpoint 格式
+    input_dim = config.get('input_dim', config.get('trajectory_feature_dim', 21))
+    
+    # 如果是融合输入，spatial_dim 应该是 1（占位符）
+    if config.get('fused_input', False):
+        spatial_dim = 1
+    else:
+        spatial_dim = config.get('spatial_feature_dim', 1)
+
     print(f"   模型配置:")
-    print(f"     - 轨迹特征维度: {config['trajectory_feature_dim']}")
-    print(f"     - 空间特征维度: {config['spatial_feature_dim']}")
+    print(f"     - 输入特征维度（融合后）: {input_dim}")
+    print(f"     - 融合方式: 点级拼接 (9轨迹 + 12空间)")
+    print(f"     - 空间特征维度（占位）: {spatial_dim}")
     print(f"     - 隐藏层维度: {config['hidden_dim']}")
     print(f"     - 层数: {config['num_layers']}")
     print(f"     - 类别数: {config['num_classes']}")
     print(f"     - 类别: {list(class_names)}")
 
-    # 动态初始化模型 (Exp2: 9 + 11 维)
+    # 动态初始化模型
     model = TransportationModeClassifier(
-        trajectory_feature_dim=config['trajectory_feature_dim'],
-        spatial_feature_dim=config['spatial_feature_dim'],
+        trajectory_feature_dim=input_dim,
+        spatial_feature_dim=spatial_dim,
         hidden_dim=config['hidden_dim'],
         num_layers=config['num_layers'],
         num_classes=config['num_classes'],
@@ -318,7 +326,7 @@ def main():
             cm, annot=True, fmt='d', cmap='Greens',
             xticklabels=class_names, yticklabels=class_names
         )
-        plt.title('Exp2 Confusion Matrix (Trajectory + Basic Spatial Features)', fontsize=14)
+        plt.title('Exp2 Confusion Matrix (Point-level Fusion: Trajectory + OSM Spatial Features)', fontsize=14)
         plt.xlabel('Predicted')
         plt.ylabel('True')
         plt.tight_layout()

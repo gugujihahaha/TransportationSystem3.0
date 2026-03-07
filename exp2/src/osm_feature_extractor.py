@@ -327,6 +327,19 @@ class OsmSpatialExtractor:
                 self._grid_cache[grid_key] = uncached_features[i]
                 spatial_features[idx] = uncached_features[i]
 
+        # 统计有效覆盖率（只统计前6列道路类型，不包括unknown）
+        road_hits = np.sum(spatial_features[:, :6].sum(axis=1) > 0)  # 前6列有非零值
+        total = spatial_features.shape[0]
+        coverage = road_hits / total
+        if not hasattr(self, '_coverage_stats'):
+            self._coverage_stats = []
+        self._coverage_stats.append(coverage)
+
+        # 每处理100条轨迹打印一次
+        if len(self._coverage_stats) % 100 == 0:
+            avg_cov = np.mean(self._coverage_stats[-100:])
+            print(f"   [OSM覆盖率] 最近100条平均: {avg_cov:.1%}  (unknown率: {1-avg_cov:.1%})")
+
         return spatial_features.astype(np.float32)
 
     def _get_grid_key(self, lat: float, lon: float) -> Tuple[int, int]:
