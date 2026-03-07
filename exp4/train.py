@@ -1,15 +1,15 @@
 """
-训练脚本 (Exp4 - CCA 对比学习)
+训练脚本 (Exp4 - 标签平滑 + Focal Loss)
 
 与 exp2 的关系：
     - 特征完全复用 exp2 的点级融合特征 (21维)
-    - 新增 CCA 对比学习损失（InfoNCE）
-    - 控制变量：特征维度、数据划分、超参数与 exp2 一致
+    - 模型架构与 exp2 完全一致
+    - 唯一区别：使用 LabelSmoothingFocalLoss 替换 CrossEntropyLoss
 
 核心思想：
-    - 将 21 维特征拆分为轨迹表示（9 维）和空间上下文表示（12 维）
-    - 通过 InfoNCE 对比损失对齐两个表示
-    - 主路径用于分类，辅路径仅用于对比学习
+    - 标签平滑 (ε=0.1) 防止过拟合
+    - Focal Loss (γ=2) 针对难分类样本加大惩罚
+    - 专门针对 Bus 和 Car&taxi 的混淆问题
 
 已修复的Bug：
     1. oversample 移到 split 之后，只对训练集做，避免测试集数据泄露
@@ -18,7 +18,6 @@
     4. plateau 在 warmup 结束时 reset 内部计数器
     5. labels_stratify 取正确的索引（-1）
     6. evaluate.py 的 split 方式与 train.py 保持一致（70/10/20）
-    7. patience 使用 args.patience，不硬编码
 """
 import os
 import sys
@@ -30,7 +29,6 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
@@ -46,15 +44,23 @@ os.chdir(SCRIPT_DIR)
 # ==============================================================
 
 from common import (BaseGeoLifePreprocessor, Exp4DataAdapter,
-                    compute_class_weights, evaluate)
+                    compute_class_weights, evaluate, train_epoch)
+
+# exp2 专用模块（复用模型）
+from exp2.src.model import TransportationModeClassifier
 
 # exp4 专用模块
-from src.model_cca import CCATransportationClassifier
+from src.focal_loss import LabelSmoothingFocalLoss
 
 # ========================== 特征维度常量 ==========================
 TRAJECTORY_FEATURE_DIM = 21   # 复用exp2：9轨迹+12空间，点级融合
 SEGMENT_STATS_DIM      = 18
 FIXED_SEQUENCE_LENGTH  = 50
+
+# ========================== 缓存配置 ==========================
+CACHE_DIR = 'cache'
+PROCESSED_FEATURE_CACHE = os.path.join(CACHE_DIR, 'processed_features_exp4.pkl')
+EXP2_FEATURE_CACHE = os.path.join('..', 'exp2', 'cache', 'processed_features.pkl')
 # ==================================================================
 
 
@@ -91,16 +97,9 @@ def compute_feature_stats(segments):
 
     return traj_mean, traj_std, stats_mean, stats_std
 
-# ========================== 缓存配置 ==========================
-CACHE_DIR = 'cache'
-EXP2_FEATURE_CACHE = os.path.join(PARENT_DIR, 'exp2', 'cache', 'processed_features.pkl')
-PROCESSED_FEATURE_CACHE = os.path.join(CACHE_DIR, 'processed_features_exp4.pkl')
-os.makedirs(CACHE_DIR, exist_ok=True)
-# ==============================================================
 
-
-class TrajectoryDatasetForCCA(Dataset):
-    """轨迹数据集（CCA 版本）"""
+class TrajectoryDatasetExp4(Dataset):
+    """轨迹数据集（Exp4 版本）"""
 
     def __init__(self, all_features,
                  traj_mean=None, traj_std=None,
@@ -133,70 +132,14 @@ class TrajectoryDatasetForCCA(Dataset):
                 torch.LongTensor([label])[0])
 
 
-def train_epoch_cca(model, dataloader, criterion, optimizer, device,
-                   max_grad_norm=1.0, context_loss_weight=0.1):
-    """
-    训练一个 epoch（CCA 版本）
-
-    Args:
-        model: 模型
-        dataloader: 数据加载器
-        criterion: 分类损失函数
-        optimizer: 优化器
-        device: 设备
-        max_grad_norm: 梯度裁剪阈值
-        context_loss_weight: CCA 损失权重
-
-    Returns:
-        avg_loss: 平均损失
-        accuracy: 准确率
-    """
-    model.train()
-    total_loss, correct, total = 0.0, 0, 0
-
-    batch_count = 0
-    for batch in tqdm(dataloader, desc="Training", leave=False):
-        batch_count += 1
-        traj, stats, labels = batch
-        traj = traj.to(device)
-        stats = stats.to(device)
-        labels = labels.to(device)
-
-        optimizer.zero_grad()
-
-        # CCA 模式：返回 logits, traj_z, ctx_z
-        logits, traj_z, ctx_z = model(traj, segment_stats=stats, return_context=True)
-
-        # 计算分类损失
-        cls_loss = criterion(logits, labels)
-
-        # 计算 InfoNCE 对比损失
-        infonce_loss = model.compute_infonce_loss(traj_z, ctx_z)
-
-        # 总损失
-        loss = cls_loss + context_loss_weight * infonce_loss
-
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
-        optimizer.step()
-
-        total_loss += loss.item()
-        preds = torch.argmax(logits, dim=1)
-        correct += (preds == labels).sum().item()
-        total += labels.size(0)
-
-    print(f"[EPOCH END] 实际训练 batches: {batch_count}, 样本数: {total}")
-    return total_loss / max(len(dataloader), 1), correct / max(total, 1)
-
-
 def load_data(geolife_root: str, osm_path: str, weather_path: str,
               max_users=None, use_base_data=True, cleaning_mode='balanced'):
     """
     加载数据策略：
-    1. 直接加载 exp2 的特征缓存（exp2/cache/processed_features.pkl）
-    2. exp2 缓存格式: (all_data, label_encoder, cleaning_stats)
-    3. exp4 数据格式: (traj_21dim, stats_18dim, label_encoded)
-    4. CCA 的 context 直接从 traj_21 拆分（前9维=轨迹，后12维=空间）
+    1. 优先检查 exp4 完整缓存
+    2. 若无缓存，直接加载 exp2 的特征缓存
+    3. exp2 缓存格式: (all_data, label_encoder, cleaning_stats)
+    4. exp4 数据格式: (traj_21dim, stats_18dim, label_encoded)
     """
 
     # ===== 优先检查 exp4 完整缓存 =====
@@ -211,28 +154,28 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
             print(f"⚠️ 缓存加载失败 ({e})，重新构建")
 
     # ===== 加载 exp2 的特征缓存 =====
-    print(f"\n========== 加载 Exp2 特征 (复用) ==========")
+    print(f"\n========== 将 Exp2 特征 (复用) ==========")
     if not os.path.exists(EXP2_FEATURE_CACHE):
         raise FileNotFoundError(
             f"找不到 exp2 特征缓存: {EXP2_FEATURE_CACHE}\n"
             "请先确保 exp2/train.py 已经运行并生成缓存。"
         )
-    
+
     with open(EXP2_FEATURE_CACHE, 'rb') as f:
         exp2_raw, label_encoder, cleaning_stats = pickle.load(f)
-    
+
     print(f"✅ exp2 特征加载完成: {len(exp2_raw)} 个样本")
-    
+
     # 验证 exp2 缓存格式
     if len(exp2_raw) > 0:
         print(f"exp2样本格式: {type(exp2_raw[0])}, 长度: {len(exp2_raw[0])}")
         print(f"exp2样本0的形状: {[x.shape if hasattr(x, 'shape') else type(x) for x in exp2_raw[0]]}")
-    
+
     # ===== 转换数据格式 =====
     # exp2 格式: (traj_21dim, placeholder, stats_18dim, label_encoded)
     # exp4 格式: (traj_21dim, stats_18dim, label_encoded)
     print(f"\n========== 转换数据格式 ==========")
-    
+
     all_data = []
     for traj_21, _, stats, label_encoded in exp2_raw:
         # NaN 过滤
@@ -240,10 +183,10 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
             continue
         if np.isnan(stats).any() or np.isinf(stats).any():
             continue
-        
+
         # exp4 格式: (traj_21dim, stats_18dim, label_encoded)
         all_data.append((traj_21, stats, label_encoded))
-    
+
     print(f"✅ 数据转换完成: {len(all_data)} 个样本")
 
     # 保存缓存
@@ -256,37 +199,57 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
 
 
 def main():
-    parser = argparse.ArgumentParser(description='训练 Exp4 (轨迹+空间+CCA)')
-    parser.add_argument('--geolife_root', default='../data/Geolife Trajectories 1.3')
-    parser.add_argument('--osm_path',     default='../data/exp2.geojson')
-    parser.add_argument('--weather_path', default='../data/beijing_weather_daily_2007_2012.csv')
-    parser.add_argument('--use_base_data', action='store_true', default=True)
-    parser.add_argument('--cleaning_mode', default='balanced',
-                        choices=['strict', 'balanced', 'gentle'])
-    parser.add_argument('--max_users',  type=int,   default=None)
-    parser.add_argument('--batch_size', type=int,   default=32)
-    parser.add_argument('--epochs',     type=int,   default=150)
-    parser.add_argument('--lr',         type=float, default=1e-4)   # 与exp1/exp2/exp3一致
-    parser.add_argument('--hidden_dim', type=int,   default=128)
-    parser.add_argument('--num_layers', type=int,   default=2)
-    parser.add_argument('--dropout',    type=float, default=0.3)
-    parser.add_argument('--patience',   type=int,   default=25)     # 与exp1/exp2/exp3一致
-    parser.add_argument('--save_dir',   default='checkpoints')
-    parser.add_argument('--context_loss_weight', type=float, default=0.1)
-    parser.add_argument('--temperature', type=float, default=0.07)
+    parser = argparse.ArgumentParser(description='Exp4: 标签平滑 + Focal Loss')
+    parser.add_argument('--geolife_root', type=str, default='../data/Geolife Trajectories 1.3',
+                       help='Geolife 数据根目录')
+    parser.add_argument('--osm_path', type=str, default='../data/osm_data',
+                       help='OSM 数据路径')
+    parser.add_argument('--weather_path', type=str, default='../data/weather_data',
+                       help='天气数据路径')
+    parser.add_argument('--max_users', type=int, default=None,
+                       help='最大用户数（用于快速测试）')
+    parser.add_argument('--use_base_data', action='store_true',
+                       help='是否使用 base_segments.pkl 作为基础数据')
+    parser.add_argument('--cleaning_mode', type=str, default='balanced',
+                       choices=['balanced', 'strict'],
+                       help='数据清洗模式')
+    parser.add_argument('--epochs', type=int, default=150,
+                       help='训练轮数')
+    parser.add_argument('--batch_size', type=int, default=32,
+                       help='批次大小')
+    parser.add_argument('--lr', type=float, default=1e-4,
+                       help='学习率')
+    parser.add_argument('--hidden_dim', type=int, default=128,
+                       help='隐藏层维度')
+    parser.add_argument('--num_layers', type=int, default=2,
+                       help='LSTM 层数')
+    parser.add_argument('--dropout', type=float, default=0.3,
+                       help='Dropout 比率')
+    parser.add_argument('--patience', type=int, default=25,
+                       help='Early stopping patience')
+    parser.add_argument('--save_dir', type=str, default='checkpoints',
+                       help='模型保存目录')
+    parser.add_argument('--device', type=str, default='cpu',
+                       choices=['cpu', 'cuda'],
+                       help='设备')
+
     args = parser.parse_args()
 
-    DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+    DEVICE = torch.device(args.device if torch.cuda.is_available() else 'cpu')
 
-    print("\n" + "=" * 80)
-    print("Exp4 训练 (轨迹21维 + CCA对比学习)")
+    print("=" * 80)
+    print("Exp4 训练 (标签平滑 + Focal Loss)")
     print(f"设备: {DEVICE} | lr: {args.lr} | patience: {args.patience}")
     print("=" * 80)
 
     # 加载数据
     all_data, label_encoder, cleaning_stats = load_data(
-        args.geolife_root, args.osm_path, args.weather_path,
-        args.max_users, args.use_base_data, args.cleaning_mode
+        args.geolife_root,
+        args.osm_path,
+        args.weather_path,
+        max_users=args.max_users,
+        use_base_data=args.use_base_data,
+        cleaning_mode=args.cleaning_mode
     )
 
     # 数据划分（与exp1/exp2/exp3完全一致）
@@ -307,13 +270,19 @@ def main():
     # 转换格式以适配 oversample 接口：需要 (feat, feat, label_str, ...) 格式
     # oversample 需要字符串标签，临时转回
     train_with_str = [(t, s, label_encoder.inverse_transform([l])[0])
-                      for t, s, l in train_segments_raw]
+                     for t, s, l in train_segments_raw]
+
+    # oversample
     train_oversampled = BaseGeoLifePreprocessor.oversample_minority_classes(
-        train_with_str, target_ratio=0.3, minority_classes=['Subway', 'Train']
+        train_with_str,
+        target_ratio=0.3,
+        minority_classes=['Subway', 'Train']
     )
     # 转回编码标签
     train_oversampled = [(t, s, label_encoder.transform([l])[0])
-                         for t, s, l in train_oversampled]
+                        for t, s, l in train_oversampled]
+
+    train_labels = [item[-1] for item in train_oversampled]
 
     print(f"✅ 数据划分完成 (oversample仅对训练集):")
     print(f"  Train (oversampled): {len(train_oversampled)}")
@@ -332,49 +301,49 @@ def main():
     }
     print(f"✅ 归一化统计量计算完成（基于 {len(train_oversampled)} 个训练样本）")
 
-    # 创建数据集
-    train_dataset = TrajectoryDatasetForCCA(
+    # 创建 Dataset
+    train_dataset = TrajectoryDatasetExp4(
         train_oversampled,
         traj_mean=traj_mean, traj_std=traj_std,
         stats_mean=stats_mean, stats_std=stats_std
     )
-    val_dataset = TrajectoryDatasetForCCA(
+    val_dataset = TrajectoryDatasetExp4(
         [all_data[i] for i in val_indices],
         traj_mean=traj_mean, traj_std=traj_std,
         stats_mean=stats_mean, stats_std=stats_std
     )
-    test_dataset = TrajectoryDatasetForCCA(
+    test_dataset = TrajectoryDatasetExp4(
         [all_data[i] for i in test_indices],
         traj_mean=traj_mean, traj_std=traj_std,
         stats_mean=stats_mean, stats_std=stats_std
     )
 
+    # 创建 DataLoader
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
-                          shuffle=True, num_workers=0)
+                           shuffle=True, num_workers=0)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size,
-                        shuffle=False, num_workers=0)
-    test_loader = DataLoader(test_dataset, batch_size=args.batch_size,
                          shuffle=False, num_workers=0)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size,
+                          shuffle=False, num_workers=0)
 
     print(f"  Train batches: {len(train_loader)} | Val batches: {len(val_loader)}")
 
-    # 打印类别分布
+    # 类别分布
     print(f"\n类别分布 (训练集, oversampled):")
-    train_labels = [l for _, _, l in train_oversampled]
+    from collections import Counter
+    label_counts = Counter(train_labels)
     for cls in label_encoder.classes_:
-        count = sum(1 for l in train_labels if l == label_encoder.transform([cls])[0])
+        count = label_counts.get(label_encoder.transform([cls])[0], 0)
         print(f"  {cls}: {count}")
 
-    # 创建模型
-    model = CCATransportationClassifier(
-        trajectory_feature_dim=TRAJECTORY_FEATURE_DIM,
-        segment_stats_dim=SEGMENT_STATS_DIM,
+    # 创建模型（与 exp2 完全一致）
+    model = TransportationModeClassifier(
+        trajectory_feature_dim=21,
+        segment_stats_dim=18,
         hidden_dim=args.hidden_dim,
         num_layers=args.num_layers,
         num_classes=len(label_encoder.classes_),
-        dropout=args.dropout,
-        context_loss_weight=args.context_loss_weight,
-        temperature=args.temperature
+        dropout=args.dropout
     ).to(DEVICE)
 
     print(f"\n模型参数量: {sum(p.numel() for p in model.parameters()):,}")
@@ -407,8 +376,17 @@ def main():
     # Early stopping 计数器
     epochs_no_improve = 0
 
-    # 损失函数
-    criterion = nn.CrossEntropyLoss(weight=class_weights)
+    # 连续 NaN 检测计数器
+    consecutive_nan_count = 0
+    MAX_CONSECUTIVE_NAN = 3  # 连续3次NaN则停止训练
+
+    # 损失函数（标签平滑 + Focal Loss）
+    criterion = LabelSmoothingFocalLoss(
+        num_classes=len(label_encoder.classes_),
+        gamma=2.0,
+        smoothing=0.1,
+        weight=class_weights
+    )
 
     # Checkpoint 路径
     os.makedirs(args.save_dir, exist_ok=True)
@@ -458,9 +436,8 @@ def main():
             current_lr = optimizer.param_groups[0]['lr']
 
         # 训练一个 epoch
-        train_loss, train_acc = train_epoch_cca(
-            model, train_loader, criterion, optimizer, DEVICE,
-            context_loss_weight=args.context_loss_weight
+        train_loss, train_acc = train_epoch(
+            model, train_loader, criterion, optimizer, DEVICE
         )
 
         # NaN 检测
@@ -486,7 +463,7 @@ def main():
         # 验证
         val_loss, val_acc, _, _ = evaluate(
             model, val_loader, criterion, DEVICE,
-            label_names=None, use_cca=False  # 验证时不计算 CCA 损失
+            label_names=None  # 验证时不计算 CCA 损失
         )
 
         # 学习率调度
@@ -514,14 +491,15 @@ def main():
                 'val_acc': val_acc,
                 'norm_params': norm_params,
                 'model_config': {
-                    'trajectory_feature_dim': TRAJECTORY_FEATURE_DIM,
-                    'segment_stats_dim': SEGMENT_STATS_DIM,
+                    'input_dim': 21,
+                    'segment_stats_dim': 18,
                     'hidden_dim': args.hidden_dim,
                     'num_layers': args.num_layers,
                     'num_classes': len(label_encoder.classes_),
                     'dropout': args.dropout,
-                    'context_loss_weight': args.context_loss_weight,
-                    'temperature': args.temperature,
+                    'loss_type': 'label_smoothing_focal',
+                    'focal_gamma': 2.0,
+                    'label_smoothing': 0.1,
                 }
             }, CHECKPOINT_PATH)
             print("✓ 保存最佳模型（基于验证集）")

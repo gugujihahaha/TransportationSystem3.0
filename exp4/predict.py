@@ -1,5 +1,5 @@
 """
-预测脚本 (Exp4 - CCA 对比学习)
+预测脚本 (Exp4 - 标签平滑 + Focal Loss)
 
 使用训练好的模型对单个样本进行预测
 """
@@ -17,7 +17,8 @@ sys.path.insert(0, PARENT_DIR)
 os.chdir(SCRIPT_DIR)
 # ==============================================================
 
-from src.model_cca import CCATransportationClassifier
+# exp2 专用模块（复用模型）
+from exp2.src.model import TransportationModeClassifier
 
 # 默认模型路径
 DEFAULT_CHECKPOINT_PATH = os.path.join('checkpoints', 'exp4_model.pth')
@@ -46,15 +47,13 @@ def predict(traj_features, segment_stats, checkpoint_path=DEFAULT_CHECKPOINT_PAT
     norm_params = checkpoint['norm_params']
 
     # 创建模型
-    model = CCATransportationClassifier(
-        trajectory_feature_dim=model_config.get('trajectory_feature_dim', 21),
+    model = TransportationModeClassifier(
+        trajectory_feature_dim=model_config.get('input_dim', 21),
         segment_stats_dim=model_config.get('segment_stats_dim', 18),
         hidden_dim=model_config.get('hidden_dim', 128),
         num_layers=model_config.get('num_layers', 2),
         num_classes=model_config.get('num_classes', 6),
-        dropout=model_config.get('dropout', 0.3),
-        context_loss_weight=model_config.get('context_loss_weight', 0.1),
-        temperature=model_config.get('temperature', 0.07)
+        dropout=model_config.get('dropout', 0.3)
     ).to(device)
 
     # 加载权重
@@ -71,7 +70,7 @@ def predict(traj_features, segment_stats, checkpoint_path=DEFAULT_CHECKPOINT_PAT
 
     # 预测
     with torch.no_grad():
-        logits = model(traj_tensor, segment_stats=stats_tensor, return_context=False)
+        logits = model(traj_tensor, segment_stats=stats_tensor)
         probs = F.softmax(logits, dim=1).squeeze(0).cpu().numpy()  # (num_classes,)
 
     # 获取预测结果
