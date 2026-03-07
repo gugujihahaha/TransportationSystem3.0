@@ -348,13 +348,11 @@ def main():
             prev = torch.load(CHECKPOINT_PATH, map_location=args.device, weights_only=False)
             if 'val_loss' in prev:
                 best_val_loss = prev['val_loss']
-            if 'resume' in prev and prev['resume']:
+            if prev.get('model_config', {}).get('num_classes') == len(label_encoder.classes_):
                 model.load_state_dict(prev['model_state_dict'])
-                optimizer.load_state_dict(prev['optimizer_state_dict'])
-                start_epoch = prev['epoch'] + 1
-                print(f"✅ 从 epoch {start_epoch} 继续训练，历史最佳 val_loss={best_val_loss:.4f}")
+                print(f"✅ 加载历史最佳权重，val_loss={best_val_loss:.4f}，从 epoch 0 重新训练")
             else:
-                print(f"✅ 检测到历史最佳模型，val_loss={best_val_loss:.4f}，新训练需超过此值才覆盖")
+                print(f"⚠️ 模型类别数不匹配，从零开始")
         except Exception as e:
             print(f"⚠️ 历史模型加载失败（{e}），从零开始")
 

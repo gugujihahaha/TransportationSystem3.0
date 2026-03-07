@@ -6,7 +6,7 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import classification_report
+from sklearn.metrics import classification_report, confusion_matrix
 from tqdm import tqdm
 import pickle
 import warnings
@@ -114,17 +114,6 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
             pickle.dump(spatial_extractor, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     # 2. 数据准备
-    # A. 最终特征缓存检查
-    if os.path.exists(PROCESSED_FEATURE_CACHE_PATH):
-        print(f"\n========== 阶段 2: 最终特征加载 (从缓存) ==========")
-        try:
-            with open(PROCESSED_FEATURE_CACHE_PATH, 'rb') as f:
-                with torch.serialization.safe_globals({LabelEncoder: LabelEncoder}):
-                    all_features_and_labels, label_encoder, cleaning_stats = pickle.load(f)
-            return all_features_and_labels, spatial_extractor, label_encoder, cleaning_stats
-        except Exception:
-            pass
-
     processed_segments = None
     label_encoder = None
     cleaning_stats = {}
@@ -139,6 +128,12 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
 
         TARGET_MODES = ['Walk', 'Bike', 'Bus', 'Car & taxi', 'Train', 'Subway']
         processed_segments = [s for s in processed_segments if s[2] in TARGET_MODES]
+
+        processed_segments = BaseGeoLifePreprocessor.oversample_minority_classes(
+            processed_segments,
+            target_ratio=0.3,
+            minority_classes=['Subway', 'Train']
+        )
 
         all_labels_str = [label for _, _, label in processed_segments]
         label_encoder = LabelEncoder().fit(all_labels_str)
@@ -225,7 +220,7 @@ def main():
     parser.add_argument('--max_users', type=int, default=None)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--epochs', type=int, default=50)
-    parser.add_argument('--lr', type=float, default=0.001)
+    parser.add_argument('--lr', type=float, default=0.0003)
     parser.add_argument('--hidden_dim', type=int, default=128)
     parser.add_argument('--num_layers', type=int, default=2)
     parser.add_argument('--dropout', type=float, default=0.3)
@@ -388,13 +383,11 @@ def main():
             prev = torch.load(CHECKPOINT_PATH, map_location=args.device, weights_only=False)
             if 'val_loss' in prev:
                 best_val_loss = prev['val_loss']
-            if 'resume' in prev and prev['resume']:
+            if prev.get('model_config', {}).get('num_classes') == len(label_encoder.classes_):
                 model.load_state_dict(prev['model_state_dict'])
-                optimizer.load_state_dict(prev['optimizer_state_dict'])
-                start_epoch = prev['epoch'] + 1
-                print(f"✅ 从 epoch {start_epoch} 继续训练，历史最佳 val_loss={best_val_loss:.4f}")
+                print(f"✅ 加载历史最佳权重，val_loss={best_val_loss:.4f}，从 epoch 0 重新训练")
             else:
-                print(f"✅ 检测到历史最佳模型，val_loss={best_val_loss:.4f}，新训练需超过此值才覆盖")
+                print(f"⚠️ 模型类别数不匹配，从零开始")
         except Exception as e:
             print(f"⚠️ 历史模型加载失败（{e}），从零开始")
 
@@ -473,7 +466,7 @@ def main():
     print("最终测试集评估")
     print("=" * 80)
 
-    test_loss, test_report, _, _ = evaluate(model, test_loader, criterion, args.device, label_encoder.classes_)
+    test_loss, test_report, all_preds, all_labels = evaluate(model, test_loader, criterion, args.device, label_encoder.classes_)
     test_acc = test_report['accuracy']
 
     print(f"\nTest Loss: {test_loss:.4f} | Test Acc: {test_acc:.4f}")
@@ -482,6 +475,19 @@ def main():
         if cls in test_report:
             metrics = test_report[cls]
             print(f"  {cls:15s}: P={metrics['precision']:.4f}, R={metrics['recall']:.4f}, F1={metrics['f1-score']:.4f}")
+
+    cm = confusion_matrix(all_labels, all_preds)
+    print("\n混淆矩阵（行=真实，列=预测）:")
+    classes = label_encoder.classes_
+    print(f"{'':15s}", end="")
+    for c in classes:
+        print(f"{c[:6]:>8s}", end="")
+    print()
+    for i, row in enumerate(cm):
+        print(f"{classes[i]:15s}", end="")
+        for val in row:
+            print(f"{val:8d}", end="")
+        print()
 
 if __name__ == '__main__':
     warnings.simplefilter(action='ignore', category=FutureWarning)

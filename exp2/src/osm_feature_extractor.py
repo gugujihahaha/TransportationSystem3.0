@@ -372,7 +372,7 @@ class OsmSpatialExtractor:
         ], axis=1)
 
     def _batch_query_road_types(self, coords: np.ndarray,
-                                 max_distance: float = 50.0) -> np.ndarray:
+                                 max_distance: float = 150.0) -> np.ndarray:
         """
         批量查询道路类型。
 
@@ -411,7 +411,7 @@ class OsmSpatialExtractor:
         return road_type_features
 
     def _batch_query_pois(self, coords: np.ndarray,
-                          max_distance: float = 200.0) -> np.ndarray:
+                          max_distance: float = 300.0) -> np.ndarray:
         """
         批量查询 POI 信息。
 
