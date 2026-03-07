@@ -9,6 +9,7 @@ from tqdm import tqdm
 from abc import ABC, abstractmethod
 
 from common.trajectory_cleaner import TrajectoryCleaner
+from common.base_preprocessor import BaseGeoLifePreprocessor
 
 
 class BaseDataAdapter(ABC):
@@ -319,7 +320,7 @@ class BaseDataAdapter(ABC):
     def _print_label_distribution(self, processed: List[Tuple]):
         """打印标签分布"""
         from collections import Counter
-        labels = [item[2] for item in processed]
+        labels = [item[3] for item in processed]
         counts = Counter(labels)
         print(f"\n📊 标签分布 (共 {len(processed)} 条):")
         for label in sorted(counts.keys()):

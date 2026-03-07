@@ -22,7 +22,7 @@ from geopy.distance import geodesic
 import warnings
 from tqdm import tqdm
 
-from common.geolife_data_loader import BaseGeoLifeDataLoader
+from common.base_preprocessor import BaseGeoLifeDataLoader
 
 pd.options.mode.chained_assignment = None
 

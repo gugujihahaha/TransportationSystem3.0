@@ -186,10 +186,11 @@ def main():
     y_true, y_pred, y_probs = [], [], []
 
     with torch.no_grad():
-        for x, y in tqdm(test_loader, desc="Evaluation Progress", leave=True):
+        for x, stats, y in tqdm(test_loader, desc="Evaluation Progress", leave=True):
             try:
                 x = x.to(DEVICE)
-                logits = model(x)
+                stats = stats.to(DEVICE)
+                logits = model(x, segment_stats=stats)
                 probs = torch.softmax(logits, dim=1)
                 preds = torch.argmax(logits, dim=1)
 

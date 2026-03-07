@@ -44,13 +44,36 @@ PROCESSED_FEATURE_CACHE_PATH = os.path.join(CACHE_DIR, 'processed_features.pkl')
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 class TrajectoryDataset(Dataset):
-    def __init__(self, all_features_and_labels: List[Tuple[np.ndarray, np.ndarray, np.ndarray, int]]):
+    def __init__(self, all_features_and_labels: List[Tuple[np.ndarray, np.ndarray, np.ndarray, int]],
+                 traj_mean=None, traj_std=None,
+                 spatial_mean=None, spatial_std=None,
+                 stats_mean=None, stats_std=None):
         self.data = all_features_and_labels
+        self.traj_mean = traj_mean
+        self.traj_std = traj_std
+        self.spatial_mean = spatial_mean
+        self.spatial_std = spatial_std
+        self.stats_mean = stats_mean
+        self.stats_std = stats_std
+
     def __len__(self):
         return len(self.data)
+
     def __getitem__(self, idx):
         trajectory_features, spatial_features, segment_stats, label_encoded = self.data[idx]
-        return torch.FloatTensor(trajectory_features), torch.FloatTensor(spatial_features), torch.FloatTensor(segment_stats), torch.LongTensor([label_encoded])[0]
+
+        # 归一化
+        if self.traj_mean is not None:
+            trajectory_features = (trajectory_features - self.traj_mean) / self.traj_std
+        if self.spatial_mean is not None:
+            spatial_features = (spatial_features - self.spatial_mean) / self.spatial_std
+        if self.stats_mean is not None:
+            segment_stats = (segment_stats - self.stats_mean) / self.stats_std
+
+        return (torch.FloatTensor(trajectory_features),
+                torch.FloatTensor(spatial_features),
+                torch.FloatTensor(segment_stats),
+                torch.LongTensor([label_encoded])[0])
 
 # ===== ✅ 修改 2：load_data 函数完整更新 =====
 def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_data: bool = True, cleaning_mode: str = 'balanced'):
@@ -115,7 +138,7 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
         processed_segments = BaseGeoLifePreprocessor.oversample_minority_classes(
             processed_segments,
             target_ratio=0.3,
-            minority_classes=['Subway', 'Airplane']
+            minority_classes=['Subway', 'Train']
         )
 
         all_labels_str = [label for _, label in processed_segments]
@@ -150,14 +173,14 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
                     except: continue
 
             processed_segments = preprocess_trajectory_segments(all_segments, min_length=10)
-            final_seven_modes = {'Walk', 'Bike', 'Bus', 'Car & taxi', 'Train', 'Airplane', 'Other'}
-            processed_segments = [(t, l) for t, l in processed_segments if l in final_seven_modes]
+            final_six_modes = {'Walk', 'Bike', 'Bus', 'Car & taxi', 'Train', 'Subway'}
+            processed_segments = [(t, l) for t, l in processed_segments if l in final_six_modes]
 
             # 对少数类进行数据增强（仅对训练数据有效，此处对全量做增强后再split）
             processed_segments = BaseGeoLifePreprocessor.oversample_minority_classes(
                 processed_segments,
                 target_ratio=0.3,
-                minority_classes=['Subway', 'Airplane']
+                minority_classes=['Subway', 'Train']
             )
 
             label_encoder = LabelEncoder().fit([l for _, l in processed_segments])
@@ -222,37 +245,61 @@ def main():
 
     if not all_features_and_labels: return
 
-    # ========================================================
-    # ✅ 数据划分：一次性划分 70% 训练 / 10% 验证 / 20% 测试
-    # ========================================================
-    dataset = TrajectoryDataset(all_features_and_labels)
+    # 第一步：先划分索引（不需要 dataset）
+    all_indices = np.arange(len(all_features_and_labels))
+    labels_stratify = [label_encoder.inverse_transform([label_encoded])[0] for _, _, label_encoded in all_features_and_labels]
+
+    train_indices, temp_indices = train_test_split(
+        all_indices, test_size=0.3, random_state=42,
+        stratify=labels_stratify
+    )
+    temp_labels = [labels_stratify[i] for i in temp_indices]
+    val_indices, test_indices = train_test_split(
+        temp_indices, test_size=0.6667, random_state=42,
+        stratify=temp_labels
+    )
+
+    # 第二步：用训练集计算归一化统计量
+    from common.train_utils import compute_feature_stats
+    train_segments = [all_features_and_labels[i] for i in train_indices]
+    traj_list = [s[0] for s in train_segments]
+    spatial_list = [s[1] for s in train_segments]
+    stats_list = [s[2] for s in train_segments]
+
+    traj_all = np.vstack(traj_list)
+    spatial_all = np.vstack(spatial_list)
+    stats_all = np.vstack(stats_list)
+
+    traj_mean = traj_all.mean(axis=0).astype(np.float32)
+    traj_std = traj_all.std(axis=0).astype(np.float32)
+    traj_std = np.where(traj_std < 1e-6, 1.0, traj_std)
+
+    spatial_mean = spatial_all.mean(axis=0).astype(np.float32)
+    spatial_std = spatial_all.std(axis=0).astype(np.float32)
+    spatial_std = np.where(spatial_std < 1e-6, 1.0, spatial_std)
+
+    stats_mean = stats_all.mean(axis=0).astype(np.float32)
+    stats_std = stats_all.std(axis=0).astype(np.float32)
+    stats_std = np.where(stats_std < 1e-6, 1.0, stats_std)
+
+    norm_params = {
+        'traj_mean': traj_mean, 'traj_std': traj_std,
+        'spatial_mean': spatial_mean, 'spatial_std': spatial_std,
+        'stats_mean': stats_mean, 'stats_std': stats_std
+    }
+    print(f"\n✅ 归一化统计量计算完成（基于 {len(train_indices)} 个训练样本）")
+
+    # 第三步：创建带归一化的 dataset
+    dataset = TrajectoryDataset(
+        all_features_and_labels,
+        traj_mean=traj_mean, traj_std=traj_std,
+        spatial_mean=spatial_mean, spatial_std=spatial_std,
+        stats_mean=stats_mean, stats_std=stats_std
+    )
 
     print(f"\n✅ 数据集大小:")
     print(f"  总样本数: {len(dataset)}")
     print(f"  特征样本数: {len(all_features_and_labels)}")
-
-    # ========================================================
-    # ✅ 数据划分：一次性划分 70% 训练 / 10% 验证 / 20% 测试
-    # ========================================================
-    all_indices = np.arange(len(dataset))
-    labels_stratify = [label_encoder.inverse_transform([label_encoded])[0] for _, _, label_encoded in all_features_and_labels]
-
-    # 第一次划分：70% 训练 / 30% 临时（验证+测试）
-    train_indices, temp_indices = train_test_split(
-        all_indices,
-        test_size=0.3,
-        random_state=42,
-        stratify=labels_stratify
-    )
-
-    # 第二次划分：从30%临时中划分出 10% 验证 / 20% 测试
-    temp_labels = [labels_stratify[i] for i in temp_indices]
-    val_indices, test_indices = train_test_split(
-        temp_indices,
-        test_size=0.6667,
-        random_state=42,
-        stratify=temp_labels
-    )
 
     train_loader = DataLoader(
         torch.utils.data.Subset(dataset, train_indices),
@@ -295,7 +342,23 @@ def main():
     ).to(args.device)
 
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
+
+    # Warmup scheduler：前5轮线性升温
+    def warmup_lambda(epoch):
+        warmup_epochs = 5
+        if epoch < warmup_epochs:
+            return (epoch + 1) / warmup_epochs
+        return 1.0
+
+    warmup_scheduler = torch.optim.lr_scheduler.LambdaLR(
+        optimizer, lr_lambda=warmup_lambda
+    )
+
+    # ReduceLROnPlateau：验证损失不改善时降低学习率
+    plateau_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.5, patience=8
+    )
+
     class_weights = compute_class_weights(
         label_encoder,
         all_features_and_labels,
@@ -307,11 +370,42 @@ def main():
     # ========================================================
     # ✅ Early Stopping 配置
     # ========================================================
-    patience = 10
-    best_val_loss = float("inf")
-    epochs_no_improve = 0
+    CHECKPOINT_PATH = "checkpoints/exp2_model.pth"
 
-    for epoch in range(args.epochs):
+    # 加载历史最佳 val_loss 作为初始基准
+    best_val_loss = float("inf")
+    start_epoch = 0
+
+    if os.path.exists(CHECKPOINT_PATH):
+        try:
+            prev = torch.load(CHECKPOINT_PATH, map_location=args.device, weights_only=False)
+            if 'val_loss' in prev:
+                best_val_loss = prev['val_loss']
+            if 'resume' in prev and prev['resume']:
+                model.load_state_dict(prev['model_state_dict'])
+                optimizer.load_state_dict(prev['optimizer_state_dict'])
+                start_epoch = prev['epoch'] + 1
+                print(f"✅ 从 epoch {start_epoch} 继续训练，历史最佳 val_loss={best_val_loss:.4f}")
+            else:
+                print(f"✅ 检测到历史最佳模型，val_loss={best_val_loss:.4f}，新训练需超过此值才覆盖")
+        except Exception as e:
+            print(f"⚠️ 历史模型加载失败（{e}），从零开始")
+
+    epochs_no_improve = 0
+    patience = args.patience
+    os.makedirs("checkpoints", exist_ok=True)
+
+    # ========================================================
+    # ✅ 训练曲线保存到 CSV
+    # ========================================================
+    import csv
+    os.makedirs("logs", exist_ok=True)
+    csv_path = "logs/exp2_training_log.csv"
+    with open(csv_path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['epoch', 'train_loss', 'train_acc', 'val_loss', 'val_acc', 'lr'])
+
+    for epoch in range(start_epoch, args.epochs):
         print(f"\nEpoch {epoch+1}/{args.epochs}")
 
         train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, args.device)
@@ -323,14 +417,38 @@ def main():
         print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f}")
         print(f"Val   Loss: {val_loss:.4f} | Val   Acc: {val_acc:.4f}")
 
+        # 学习率调度
+        if epoch < 5:
+            warmup_scheduler.step()
+        else:
+            plateau_scheduler.step(val_loss)
+
+        current_lr = optimizer.param_groups[0]['lr']
+        print(f"当前学习率: {current_lr:.6f}")
+
+        # 写入训练日志
+        with open(csv_path, 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([epoch+1, f"{train_loss:.4f}", f"{train_acc:.4f}",
+                           f"{val_loss:.4f}", f"{val_acc:.4f}",
+                           f"{optimizer.param_groups[0]['lr']:.6f}"])
+
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             epochs_no_improve = 0
 
-            torch.save({'model_state_dict': model.state_dict(), 'label_encoder': label_encoder, 'model_config': {
-                'trajectory_feature_dim': TRAJECTORY_FEATURE_DIM, 'spatial_feature_dim': SPATIAL_FEATURE_DIM,
-                'hidden_dim': args.hidden_dim, 'num_layers': args.num_layers, 'num_classes': len(label_encoder.classes_), 'dropout': args.dropout
-            }}, os.path.join(args.save_dir, 'exp2_model.pth'))
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'label_encoder': label_encoder,
+                'val_loss': val_loss,
+                'norm_params': norm_params,
+                'resume': True,
+                'model_config': {
+                    'trajectory_feature_dim': TRAJECTORY_FEATURE_DIM, 'spatial_feature_dim': SPATIAL_FEATURE_DIM,
+                    'hidden_dim': args.hidden_dim, 'num_layers': args.num_layers, 'num_classes': len(label_encoder.classes_), 'dropout': args.dropout
+                }
+            }, os.path.join(args.save_dir, 'exp2_model.pth'))
             print("✓ 保存最佳模型（基于验证集）")
         else:
             epochs_no_improve += 1
