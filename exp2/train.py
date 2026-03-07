@@ -36,7 +36,7 @@ SPATIAL_FEATURE_DIM = 11
 FIXED_SEQUENCE_LENGTH = 50
 
 # 缓存配置
-CACHE_DIR = 'cache'
+CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cache')
 SPATIAL_CACHE_PATH = os.path.join(CACHE_DIR, 'spatial_data.pkl')
 SPATIAL_GRID_CACHE_PATH = os.path.join(CACHE_DIR, 'spatial_grid_cache.pkl')
 PROCESSED_SEGMENTS_CACHE_PATH = os.path.join(CACHE_DIR, 'processed_segments.pkl')
@@ -87,7 +87,10 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
         cleaning_mode: 数据清洗模式 ('strict', 'balanced', 'gentle')
     """
 
-    BASE_DATA_PATH = os.path.join(os.path.dirname(geolife_root), 'processed/base_segments.pkl')
+    BASE_DATA_PATH = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'data/processed/base_segments.pkl'
+    )
 
     # 1. 空间特征提取器构建 (保持原有逻辑)
     spatial_extractor = None
@@ -191,13 +194,11 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
     print("\n========== 2.2: 特征提取 ==========")
     feature_extractor = FeatureExtractor(spatial_extractor)
     all_features_and_labels = []
-    for features, label_str in tqdm(processed_segments, desc="[特征提取]"):
+    for traj, stats, label_str in tqdm(processed_segments, desc="[特征提取]"):
         try:
-            trajectory_features = features[:, :9]
-            segment_stats = features[:, 9:]
-            trajectory_features, spatial_features = feature_extractor.extract_features(trajectory_features)
+            trajectory_features, spatial_features = feature_extractor.extract_features(traj)
             label_encoded = label_encoder.transform([label_str])[0]
-            all_features_and_labels.append((trajectory_features, spatial_features, segment_stats, label_encoded))
+            all_features_and_labels.append((trajectory_features, spatial_features, stats, label_encoded))
         except: continue
 
     with open(PROCESSED_FEATURE_CACHE_PATH, 'wb') as f:
@@ -208,8 +209,8 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
 # ===== ✅ 修改 3：main 函数参数接入 =====
 def main():
     parser = argparse.ArgumentParser(description='训练交通方式识别模型 (Exp2 优化版)')
-    parser.add_argument('--geolife_root', type=str, default='./data/Geolife Trajectories 1.3')
-    parser.add_argument('--osm_path', type=str, default='./data/exp2.geojson')
+    parser.add_argument('--geolife_root', type=str, default='../data/Geolife Trajectories 1.3')
+    parser.add_argument('--osm_path', type=str, default='../data/exp2.geojson')
 
     # 新增参数
     parser.add_argument('--use_base_data', action='store_true', default=True, help='使用预处理的基础数据')
@@ -226,7 +227,7 @@ def main():
     parser.add_argument('--dropout', type=float, default=0.3)
     parser.add_argument('--weight_decay', type=float, default=1e-4)
     parser.add_argument('--patience', type=int, default=10)
-    parser.add_argument('--save_dir', type=str, default='checkpoints')
+    parser.add_argument('--save_dir', type=str, default=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'checkpoints'))
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
     parser.add_argument('--clear_cache', action='store_true')
@@ -401,8 +402,9 @@ def main():
     # ✅ 训练曲线保存到 CSV
     # ========================================================
     import csv
-    os.makedirs("logs", exist_ok=True)
-    csv_path = "logs/exp2_training_log.csv"
+    logs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
+    os.makedirs(logs_dir, exist_ok=True)
+    csv_path = os.path.join(logs_dir, 'exp2_training_log.csv')
     with open(csv_path, 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(['epoch', 'train_loss', 'train_acc', 'val_loss', 'val_acc', 'lr'])

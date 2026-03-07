@@ -274,13 +274,11 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
     feature_extractor = FeatureExtractor(spatial_extractor)
     all_features_and_labels = []
 
-    for features, label_str in tqdm(processed_segments, desc="[Exp3 特征提取]"):
+    for traj, stats, label_str in tqdm(processed_segments, desc="[Exp3 特征提取]"):
         try:
-            trajectory_features = features[:, :9]
-            segment_stats = features[:, 9:]
-            trajectory_features, spatial_features = feature_extractor.extract_features(trajectory_features)
+            trajectory_features, spatial_features = feature_extractor.extract_features(traj)
             label_encoded = label_encoder.transform([label_str])[0]
-            all_features_and_labels.append((trajectory_features, spatial_features, segment_stats, label_encoded))
+            all_features_and_labels.append((trajectory_features, spatial_features, stats, label_encoded))
         except Exception:
             continue
 
