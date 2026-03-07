@@ -45,8 +45,7 @@ os.chdir(SCRIPT_DIR)
 # ==============================================================
 
 from common import (BaseGeoLifePreprocessor, Exp4DataAdapter,
-                    train_epoch, evaluate, compute_class_weights)
-from common.train_utils import compute_feature_stats
+                    compute_class_weights)
 
 # exp4 专用模块
 from src.model_cca import CCATransportationClassifier
@@ -56,6 +55,40 @@ TRAJECTORY_FEATURE_DIM = 21   # 复用exp2：9轨迹+12空间，点级融合
 SEGMENT_STATS_DIM      = 18
 FIXED_SEQUENCE_LENGTH  = 50
 # ==================================================================
+
+
+def compute_feature_stats(segments):
+    """
+    计算特征的均值和标准差，用于归一化
+
+    Args:
+        segments: List of (traj_features, stats, label)
+
+    Returns:
+        mean: 均值
+        std: 标准差
+    """
+    traj_list = []
+    stats_list = []
+
+    for item in segments:
+        traj = item[0]    # (50, 21)
+        stats = item[1]   # (18,)
+        traj_list.append(traj)
+        stats_list.append(stats)
+
+    traj_all = np.vstack(traj_list)       # (N*50, 21)
+    stats_all = np.vstack(stats_list)     # (N, 18)
+
+    traj_mean = traj_all.mean(axis=0).astype(np.float32)
+    traj_std  = traj_all.std(axis=0).astype(np.float32)
+    traj_std  = np.where(traj_std < 1e-6, 1.0, traj_std)  # 防止除零
+
+    stats_mean = stats_all.mean(axis=0).astype(np.float32)
+    stats_std  = stats_all.std(axis=0).astype(np.float32)
+    stats_std  = np.where(stats_std < 1e-6, 1.0, stats_std)
+
+    return traj_mean, traj_std, stats_mean, stats_std
 
 # ========================== 缓存配置 ==========================
 CACHE_DIR = 'cache'
@@ -97,6 +130,100 @@ class TrajectoryDatasetForCCA(Dataset):
         return (torch.FloatTensor(traj),
                 torch.FloatTensor(stats_norm),
                 torch.LongTensor([label])[0])
+
+
+def train_epoch_cca(model, dataloader, criterion, optimizer, device,
+                   max_grad_norm=1.0, context_loss_weight=0.1):
+    """
+    训练一个 epoch（CCA 版本）
+
+    Args:
+        model: 模型
+        dataloader: 数据加载器
+        criterion: 分类损失函数
+        optimizer: 优化器
+        device: 设备
+        max_grad_norm: 梯度裁剪阈值
+        context_loss_weight: CCA 损失权重
+
+    Returns:
+        avg_loss: 平均损失
+        accuracy: 准确率
+    """
+    model.train()
+    total_loss, correct, total = 0.0, 0, 0
+
+    batch_count = 0
+    for batch in tqdm(dataloader, desc="Training", leave=False):
+        batch_count += 1
+        traj, stats, labels = batch
+        traj = traj.to(device)
+        stats = stats.to(device)
+        labels = labels.to(device)
+
+        optimizer.zero_grad()
+
+        # CCA 模式：返回 logits, traj_z, ctx_z
+        logits, traj_z, ctx_z = model(traj, segment_stats=stats, return_context=True)
+
+        # 计算分类损失
+        cls_loss = criterion(logits, labels)
+
+        # 计算 InfoNCE 对比损失
+        infonce_loss = model.compute_infonce_loss(traj_z, ctx_z)
+
+        # 总损失
+        loss = cls_loss + context_loss_weight * infonce_loss
+
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+        optimizer.step()
+
+        total_loss += loss.item()
+        preds = torch.argmax(logits, dim=1)
+        correct += (preds == labels).sum().item()
+        total += labels.size(0)
+
+    print(f"[EPOCH END] 实际训练 batches: {batch_count}, 样本数: {total}")
+    return total_loss / max(len(dataloader), 1), correct / max(total, 1)
+
+
+def evaluate_cca(model, dataloader, criterion, device):
+    """
+    评估模型（CCA 版本）
+
+    Args:
+        model: 模型
+        dataloader: 数据加载器
+        criterion: 损失函数
+        device: 设备
+
+    Returns:
+        avg_loss: 平均损失
+        accuracy: 准确率
+    """
+    model.eval()
+    total_loss, correct, total = 0.0, 0, 0
+
+    with torch.no_grad():
+        for batch in tqdm(dataloader, desc="Evaluating", leave=False):
+            traj, stats, labels = batch
+            traj = traj.to(device)
+            stats = stats.to(device)
+            labels = labels.to(device)
+
+            # 仅返回 logits（不计算对比损失）
+            logits = model(traj, segment_stats=stats, return_context=False)
+
+            total_loss += criterion(logits, labels).item()
+            preds = torch.argmax(logits, dim=1)
+            correct += (preds == labels).sum().item()
+            total += labels.size(0)
+
+    avg_loss = total_loss / max(len(dataloader), 1)
+    accuracy = correct / max(total, 1)
+
+    return avg_loss, accuracy
 
 
 def load_data(geolife_root: str, osm_path: str, weather_path: str,
@@ -227,11 +354,7 @@ def main():
 
     # 归一化统计量（仅基于训练集）
     print(f"\n========== 归一化统计量计算 ==========")
-    train_trajs = np.array([t for t, _, _ in train_oversampled])
-    train_stats = np.array([s for _, s, _ in train_oversampled])
-
-    traj_mean, traj_std = compute_feature_stats(train_trajs)
-    stats_mean, stats_std = compute_feature_stats(train_stats)
+    traj_mean, traj_std, stats_mean, stats_std = compute_feature_stats(train_oversampled)
 
     norm_params = {
         'traj_mean': traj_mean,
@@ -289,13 +412,12 @@ def main():
     print(f"\n模型参数量: {sum(p.numel() for p in model.parameters()):,}")
 
     # 类别权重
-    class_weights = compute_class_weights(train_labels, mode='sqrt_inverse')
-    class_weights_tensor = torch.FloatTensor(class_weights).to(DEVICE)
-
-    print(f"\n类别权重 (mode=sqrt_inverse):")
-    for cls, weight in zip(label_encoder.classes_, class_weights):
-        count = sum(1 for l in train_labels if l == label_encoder.transform([cls])[0])
-        print(f"  {cls}: count={count:4d}, weight={weight:.4f}")
+    class_weights = compute_class_weights(
+        label_encoder,
+        train_oversampled,
+        label_index=-1,
+        mode='sqrt_inverse'
+    ).to(DEVICE)
 
     # 优化器
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
@@ -308,6 +430,9 @@ def main():
     plateau_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='max', factor=0.5, patience=8, verbose=True
     )
+
+    # Early stopping 计数器
+    epochs_no_improve = 0
 
     # 损失函数
     criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)
@@ -350,15 +475,14 @@ def main():
             current_lr = optimizer.param_groups[0]['lr']
 
         # 训练一个 epoch
-        train_loss, train_acc = train_epoch(
+        train_loss, train_acc = train_epoch_cca(
             model, train_loader, criterion, optimizer, DEVICE,
-            use_cca=True, context_loss_weight=args.context_loss_weight
+            context_loss_weight=args.context_loss_weight
         )
 
         # 验证
-        val_loss, val_acc, _, _ = evaluate(
-            model, val_loader, criterion, DEVICE,
-            label_names=None, use_cca=False  # 验证时不计算 CCA 损失
+        val_loss, val_acc = evaluate_cca(
+            model, val_loader, criterion, DEVICE
         )
 
         # 学习率调度
@@ -368,6 +492,7 @@ def main():
         # 保存最佳模型
         if val_acc > best_val_acc:
             best_val_acc = val_acc
+            epochs_no_improve = 0  # 重置计数器
             torch.save({
                 'model_state_dict': model.state_dict(),
                 'label_encoder': label_encoder,
@@ -385,6 +510,8 @@ def main():
                 }
             }, CHECKPOINT_PATH)
             print(f"✓ 保存最佳模型 (val_acc={val_acc:.4f})")
+        else:
+            epochs_no_improve += 1
 
         # 记录训练曲线
         csv_writer.writerow([epoch + 1, train_loss, train_acc, val_loss, val_acc, current_lr])
@@ -397,7 +524,7 @@ def main():
         print(f"学习率: {current_lr:.6f}")
 
         # Early stopping
-        if plateau_scheduler.num_bad_epochs >= args.patience:
+        if epochs_no_improve >= args.patience:
             print(f"\n⏹️ Early stopping (patience={args.patience})")
             break
 
@@ -414,9 +541,8 @@ def main():
         checkpoint = torch.load(CHECKPOINT_PATH, map_location=DEVICE, weights_only=False)
         model.load_state_dict(checkpoint['model_state_dict'])
 
-    test_loss, test_acc, _, _ = evaluate(
-        model, test_loader, criterion, DEVICE,
-        label_names=None, use_cca=False  # 测试时不计算 CCA 损失
+    test_loss, test_acc = evaluate_cca(
+        model, test_loader, criterion, DEVICE
     )
 
     print(f"\nTest Loss: {test_loss:.4f} | Test Acc: {test_acc:.4f}")
