@@ -40,6 +40,12 @@ class TrajectoryPredictor:
         self.model.load_state_dict(ckpt["model_state_dict"])
         self.model.eval()
 
+        norm_params = ckpt.get('norm_params', {})
+        self.traj_mean = norm_params.get('traj_mean', None)
+        self.traj_std = norm_params.get('traj_std', None)
+        self.stats_mean = norm_params.get('stats_mean', None)
+        self.stats_std = norm_params.get('stats_std', None)
+
         print(f"✅ Exp1 模型加载成功！")
         print(f"📊 特征配置: 轨迹维度={config.get('trajectory_feature_dim', config.get('input_dim', 9))}, 统计特征=18")
         print(f"🏷️  支持类别: {list(self.class_names)}")
@@ -57,6 +63,10 @@ class TrajectoryPredictor:
         if isinstance(trajectory_features, list):
             trajectory_features = np.array(trajectory_features)
 
+        # 归一化
+        if self.traj_mean is not None:
+            trajectory_features = (trajectory_features - self.traj_mean) / self.traj_std
+
         # 如果是单条数据 (seq_len, 9)，增加 batch 维度 -> (1, seq_len, 9)
         if len(trajectory_features.shape) == 2:
             trajectory_features = np.expand_dims(trajectory_features, axis=0)
@@ -67,6 +77,8 @@ class TrajectoryPredictor:
         if segment_stats is not None:
             if isinstance(segment_stats, list):
                 segment_stats = np.array(segment_stats)
+            if self.stats_mean is not None:
+                segment_stats = (segment_stats - self.stats_mean) / self.stats_std
             if len(segment_stats.shape) == 1:
                 segment_stats = np.expand_dims(segment_stats, axis=0)
             stats = torch.FloatTensor(segment_stats).to(self.device)

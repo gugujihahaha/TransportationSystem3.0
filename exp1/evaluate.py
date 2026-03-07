@@ -93,6 +93,12 @@ def main():
     model.eval()
     print("   ✓ 模型加载完成")
 
+    norm_params = checkpoint.get('norm_params', {})
+    traj_mean = norm_params.get('traj_mean', None)
+    traj_std = norm_params.get('traj_std', None)
+    stats_mean = norm_params.get('stats_mean', None)
+    stats_std = norm_params.get('stats_std', None)
+
     # 2. 加载特征缓存
     print(f"\n[2/5] 正在加载特征缓存...")
 
@@ -163,14 +169,19 @@ def main():
 
     # 3. 准备测试数据
     print(f"\n[3/5] 正在准备测试数据...")
-    dataset = TrajectoryDataset(segments, cached_label_encoder)
-    labels_for_stratify = [s[1] for s in segments]
-
-    _, test_indices = train_test_split(
-        range(len(dataset)),
-        test_size=0.2,
-        random_state=42,
-        stratify=labels_for_stratify
+    dataset = TrajectoryDataset(
+        segments, cached_label_encoder,
+        traj_mean=traj_mean, traj_std=traj_std,
+        stats_mean=stats_mean, stats_std=stats_std
+    )
+    all_indices = np.arange(len(segments))
+    labels_stratify = [s[2] for s in segments]
+    train_indices, temp_indices = train_test_split(
+        all_indices, test_size=0.3, random_state=42, stratify=labels_stratify
+    )
+    temp_labels = [labels_stratify[i] for i in temp_indices]
+    val_indices, test_indices = train_test_split(
+        temp_indices, test_size=0.6667, random_state=42, stratify=temp_labels
     )
 
     test_loader = DataLoader(
