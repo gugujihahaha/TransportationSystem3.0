@@ -30,6 +30,7 @@ class TrajectoryPredictor:
         # 初始化模型架构
         self.model = TransportationModeClassifier(
             trajectory_feature_dim=config.get('trajectory_feature_dim', config.get('input_dim', 9)),
+            segment_stats_dim=18,
             hidden_dim=config['hidden_dim'],
             num_layers=config['num_layers'],
             num_classes=config['num_classes'],
@@ -40,13 +41,14 @@ class TrajectoryPredictor:
         self.model.eval()
 
         print(f"✅ Exp1 模型加载成功！")
-        print(f"📊 特征配置: 轨迹维度={config.get('trajectory_feature_dim', config.get('input_dim', 9))}")
+        print(f"📊 特征配置: 轨迹维度={config.get('trajectory_feature_dim', config.get('input_dim', 9))}, 统计特征=18")
         print(f"🏷️  支持类别: {list(self.class_names)}")
 
-    def predict(self, trajectory_features):
+    def predict(self, trajectory_features, segment_stats=None):
         """
         输入:
             trajectory_features: np.ndarray, 形状为 (seq_len, 9) 或 (batch, seq_len, 9)
+            segment_stats: np.ndarray, 形状为 (18,) 或 (batch, 18)，可选
         输出:
             pred_labels: 预测标签字符串数组
             confidences: 置信度分数数组
@@ -61,8 +63,21 @@ class TrajectoryPredictor:
 
         x = torch.FloatTensor(trajectory_features).to(self.device)
 
+        # 处理 segment_stats
+        if segment_stats is not None:
+            if isinstance(segment_stats, list):
+                segment_stats = np.array(segment_stats)
+            if len(segment_stats.shape) == 1:
+                segment_stats = np.expand_dims(segment_stats, axis=0)
+            stats = torch.FloatTensor(segment_stats).to(self.device)
+            if stats.dim() == 1:
+                stats = stats.unsqueeze(0)
+        else:
+            # 无 segment_stats 时用零向量（向后兼容）
+            stats = torch.zeros(x.size(0), 18).to(self.device)
+
         with torch.no_grad():
-            logits = self.model(x)
+            logits = self.model(x, segment_stats=stats)
             probs = torch.softmax(logits, dim=1)
             conf, preds = torch.max(probs, dim=1)
 

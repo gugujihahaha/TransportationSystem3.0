@@ -37,19 +37,34 @@ TRAJECTORY_FEATURE_DIM = 9
 # Dataset
 # ============================================================
 class TrajectoryDataset(Dataset):
-    def __init__(self, segments, label_encoder):
+    def __init__(self, segments, label_encoder,
+                 traj_mean=None, traj_std=None,
+                 stats_mean=None, stats_std=None):
         self.segments = segments
         self.label_encoder = label_encoder
+        self.traj_mean  = traj_mean
+        self.traj_std   = traj_std
+        self.stats_mean = stats_mean
+        self.stats_std  = stats_std
 
     def __len__(self):
         return len(self.segments)
 
     def __getitem__(self, idx):
         features, segment_stats, label = self.segments[idx]
-        x = torch.FloatTensor(features)
-        stats = torch.FloatTensor(segment_stats)
+        x     = features.astype(np.float32)
+        stats = segment_stats.astype(np.float32)
+
+        # 归一化
+        if self.traj_mean is not None:
+            x = (x - self.traj_mean) / self.traj_std
+        if self.stats_mean is not None:
+            stats = (stats - self.stats_mean) / self.stats_std
+
         y = self.label_encoder.transform([label])[0]
-        return x, stats, torch.LongTensor([y])
+        return (torch.FloatTensor(x),
+                torch.FloatTensor(stats),
+                torch.LongTensor([y]).squeeze())
 
 
 # ============================================================
@@ -148,11 +163,11 @@ def main():
                        help="数据清洗模式: strict(严格), balanced(平衡), gentle(温和)")
     # ===== 修改结束 =====
 
-    parser.add_argument("--epochs", type=int, default=50)
+    parser.add_argument("--epochs", type=int, default=150)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--hidden_dim", type=int, default=128)
     parser.add_argument("--num_layers", type=int, default=2)
-    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--dropout", type=float, default=0.3)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
@@ -164,18 +179,18 @@ def main():
         cleaning_mode=args.cleaning_mode
     )
 
-    # 最终 7 类（任务定义统一）
-    TARGET_MODES_FINAL = ['Walk', 'Bike', 'Car & taxi', 'Bus', 'Train', 'Subway', 'Airplane']
-    segments = [s for s in segments if s[1] in TARGET_MODES_FINAL]
+    # 最终 6 类（任务定义统一）
+    TARGET_MODES_FINAL = ['Walk', 'Bike', 'Car & taxi', 'Bus', 'Train', 'Subway']
+    segments = [s for s in segments if s[2] in TARGET_MODES_FINAL]
 
     # 对少数类进行数据增强（仅对训练数据有效，此处对全量做增强后再split）
     segments = BaseGeoLifePreprocessor.oversample_minority_classes(
         segments,
         target_ratio=0.3,
-        minority_classes=['Subway', 'Airplane']
+        minority_classes=['Subway', 'Train']
     )
 
-    labels = [s[1] for s in segments]
+    labels = [s[2] for s in segments]
     label_encoder = LabelEncoder()
     label_encoder.fit(labels)
 
@@ -194,34 +209,40 @@ def main():
         )
     print("✓ 已保存特征缓存: cache/exp1_processed_features.pkl")
 
-    dataset = TrajectoryDataset(segments, label_encoder)
+    # 第一步：先划分索引（不需要 dataset）
+    all_indices = np.arange(len(segments))
+    labels_stratify = [s[2] for s in segments]
+
+    train_indices, temp_indices = train_test_split(
+        all_indices, test_size=0.3, random_state=42,
+        stratify=labels_stratify
+    )
+    temp_labels = [labels_stratify[i] for i in temp_indices]
+    val_indices, test_indices = train_test_split(
+        temp_indices, test_size=0.6667, random_state=42,
+        stratify=temp_labels
+    )
+
+    # 第二步：用训练集计算归一化统计量
+    from common.train_utils import compute_feature_stats
+    train_segments = [segments[i] for i in train_indices]
+    traj_mean, traj_std, stats_mean, stats_std = compute_feature_stats(train_segments)
+    norm_params = {
+        'traj_mean': traj_mean, 'traj_std': traj_std,
+        'stats_mean': stats_mean, 'stats_std': stats_std
+    }
+    print(f"\n✅ 归一化统计量计算完成（基于 {len(train_indices)} 个训练样本）")
+
+    # 第三步：创建带归一化的 dataset
+    dataset = TrajectoryDataset(
+        segments, label_encoder,
+        traj_mean=traj_mean, traj_std=traj_std,
+        stats_mean=stats_mean, stats_std=stats_std
+    )
 
     print(f"\n✅ 数据集大小:")
     print(f"  总样本数: {len(dataset)}")
     print(f"  特征样本数: {len(segments)}")
-
-    # ========================================================
-    # ✅ 数据划分：一次性划分 70% 训练 / 10% 验证 / 20% 测试
-    # ========================================================
-    all_indices = np.arange(len(dataset))
-    labels_stratify = [s[1] for s in segments]
-
-    # 第一次划分：70% 训练 / 30% 临时
-    train_indices, temp_indices = train_test_split(
-        all_indices,
-        test_size=0.3,
-        random_state=42,
-        stratify=labels_stratify
-    )
-
-    # 第二次划分：从30%临时中划分出 10% 验证 / 20% 测试
-    temp_labels = [labels_stratify[i] for i in temp_indices]
-    val_indices, test_indices = train_test_split(
-        temp_indices,
-        test_size=0.6667,
-        random_state=42,
-        stratify=temp_labels
-    )
 
     train_loader = DataLoader(
         torch.utils.data.Subset(dataset, train_indices),
@@ -245,6 +266,27 @@ def main():
     print(f"  Test:  {len(test_indices)} 样本")
     print(f"  训练批次总数: {len(train_loader)}")
     print(f"  验证批次总数: {len(val_loader)}")
+
+    # 检查数据中是否有 NaN 或 Inf 值
+    print("\n检查数据质量:")
+    has_nan = False
+    has_inf = False
+    for i in range(min(100, len(segments))):
+        features, segment_stats, label = segments[i]
+        if np.isnan(features).any():
+            print(f"  ❌ 样本 {i}: features 包含 NaN")
+            has_nan = True
+        if np.isinf(features).any():
+            print(f"  ❌ 样本 {i}: features 包含 Inf")
+            has_inf = True
+        if np.isnan(segment_stats).any():
+            print(f"  ❌ 样本 {i}: segment_stats 包含 NaN")
+            has_nan = True
+        if np.isinf(segment_stats).any():
+            print(f"  ❌ 样本 {i}: segment_stats 包含 Inf")
+            has_inf = True
+    if not has_nan and not has_inf:
+        print("  ✅ 前 100 个样本数据质量正常")
 
     print(f"\n类别分布:")
     for cls in label_encoder.classes_:
@@ -275,17 +317,62 @@ def main():
     criterion = nn.CrossEntropyLoss(weight=class_weights)
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
+    # Warmup scheduler：前5轮线性升温
+    def warmup_lambda(epoch):
+        warmup_epochs = 5
+        if epoch < warmup_epochs:
+            return (epoch + 1) / warmup_epochs
+        return 1.0
+
+    warmup_scheduler = torch.optim.lr_scheduler.LambdaLR(
+        optimizer, lr_lambda=warmup_lambda
+    )
+
+    # ReduceLROnPlateau：验证损失不改善时降低学习率
+    plateau_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.5, patience=8,
+        min_lr=1e-5
+    )
+
     # ========================================================
     # ✅ Early Stopping 配置
     # ========================================================
-    patience = 10
-    best_val_loss = float("inf")
-    epochs_no_improve = 0
+    CHECKPOINT_PATH = "checkpoints/exp1_model.pth"
 
-    best_loss = float("inf")
+    # 加载历史最佳 val_loss 作为初始基准
+    best_val_loss = float("inf")
+    start_epoch = 0
+
+    if os.path.exists(CHECKPOINT_PATH):
+        try:
+            prev = torch.load(CHECKPOINT_PATH, map_location=args.device, weights_only=False)
+            if 'val_loss' in prev:
+                best_val_loss = prev['val_loss']
+            if 'resume' in prev and prev['resume']:
+                model.load_state_dict(prev['model_state_dict'])
+                optimizer.load_state_dict(prev['optimizer_state_dict'])
+                start_epoch = prev['epoch'] + 1
+                print(f"✅ 从 epoch {start_epoch} 继续训练，历史最佳 val_loss={best_val_loss:.4f}")
+            else:
+                print(f"✅ 检测到历史最佳模型，val_loss={best_val_loss:.4f}，新训练需超过此值才覆盖")
+        except Exception as e:
+            print(f"⚠️ 历史模型加载失败（{e}），从零开始")
+
+    epochs_no_improve = 0
+    patience = 10
     os.makedirs("checkpoints", exist_ok=True)
 
-    for epoch in range(args.epochs):
+    # ========================================================
+    # ✅ 训练曲线保存到 CSV
+    # ========================================================
+    import csv
+    os.makedirs("logs", exist_ok=True)
+    csv_path = "logs/exp1_training_log.csv"
+    with open(csv_path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['epoch', 'train_loss', 'train_acc', 'val_loss', 'val_acc', 'lr'])
+
+    for epoch in range(start_epoch, args.epochs):
         print(f"\nEpoch {epoch+1}/{args.epochs}")
 
         train_loss, train_acc = train_epoch(
@@ -293,7 +380,7 @@ def main():
         )
 
         # 在验证集上评估
-        val_loss, val_report = evaluate(
+        val_loss, val_report, _, _ = evaluate(
             model, val_loader, criterion, args.device, label_encoder.classes_
         )
         val_acc = val_report['accuracy']
@@ -302,6 +389,22 @@ def main():
         print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f}")
         print(f"Val   Loss: {val_loss:.4f} | Val   Acc: {val_acc:.4f}")
 
+        # 学习率调度
+        if epoch < 5:
+            warmup_scheduler.step()
+        else:
+            plateau_scheduler.step(val_loss)
+
+        current_lr = optimizer.param_groups[0]['lr']
+        print(f"当前学习率: {current_lr:.6f}")
+
+        # 写入训练日志
+        with open(csv_path, 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([epoch+1, f"{train_loss:.4f}", f"{train_acc:.4f}",
+                           f"{val_loss:.4f}", f"{val_acc:.4f}",
+                           f"{optimizer.param_groups[0]['lr']:.6f}"])
+
         # Early Stopping 检查
         if val_loss < best_val_loss:
             best_val_loss = val_loss
@@ -309,10 +412,15 @@ def main():
 
             torch.save({
                 "epoch": epoch,
+                "resume": True,
                 "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
                 "label_encoder": label_encoder,
+                "val_loss": val_loss,
+                "norm_params": norm_params,
                 "model_config": {
                     "trajectory_feature_dim": TRAJECTORY_FEATURE_DIM,
+                    "segment_stats_dim": 18,
                     "hidden_dim": args.hidden_dim,
                     "num_layers": args.num_layers,
                     "num_classes": len(label_encoder.classes_),
@@ -335,7 +443,7 @@ def main():
     print("最终测试集评估")
     print("=" * 80)
 
-    test_loss, test_report = evaluate(
+    test_loss, test_report, all_preds, all_labels = evaluate(
         model, test_loader, criterion, args.device, label_encoder.classes_
     )
     test_acc = test_report['accuracy']
@@ -346,6 +454,21 @@ def main():
         if cls in test_report:
             metrics = test_report[cls]
             print(f"  {cls:15s}: P={metrics['precision']:.4f}, R={metrics['recall']:.4f}, F1={metrics['f1-score']:.4f}")
+
+    # 混淆矩阵
+    from sklearn.metrics import confusion_matrix
+    cm = confusion_matrix(all_labels, all_preds)
+    print("\n混淆矩阵（行=真实，列=预测）:")
+    classes = label_encoder.classes_
+    print(f"{'':15s}", end="")
+    for c in classes:
+        print(f"{c[:6]:>8s}", end="")
+    print()
+    for i, row in enumerate(cm):
+        print(f"{classes[i]:15s}", end="")
+        for val in row:
+            print(f"{val:8d}", end="")
+        print()
 
 
 if __name__ == "__main__":

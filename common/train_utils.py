@@ -8,109 +8,84 @@
     DataLoader 的每个 batch 必须是 (*features, labels) 的元组，
     其中 features 是若干特征张量，labels 是标签张量。
 """
+import numpy as np
 import torch
 from tqdm import tqdm
 from sklearn.metrics import classification_report
 from typing import Tuple, List
 
 
-def train_epoch(
-    model,
-    dataloader,
-    criterion,
-    optimizer,
-    device,
-    max_grad_norm: float = 1.0,
-) -> Tuple[float, float]:
-    """
-    执行一个 epoch 的训练。
-
-    参数：
-        model:          PyTorch 模型（需支持 *inputs 调用方式）
-        dataloader:     训练数据加载器，batch 格式为 (*features, labels)
-        criterion:      损失函数
-        optimizer:      优化器
-        device:         训练设备（'cuda' 或 'cpu'）
-        max_grad_norm:  梯度裁剪阈值，默认 1.0
-
-    返回：
-        (avg_loss, accuracy): 本 epoch 的平均损失和准确率
-    """
+def train_epoch(model, dataloader, criterion, optimizer, device,
+                max_grad_norm=1.0):
     model.train()
     total_loss, correct, total = 0.0, 0, 0
 
+    batch_count = 0
     for batch in tqdm(dataloader, desc="Training", leave=False):
+        batch_count += 1
         *features, labels = batch
-        features = [f.to(device) for f in features]
-        labels   = labels.to(device)
+        labels = labels.squeeze().to(device)
+
+        seq_features = []
+        segment_stats = None
+        for f in features:
+            f = f.to(device)
+            if f.dim() == 2:
+                segment_stats = f
+            else:
+                seq_features.append(f)
 
         optimizer.zero_grad()
-        
-        if len(features) == 2 and features[1].dim() == 2:
-            trajectory_features, segment_stats = features
-            logits = model(trajectory_features, segment_stats=segment_stats)
-        else:
-            logits = model(*features)
-        
-        loss   = criterion(logits, labels)
-        loss.backward()
 
+        if segment_stats is not None:
+            logits = model(*seq_features, segment_stats=segment_stats)
+        else:
+            logits = model(*seq_features)
+
+        loss = criterion(logits, labels)
+        loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
         optimizer.step()
 
         total_loss += loss.item()
-        preds       = torch.argmax(logits, dim=1)
-        correct    += (preds == labels).sum().item()
-        total      += labels.size(0)
+        preds = torch.argmax(logits, dim=1)
+        correct += (preds == labels).sum().item()
+        total += labels.size(0)
 
-    avg_loss = total_loss / max(len(dataloader), 1)
-    accuracy = correct   / max(total, 1)
-    return avg_loss, accuracy
+    print(f"[EPOCH END] 实际训练 batches: {batch_count}, 样本数: {total}")
+    return total_loss / max(len(dataloader), 1), correct / max(total, 1)
 
 
-def evaluate(
-    model,
-    dataloader,
-    criterion,
-    device,
-    label_names: List[str],
-) -> Tuple[float, dict, List, List]:
-    """
-    在验证集或测试集上评估模型。
-
-    参数：
-        model:        PyTorch 模型
-        dataloader:   评估数据加载器，batch 格式为 (*features, labels)
-        criterion:    损失函数
-        device:       评估设备
-        label_names:  类别名称列表（如 label_encoder.classes_）
-
-    返回：
-        (avg_loss, report_dict, all_preds, all_labels)
-    """
+def evaluate(model, dataloader, criterion, device, label_names):
     model.eval()
     total_loss, all_preds, all_labels = 0.0, [], []
 
     with torch.no_grad():
         for batch in tqdm(dataloader, desc="Evaluating", leave=False):
             *features, labels = batch
-            features = [f.to(device) for f in features]
-            labels   = labels.to(device)
+            labels = labels.squeeze().to(device)
 
-            if len(features) == 2 and features[1].dim() == 2:
-                trajectory_features, segment_stats = features
-                logits      = model(trajectory_features, segment_stats=segment_stats)
+            seq_features = []
+            segment_stats = None
+            for f in features:
+                f = f.to(device)
+                if f.dim() == 2:
+                    segment_stats = f
+                else:
+                    seq_features.append(f)
+
+            if segment_stats is not None:
+                logits = model(*seq_features, segment_stats=segment_stats)
             else:
-                logits      = model(*features)
-            
-            total_loss += criterion(logits, labels).item()
+                logits = model(*seq_features)
 
+            total_loss += criterion(logits, labels).item()
             preds = torch.argmax(logits, dim=1)
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
 
     avg_loss = total_loss / max(len(dataloader), 1)
-    report   = classification_report(
+    report = classification_report(
         all_labels, all_preds,
         target_names=label_names,
         output_dict=True,
@@ -138,13 +113,22 @@ def compute_class_weights(label_encoder, all_features_and_labels,
         weights: FloatTensor，shape (num_classes,)，已归一化使均值为1
     """
     import numpy as np
+    from collections import Counter
 
     num_classes = len(label_encoder.classes_)
-    label_counts = np.zeros(num_classes, dtype=np.float64)
+    labels = [item[label_index] for item in all_features_and_labels]
 
-    for item in all_features_and_labels:
-        label_idx = item[label_index]
-        label_counts[label_idx] += 1
+    # 支持字符串和整数标签
+    if isinstance(labels[0], str):
+        label_counts_dict = Counter(labels)
+        label_counts = np.array([
+            label_counts_dict.get(cls, 0)
+            for cls in label_encoder.classes_
+        ], dtype=np.float64)
+    else:
+        label_counts = np.zeros(num_classes, dtype=np.float64)
+        for lbl in labels:
+            label_counts[int(lbl)] += 1
 
     # 防止除零
     label_counts = np.where(label_counts == 0, 1, label_counts)
@@ -170,3 +154,38 @@ def compute_class_weights(label_encoder, all_features_and_labels,
         print(f"  {cls:15s}: count={int(label_counts[i]):5d}, weight={weights[i]:.4f}")
 
     return torch.FloatTensor(weights)
+
+
+def compute_feature_stats(segments, feature_index=0):
+    """
+    计算训练集特征的均值和标准差，用于归一化。
+
+    Args:
+        segments: List of (traj_features, segment_stats, label)
+        feature_index: 特征在 tuple 中的位置
+
+    Returns:
+        traj_mean, traj_std: 轨迹特征的均值和标准差 (feature_dim,)
+        stats_mean, stats_std: 段级统计特征的均值和标准差 (18,)
+    """
+    traj_list = []
+    stats_list = []
+
+    for item in segments:
+        traj = item[0]    # (50, 9)
+        stats = item[1]   # (18,)
+        traj_list.append(traj)
+        stats_list.append(stats)
+
+    traj_all = np.vstack(traj_list)       # (N*50, 9)
+    stats_all = np.vstack(stats_list)     # (N, 18)
+
+    traj_mean = traj_all.mean(axis=0).astype(np.float32)
+    traj_std  = traj_all.std(axis=0).astype(np.float32)
+    traj_std  = np.where(traj_std < 1e-6, 1.0, traj_std)  # 防止除零
+
+    stats_mean = stats_all.mean(axis=0).astype(np.float32)
+    stats_std  = stats_all.std(axis=0).astype(np.float32)
+    stats_std  = np.where(stats_std < 1e-6, 1.0, stats_std)
+
+    return traj_mean, traj_std, stats_mean, stats_std
