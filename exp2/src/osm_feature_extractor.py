@@ -327,18 +327,37 @@ class OsmSpatialExtractor:
                 self._grid_cache[grid_key] = uncached_features[i]
                 spatial_features[idx] = uncached_features[i]
 
-        # 统计有效覆盖率（只统计前6列道路类型，不包括unknown）
-        road_hits = np.sum(spatial_features[:, :6].sum(axis=1) > 0)  # 前6列有非零值
-        total = spatial_features.shape[0]
-        coverage = road_hits / total
+        # ========== 统计分析（覆盖率 + road_type分布）==========
         if not hasattr(self, '_coverage_stats'):
             self._coverage_stats = []
+        if not hasattr(self, '_type_counts'):
+            self._type_counts = {'walk':0,'bike':0,'car':0,'bus':0,
+                                 'train':0,'subway':0,'unknown':0}
+            self._total_points = 0
+        if not hasattr(self, '_traj_count'):
+            self._traj_count = 0
+
+        # 覆盖率（非unknown点的比例）
+        road_hits = int(spatial_features[:, :6].sum(axis=1).astype(bool).sum())
+        coverage = road_hits / N
         self._coverage_stats.append(coverage)
 
-        # 每处理100条轨迹打印一次
-        if len(self._coverage_stats) % 100 == 0:
-            avg_cov = np.mean(self._coverage_stats[-100:])
-            print(f"   [OSM覆盖率] 最近100条平均: {avg_cov:.1%}  (unknown率: {1-avg_cov:.1%})")
+        # road_type分布（每个点累计）
+        type_names = ['walk','bike','car','bus','train','subway','unknown']
+        for j, t in enumerate(type_names):
+            self._type_counts[t] += int(spatial_features[:, j].sum())
+        self._total_points += N
+        self._traj_count += 1
+
+        # 每1000条轨迹打印一次
+        if self._traj_count % 1000 == 0:
+            avg_cov = float(np.mean(self._coverage_stats[-1000:]))
+            print(f"\n   [Road Type分布] 累计{self._total_points}个点 "
+                  f"(覆盖率{avg_cov:.1%}):")
+            for t in type_names:
+                pct = self._type_counts[t] / max(self._total_points, 1) * 100
+                bar = '█' * int(pct / 2)
+                print(f"     {t:10s}: {pct:5.1f}%  {bar}")
 
         return spatial_features.astype(np.float32)
 
@@ -396,21 +415,33 @@ class OsmSpatialExtractor:
         查询逻辑:
             1. 使用 KDTree 查询每个坐标最近的道路节点
             2. 如果距离小于阈值，使用该道路类型
-            3. 否则标记为 unknown
-            4. 将道路类型转换为 one-hot 编码
+            3. 如果是 car 类道路且附近有 bus_stop POI，改为 bus
+            4. 否则标记为 unknown
+            5. 将道路类型转换为 one-hot 编码
 
         参数:
             coords (np.ndarray): 形状 (N, 2) 的坐标数组
-            max_distance (float): 最大查询距离（米），默认 50.0
+            max_distance (float): 最大查询距离（米），默认 150.0
 
         返回:
-            np.ndarray: 形状 (N, 6) 的 one-hot 编码矩阵
+            np.ndarray: 形状 (N, 7) 的 one-hot 编码矩阵
         """
         N = coords.shape[0]
 
         # 查询最近的道路节点
         distances, indices = self.road_kdtree.query(coords, k=1)
         distances = distances * 111300.0  # 转换为米
+
+        # 先查POI：找附近bus_stop
+        bus_stop_radius = 50.0 / 111300.0  # 50米内有bus_stop则认为是bus环境
+        if self.poi_kdtree is not None:
+            poi_indices = self.poi_kdtree.query_ball_point(coords, r=bus_stop_radius)
+            has_bus_stop = np.array([
+                any(self.poi_types[j] == 'bus_stop' for j in idx_list)
+                for idx_list in poi_indices
+            ])
+        else:
+            has_bus_stop = np.zeros(N, dtype=bool)
 
         # 构建 one-hot 编码
         type_names = ['walk', 'bike', 'car', 'bus', 'train', 'subway', 'unknown']
@@ -419,9 +450,13 @@ class OsmSpatialExtractor:
         for i in range(N):
             if distances[i] < max_distance:
                 road_type = self.road_types[indices[i]]
-                if road_type in type_names:
-                    idx = type_names.index(road_type)
-                    road_type_features[i, idx] = 1.0
+                # 如果是car类道路且附近有bus_stop，改为bus
+                if road_type == 'car' and has_bus_stop[i]:
+                    road_type_features[i, 3] = 1.0  # bus
+                elif road_type in type_names:
+                    road_type_features[i, type_names.index(road_type)] = 1.0
+                else:
+                    road_type_features[i, 6] = 1.0
             else:
                 road_type_features[i, 6] = 1.0  # unknown
 

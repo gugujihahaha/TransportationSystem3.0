@@ -220,7 +220,7 @@ def main():
     parser.add_argument('--max_users', type=int, default=None)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--epochs', type=int, default=150)
-    parser.add_argument('--lr', type=float, default=0.0003)
+    parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--hidden_dim', type=int, default=128)
     parser.add_argument('--num_layers', type=int, default=2)
     parser.add_argument('--dropout', type=float, default=0.3)
@@ -337,9 +337,9 @@ def main():
 
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
-    # Warmup scheduler：前5轮线性升温
+    # Warmup scheduler：前10轮线性升温
     def warmup_lambda(epoch):
-        warmup_epochs = 5
+        warmup_epochs = 10
         if epoch < warmup_epochs:
             return (epoch + 1) / warmup_epochs
         return 1.0
@@ -348,9 +348,9 @@ def main():
         optimizer, lr_lambda=warmup_lambda
     )
 
-    # ReduceLROnPlateau：验证损失不改善时降低学习率
+    # ReduceLROnPlateau：验证准确率不改善时降低学习率
     plateau_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=8
+        optimizer, mode='max', factor=0.5, patience=8
     )
 
     class_weights = compute_class_weights(
@@ -366,8 +366,8 @@ def main():
     # ========================================================
     CHECKPOINT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'checkpoints/exp2_model.pth')
 
-    # 加载历史最佳 val_loss 作为初始基准
-    best_val_loss = float("inf")
+    # 加载历史最佳 val_acc 作为初始基准
+    best_val_acc = 0.0
     start_epoch = 0
 
     if os.path.exists(CHECKPOINT_PATH):
@@ -381,20 +381,24 @@ def main():
 
             if prev_input_dim != curr_input_dim:
                 print(f"⚠️ 输入维度不匹配（历史={prev_input_dim}, 当前={curr_input_dim}），从零开始训练")
-                # 不加载权重，best_val_loss保持inf
+                # 不加载权重，best_val_acc保持0.0
             elif prev_config.get('num_classes') == len(label_encoder.classes_):
                 model.load_state_dict(prev['model_state_dict'])
-                if 'val_loss' in prev:
-                    best_val_loss = prev['val_loss']
-                print(f"✅ 加载历史最佳权重，val_loss={best_val_loss:.4f}，从 epoch 0 重新训练")
+                if 'val_acc' in prev:
+                    best_val_acc = prev['val_acc']
+                print(f"✅ 加载历史最佳权重，val_acc={best_val_acc:.4f}，从 epoch 0 重新训练")
             else:
                 print(f"⚠️ 模型类别数不匹配，从零开始")
         except Exception as e:
             print(f"⚠️ 历史模型加载失败（{e}），从零开始")
 
     epochs_no_improve = 0
-    patience = args.patience
+    patience = 25
     os.makedirs("checkpoints", exist_ok=True)
+
+    # 连续 NaN 检测计数器
+    consecutive_nan_count = 0
+    MAX_CONSECUTIVE_NAN = 3  # 连续3次NaN则停止训练
 
     # ========================================================
     # ✅ 训练曲线保存到 CSV
@@ -412,18 +416,56 @@ def main():
 
         train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, args.device)
 
+        # NaN 检测
+        if np.isnan(train_loss) or np.isinf(train_loss):
+            consecutive_nan_count += 1
+            print(f"⚠️ 检测到训练损失异常（{train_loss}），连续NaN次数: {consecutive_nan_count}/{MAX_CONSECUTIVE_NAN}")
+            
+            if consecutive_nan_count >= MAX_CONSECUTIVE_NAN:
+                print(f"🛑 连续{MAX_CONSECUTIVE_NAN}次NaN，停止训练")
+                break
+            
+            if os.path.exists(CHECKPOINT_PATH):
+                try:
+                    prev = torch.load(CHECKPOINT_PATH, map_location=args.device, weights_only=False)
+                    model.load_state_dict(prev['model_state_dict'])
+                    print(f"✅ 已恢复到最佳模型")
+                except Exception as e:
+                    print(f"⚠️ 模型恢复失败（{e}），从零开始")
+            continue  # 跳过本轮，不降lr
+        else:
+            consecutive_nan_count = 0  # 正常训练，重置计数器
+
         val_loss, report, _, _ = evaluate(model, val_loader, criterion, args.device, label_encoder.classes_)
         val_acc = report['accuracy']
+
+        # NaN 检测
+        if np.isnan(val_loss) or np.isinf(val_loss):
+            consecutive_nan_count += 1
+            print(f"⚠️ 检测到验证损失异常（{val_loss}），连续NaN次数: {consecutive_nan_count}/{MAX_CONSECUTIVE_NAN}")
+            
+            if consecutive_nan_count >= MAX_CONSECUTIVE_NAN:
+                print(f"🛑 连续{MAX_CONSECUTIVE_NAN}次NaN，停止训练")
+                break
+            
+            if os.path.exists(CHECKPOINT_PATH):
+                try:
+                    prev = torch.load(CHECKPOINT_PATH, map_location=args.device, weights_only=False)
+                    model.load_state_dict(prev['model_state_dict'])
+                    print(f"✅ 已恢复到最佳模型")
+                except Exception as e:
+                    print(f"⚠️ 模型恢复失败（{e}），从零开始")
+            continue  # 跳过本轮，不降lr
 
         # 在训练循环结束后再打印上一轮指标汇总
         print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f}")
         print(f"Val   Loss: {val_loss:.4f} | Val   Acc: {val_acc:.4f}")
 
         # 学习率调度
-        if epoch < 5:
+        if epoch < 10:
             warmup_scheduler.step()
         else:
-            plateau_scheduler.step(val_loss)
+            plateau_scheduler.step(val_acc)
 
         current_lr = optimizer.param_groups[0]['lr']
         print(f"当前学习率: {current_lr:.6f}")
@@ -435,15 +477,15 @@ def main():
                            f"{val_loss:.4f}", f"{val_acc:.4f}",
                            f"{optimizer.param_groups[0]['lr']:.6f}"])
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
             epochs_no_improve = 0
 
             torch.save({
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'label_encoder': label_encoder,
-                'val_loss': val_loss,
+                'val_acc': val_acc,
                 'norm_params': norm_params,
                 'resume': True,
                 'model_config': {
@@ -458,7 +500,7 @@ def main():
             print("✓ 保存最佳模型（基于验证集）")
         else:
             epochs_no_improve += 1
-            print(f"⏳ 验证损失未改善: {epochs_no_improve}/{patience}")
+            print(f"⏳ 验证准确率未改善: {epochs_no_improve}/{patience}")
 
             if epochs_no_improve >= patience:
                 print(f"\n🛑 Early stopping 触发（patience={patience}）")
