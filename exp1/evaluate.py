@@ -35,6 +35,10 @@ def main():
     OUTPUT_DIR = 'evaluation_results'
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
+    # 切换到exp1目录
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    os.chdir(script_dir)
+
     # 备用缓存路径列表（按优先级）
     ALTERNATIVE_CACHE_PATHS = [
         'cache/processed_features.pkl',
@@ -83,7 +87,7 @@ def main():
     print(f"     - 类别: {list(class_names)}")
 
     model = TransportationModeClassifier(
-        trajectory_feature_dim=config.get('trajectory_feature_dim', config.get('input_dim', 9)),
+        trajectory_feature_dim=9,
         hidden_dim=config['hidden_dim'],
         num_layers=config['num_layers'],
         num_classes=config['num_classes'],
@@ -107,34 +111,28 @@ def main():
 
     # 2. 加载特征缓存
     print(f"\n[2/5] 正在加载特征缓存...")
-
-    # 尝试多个缓存路径
-    cache_paths_to_try = [CACHE_PATH] + ALTERNATIVE_CACHE_PATHS
-    cache_loaded = False
-
-    for cp in cache_paths_to_try:
-        if os.path.exists(cp):
-            CACHE_PATH = cp
-            cache_loaded = True
-            break
-
-    if not cache_loaded:
-        print(f"❌ 错误: 找不到特征缓存，尝试过以下路径:")
-        for cp in cache_paths_to_try:
-            print(f"   - {cp}")
-        print("\n请先运行 train.py 生成特征缓存。")
+    
+    # 使用与exp2/exp3相同的数据集，确保测试集一致
+    EXP2_CACHE_PATH = '../exp2/cache/processed_features.pkl'
+    
+    if not os.path.exists(EXP2_CACHE_PATH):
+        print(f"❌ 找不到exp2缓存: {EXP2_CACHE_PATH}")
+        print(f"   请确保exp2的数据集已生成")
         return
-
-    print(f"   ✓ 找到缓存: {CACHE_PATH}")
-
-    with open(CACHE_PATH, 'rb') as f:
-        cache = pickle.load(f)
-
-    segments = cache["segments"]
-    cached_label_encoder = cache["label_encoder"]
-    cleaning_stats = cache.get("cleaning_stats", {})
-
-    print(f"   ✓ 加载完成: {len(segments)} 个样本")
+    
+    with open(EXP2_CACHE_PATH, 'rb') as f:
+        all_features, cached_label_encoder, cleaning_stats = pickle.load(f)
+    
+    # 转换为exp1需要的格式：(traj_features, segment_stats, label_str)
+    # exp2的traj_features是21维融合特征（9维轨迹 + 12维空间），exp1只需要前9维
+    segments = []
+    for traj_features, spatial_features, segment_stats, label_encoded in all_features:
+        label_str = cached_label_encoder.inverse_transform([label_encoded])[0]
+        # 提取前9维轨迹特征
+        traj_features_exp1 = traj_features[:, :9]
+        segments.append((traj_features_exp1, segment_stats, label_str))
+    
+    print(f"   ✓ 加载完成: {len(segments)} 个样本 (使用exp2数据集，提取前9维轨迹特征)")
 
     # 显示清洗统计
     if cleaning_stats:

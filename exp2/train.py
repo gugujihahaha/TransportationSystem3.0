@@ -32,7 +32,6 @@ except ImportError:
 
 # 特征维度常量
 TRAJECTORY_FEATURE_DIM = 21   # 9轨迹 + 12空间
-SPATIAL_FEATURE_DIM = 1       # 占位，不实际使用
 FIXED_SEQUENCE_LENGTH = 50
 
 # 缓存配置
@@ -46,13 +45,10 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 class TrajectoryDataset(Dataset):
     def __init__(self, all_features_and_labels: List[Tuple[np.ndarray, np.ndarray, np.ndarray, int]],
                  traj_mean=None, traj_std=None,
-                 spatial_mean=None, spatial_std=None,
                  stats_mean=None, stats_std=None):
         self.data = all_features_and_labels
         self.traj_mean = traj_mean
         self.traj_std = traj_std
-        self.spatial_mean = spatial_mean
-        self.spatial_std = spatial_std
         self.stats_mean = stats_mean
         self.stats_std = stats_std
 
@@ -68,10 +64,7 @@ class TrajectoryDataset(Dataset):
         if self.stats_mean is not None:
             segment_stats = (segment_stats - self.stats_mean) / self.stats_std
 
-        # spatial已融合进traj，placeholder不需要归一化
-        placeholder = np.zeros((trajectory_features.shape[0], 1), dtype=np.float32)
         return (torch.FloatTensor(trajectory_features),
-                torch.FloatTensor(placeholder),
                 torch.FloatTensor(segment_stats),
                 torch.LongTensor([label_encoded])[0])
 
@@ -341,7 +334,7 @@ def main():
         print(f"  {cls:15s}: Train={train_count}, Val={val_count}, Test={test_count}")
 
     model = TransportationModeClassifier(
-        TRAJECTORY_FEATURE_DIM, SPATIAL_FEATURE_DIM, 18, args.hidden_dim, args.num_layers, len(label_encoder.classes_), args.dropout,
+        TRAJECTORY_FEATURE_DIM, 18, args.hidden_dim, args.num_layers, len(label_encoder.classes_), args.dropout,
         num_segments=5,
         local_hidden=64,
         global_hidden=128,

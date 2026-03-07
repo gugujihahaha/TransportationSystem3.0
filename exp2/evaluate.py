@@ -33,14 +33,11 @@ plt.rcParams['axes.unicode_minus'] = False
 class DualFeatureDataset(Dataset):
     def __init__(self, segments, label_encoder,
                  traj_mean=None, traj_std=None,
-                 spatial_mean=None, spatial_std=None,
                  stats_mean=None, stats_std=None):
         self.segments = segments
         self.label_encoder = label_encoder
         self.traj_mean = traj_mean
         self.traj_std = traj_std
-        self.spatial_mean = spatial_mean
-        self.spatial_std = spatial_std
         self.stats_mean = stats_mean
         self.stats_std = stats_std
 
@@ -52,7 +49,6 @@ class DualFeatureDataset(Dataset):
         traj_features, spatial_features, segment_stats, label_encoded = self.segments[idx]
 
         traj = traj_features.copy().astype(np.float32)
-        spatial = spatial_features.copy().astype(np.float32)
         stats = segment_stats.copy().astype(np.float32)
 
         if self.traj_mean is not None:
@@ -60,10 +56,7 @@ class DualFeatureDataset(Dataset):
         if self.stats_mean is not None:
             stats = (stats - self.stats_mean) / self.stats_std
 
-        # spatial已融合进traj，placeholder不需要归一化
-        placeholder = np.zeros((traj.shape[0], 1), dtype=np.float32)
         return (torch.FloatTensor(traj),
-                torch.FloatTensor(placeholder),
                 torch.FloatTensor(stats),
                 torch.LongTensor([label_encoded])[0])
 
@@ -74,6 +67,10 @@ def main():
     CACHE_PATH = 'cache/processed_features.pkl'
     OUTPUT_DIR = 'evaluation_results'
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    # 切换到exp2目录
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    os.chdir(script_dir)
 
     # 备用缓存路径列表（按优先级）
     ALTERNATIVE_CACHE_PATHS = [
@@ -229,7 +226,6 @@ def main():
     dataset = DualFeatureDataset(
         all_features, label_encoder,
         traj_mean=traj_mean, traj_std=traj_std,
-        spatial_mean=spatial_mean, spatial_std=spatial_std,
         stats_mean=stats_mean, stats_std=stats_std
     )
     labels_for_stratify = [item[3] for item in all_features]

@@ -79,12 +79,22 @@ def main():
 
     # 2. 加载特征缓存
     print(f"\n[2/5] 正在加载特征缓存...")
+    
+    # 使用与exp2相同的数据集，确保测试集一致
+    EXP2_CACHE_PATH = '../exp2/cache/processed_features.pkl'
+    
+    if not os.path.exists(EXP2_CACHE_PATH):
+        print(f"❌ 找不到exp2缓存: {EXP2_CACHE_PATH}")
+        print(f"   请确保exp2的数据集已生成")
+        return
+    
     if not os.path.exists(CACHE_PATH):
         print(f"❌ 找不到缓存: {CACHE_PATH}")
         return
-    with open(CACHE_PATH, 'rb') as f:
+    
+    with open(EXP2_CACHE_PATH, 'rb') as f:
         all_features, cached_le, cleaning_stats = pickle.load(f)
-    print(f"   ✓ 加载完成: {len(all_features)} 个样本")
+    print(f"   ✓ 加载完成: {len(all_features)} 个样本 (使用exp2数据集)")
 
     # 3. 准备测试数据
     # ✅ 与 train.py 完全一致的划分方式
