@@ -31,6 +31,8 @@ from common import evaluate as common_evaluate
 
 # exp2 专用模块（复用模型）
 from exp2.src.model import TransportationModeClassifier
+from exp2.src.feature_extraction import FeatureExtractor
+from exp2.src.osm_feature_extractor import OsmSpatialExtractor
 
 # ========================== 缓存配置 ==========================
 CACHE_DIR = 'cache'
@@ -114,56 +116,54 @@ class TrajectoryDatasetExp4(Dataset):
 
 def load_data():
     """
-    加载数据（与 train.py 完全一致）
+    加载共享测试集数据
 
     Returns:
         all_data: List of (traj_21, stats, label)
         label_encoder: LabelEncoder
     """
-    # ===== 优先检查 exp4 完整缓存 =====
-    if os.path.exists(PROCESSED_FEATURE_CACHE):
-        print(f"✅ 加载 Exp4 特征缓存")
-        try:
-            with open(PROCESSED_FEATURE_CACHE, 'rb') as f:
-                all_data, label_encoder, cleaning_stats = pickle.load(f)
-            print(f"   缓存加载完成: {len(all_data)} 个样本")
-            return all_data, label_encoder
-        except Exception as e:
-            print(f"⚠️ 缓存加载失败 ({e})，重新构建")
-
-    # ===== 加载 exp2 的特征缓存 =====
-    print(f"✅ 加载 Exp2 特征 (复用)")
-    if not os.path.exists(EXP2_FEATURE_CACHE):
+    print(f"✅ 加载共享测试集")
+    
+    SHARED_TEST_PATH = '../../data/processed/shared_test_indices.pkl'
+    if not os.path.exists(SHARED_TEST_PATH):
         raise FileNotFoundError(
-            f"找不到 exp2 特征缓存: {EXP2_FEATURE_CACHE}\n"
-            "请先确保 exp2/train.py 已经运行并生成缓存。"
+            f"找不到共享测试集: {SHARED_TEST_PATH}\n"
+            "请先运行 create_shared_test_set.py 生成共享测试集。"
         )
-
-    with open(EXP2_FEATURE_CACHE, 'rb') as f:
-        exp2_raw, label_encoder, cleaning_stats = pickle.load(f)
-
-    print(f"   exp2 特征加载完成: {len(exp2_raw)} 个样本")
-
-    # ===== 转换数据格式 =====
+    
+    with open(SHARED_TEST_PATH, 'rb') as f:
+        shared_data = pickle.load(f)
+    
+    valid_indices = shared_data['valid_indices']
+    test_indices = shared_data['test_indices']
+    cleaned_data = shared_data['cleaned_data']
+    label_encoder = shared_data['label_encoder']
+    
+    print(f"   共享测试集加载完成: {len(test_indices)} 个样本")
+    
+    # 初始化特征提取器
+    spatial_extractor = OsmSpatialExtractor()
+    feature_extractor = FeatureExtractor(spatial_extractor)
+    
+    # 提取21维融合特征
     all_data = []
-    for traj_21, _, stats, label_encoded in exp2_raw:
-        # NaN 过滤
-        if np.isnan(traj_21).any() or np.isinf(traj_21).any():
+    for idx in tqdm(test_indices, desc="提取特征"):
+        cleaned_idx = valid_indices[idx]
+        traj, stats, datetime_series, label = cleaned_data[cleaned_idx]
+        
+        try:
+            # 提取21维融合特征（9轨迹 + 12空间）
+            traj_21, spatial_features = feature_extractor.extract_features(traj)
+            label_encoded = label_encoder.transform([label])[0]
+            
+            # exp4 格式: (traj_21dim, stats_18dim, label_encoded)
+            all_data.append((traj_21, stats, label_encoded))
+        except Exception as e:
+            print(f"  警告: 样本 {idx} 特征提取失败: {e}")
             continue
-        if np.isnan(stats).any() or np.isinf(stats).any():
-            continue
-
-        # exp4 格式: (traj_21dim, stats_18dim, label_encoded)
-        all_data.append((traj_21, stats, label_encoded))
-
-    print(f"   数据转换完成: {len(all_data)} 个样本")
-
-    # 保存缓存
-    with open(PROCESSED_FEATURE_CACHE, 'wb') as f:
-        pickle.dump((all_data, label_encoder, cleaning_stats), f,
-                    protocol=pickle.HIGHEST_PROTOCOL)
-    print(f"   Exp4 特征缓存已保存: {PROCESSED_FEATURE_CACHE}")
-
+    
+    print(f"   特征提取完成: {len(all_data)} 个样本")
+    
     return all_data, label_encoder
 
 
@@ -189,40 +189,13 @@ def main():
     # 加载数据
     all_data, label_encoder = load_data()
 
-    # 数据划分（与 train.py 完全一致：70/10/20）
-    print(f"\n========== 数据划分 (70/10/20) ==========")
-    all_indices = np.arange(len(all_data))
-    labels_stratify = [item[-1] for item in all_data]
-
-    train_indices, temp_indices = train_test_split(
-        all_indices, test_size=0.3, random_state=42, stratify=labels_stratify
-    )
-    temp_labels = [labels_stratify[i] for i in temp_indices]
-    val_indices, test_indices = train_test_split(
-        temp_indices, test_size=0.6667, random_state=42, stratify=temp_labels
-    )
-
-    print(f"✅ 数据划分完成:")
-    print(f"  Train: {len(train_indices)}")
-    print(f"  Val:   {len(val_indices)}")
-    print(f"  Test:  {len(test_indices)}")
-
-    # 计算归一化统计量（基于训练集）
-    train_segments = [all_data[i] for i in train_indices]
-    traj_mean, traj_std, stats_mean, stats_std = compute_feature_stats(train_segments)
-
-    norm_params = {
-        'traj_mean': traj_mean,
-        'traj_std': traj_std,
-        'stats_mean': stats_mean,
-        'stats_std': stats_std
-    }
+    print(f"✅ 测试集加载完成: {len(all_data)} 个样本")
 
     # 创建测试集 Dataset
     test_dataset = TrajectoryDatasetExp4(
-        [all_data[i] for i in test_indices],
-        traj_mean=traj_mean, traj_std=traj_std,
-        stats_mean=stats_mean, stats_std=stats_std
+        all_data,
+        traj_mean=None, traj_std=None,  # 归一化参数将从checkpoint读取
+        stats_mean=None, stats_std=None
     )
 
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size,
@@ -266,8 +239,23 @@ def main():
 
     # 加载权重
     model.load_state_dict(checkpoint['model_state_dict'])
+    model.eval()
+    
+    # 读取归一化参数
+    norm_params = checkpoint.get('norm_params', {})
+    traj_mean = norm_params.get('traj_mean', None)
+    traj_std = norm_params.get('traj_std', None)
+    stats_mean = norm_params.get('stats_mean', None)
+    stats_std = norm_params.get('stats_std', None)
+    
+    # 更新Dataset的归一化参数
+    test_dataset.traj_mean = traj_mean
+    test_dataset.traj_std = traj_std
+    test_dataset.stats_mean = stats_mean
+    test_dataset.stats_std = stats_std
+    
     print(f"✅ 模型加载完成")
-
+    print(f"   归一化参数: traj_mean={traj_mean is not None}, stats_mean={stats_mean is not None}")
     # 损失函数（标签平滑 + Focal Loss）
     from src.focal_loss import LabelSmoothingFocalLoss
     class_weights = checkpoint.get('class_weights', None)

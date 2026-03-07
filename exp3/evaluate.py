@@ -23,6 +23,9 @@ os.chdir(SCRIPT_DIR)
 
 from src.model_weather import TransportationModeClassifierWithWeather
 from train import TrajectoryDatasetWithWeather
+from src.weather_preprocessing import WeatherDataProcessor
+from exp2.src.feature_extraction import FeatureExtractor
+from exp2.src.osm_feature_extractor import OsmSpatialExtractor
 
 plt.rcParams['font.sans-serif'] = ['SimHei', 'DejaVu Sans', 'Arial Unicode MS']
 plt.rcParams['axes.unicode_minus'] = False
@@ -77,54 +80,90 @@ def main():
     model.eval()
     print("   ✓ 模型加载完成")
 
-    # 2. 加载特征缓存
-    print(f"\n[2/5] 正在加载特征缓存...")
+    # 2. 加载共享测试集
+    print(f"\n[2/5] 正在加载共享测试集...")
     
-    # 使用与exp2相同的数据集，确保测试集一致
-    EXP2_CACHE_PATH = '../exp2/cache/processed_features.pkl'
-    
-    if not os.path.exists(EXP2_CACHE_PATH):
-        print(f"❌ 找不到exp2缓存: {EXP2_CACHE_PATH}")
-        print(f"   请确保exp2的数据集已生成")
+    SHARED_TEST_PATH = '../../data/processed/shared_test_indices.pkl'
+    if not os.path.exists(SHARED_TEST_PATH):
+        print(f"❌ 找不到共享测试集: {SHARED_TEST_PATH}")
+        print(f"   请先运行 create_shared_test_set.py 生成共享测试集")
         return
     
-    if not os.path.exists(CACHE_PATH):
-        print(f"❌ 找不到缓存: {CACHE_PATH}")
-        return
+    with open(SHARED_TEST_PATH, 'rb') as f:
+        shared_data = pickle.load(f)
     
-    with open(EXP2_CACHE_PATH, 'rb') as f:
-        all_features, cached_le, cleaning_stats = pickle.load(f)
-    print(f"   ✓ 加载完成: {len(all_features)} 个样本 (使用exp2数据集)")
+    valid_indices = shared_data['valid_indices']
+    test_indices = shared_data['test_indices']
+    cleaned_data = shared_data['cleaned_data']
+    shared_label_encoder = shared_data['label_encoder']
+    
+    print(f"   ✓ 加载完成: {len(test_indices)} 个测试样本 (使用共享测试集)")
+    
+    # 3. 提取21维融合特征+天气特征
+    print(f"\n[3/5] 正在提取21维融合特征+天气特征...")
+    
+    # 初始化特征提取器
+    spatial_extractor = OsmSpatialExtractor()
+    feature_extractor = FeatureExtractor(spatial_extractor)
+    
+    # 初始化天气处理器
+    weather_processor = WeatherDataProcessor()
+    zero_weather = np.zeros((50, 10), dtype=np.float32)  # 50序列长度，10维天气
+    
+    all_data = []
+    for idx in tqdm(test_indices, desc="提取特征"):
+        cleaned_idx = valid_indices[idx]
+        traj, stats, datetime_series, label = cleaned_data[cleaned_idx]
+        
+        try:
+            # 提取21维融合特征（9轨迹 + 12空间）
+            traj_21, spatial_features = feature_extractor.extract_features(traj)
+            
+            # 获取天气特征
+            if datetime_series is not None and len(datetime_series) > 0:
+                weather_feat = weather_processor.get_weather_features_for_trajectory(datetime_series)
+                # 确保长度匹配
+                T = traj_21.shape[0]
+                if weather_feat.shape[0] != T:
+                    if weather_feat.shape[0] > T:
+                        weather_feat = weather_feat[:T]
+                    else:
+                        pad = np.zeros((T - weather_feat.shape[0], 10), dtype=np.float32)
+                        weather_feat = np.vstack([weather_feat, pad])
+            else:
+                weather_feat = zero_weather.copy()
+            
+            weather_feat = np.nan_to_num(weather_feat, nan=0.0, posinf=0.0, neginf=0.0)
+            
+            # 编码标签
+            label_encoded = shared_label_encoder.transform([label])[0]
+            
+            # exp3 最终格式: (traj_21dim, weather_10dim, stats_18dim, label_encoded)
+            all_data.append((traj_21, weather_feat, stats, label_encoded))
+        except Exception as e:
+            print(f"  警告: 样本 {idx} 特征提取失败: {e}")
+            continue
+    
+    print(f"   ✓ 特征提取完成: {len(all_data)} 个样本")
 
-    # 3. 准备测试数据
-    # ✅ 与 train.py 完全一致的划分方式
-    print(f"\n[3/5] 正在准备测试数据...")
-    all_indices      = np.arange(len(all_features))
-    labels_stratify  = [item[-1] for item in all_features]
-
-    train_indices, temp_indices = train_test_split(
-        all_indices, test_size=0.3, random_state=42, stratify=labels_stratify
-    )
-    temp_labels = [labels_stratify[i] for i in temp_indices]
-    val_indices, test_indices = train_test_split(
-        temp_indices, test_size=0.6667, random_state=42, stratify=temp_labels
-    )
-
-    # 注意：evaluate 只用 test_indices，不做 oversample（测试集不应被增强）
+    # 4. 准备测试数据
+    print(f"\n[4/5] 正在准备测试数据...")
+    
     dataset = TrajectoryDatasetWithWeather(
-        all_features,
+        all_data,
         traj_mean=traj_mean, traj_std=traj_std,
         weather_mean=weather_mean, weather_std=weather_std,
         stats_mean=stats_mean, stats_std=stats_std
     )
+    
     test_loader = DataLoader(
-        Subset(dataset, test_indices),
+        dataset,
         batch_size=64, shuffle=False, num_workers=0
     )
-    print(f"   ✓ 测试集大小: {len(test_indices)} 个样本")
+    print(f"   ✓ 测试集大小: {len(all_data)} 个样本")
 
-    # 4. 推理
-    print(f"\n[4/5] 正在进行模型推理...")
+    # 5. 推理
+    print(f"\n[5/5] 正在进行模型推理...")
     y_true, y_pred, y_probs = [], [], []
 
     with torch.no_grad():
