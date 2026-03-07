@@ -109,92 +109,49 @@ def main():
         print("   请使用新版本训练的 checkpoint（包含归一化参数）。")
         return
 
-    # 2. 加载特征缓存
-    print(f"\n[2/5] 正在加载特征缓存...")
+    # 2. 加载共享测试集
+    print(f"\n[2/5] 正在加载共享测试集...")
     
-    # 使用与exp2/exp3相同的数据集，确保测试集一致
-    EXP2_CACHE_PATH = '../exp2/cache/processed_features.pkl'
-    
-    if not os.path.exists(EXP2_CACHE_PATH):
-        print(f"❌ 找不到exp2缓存: {EXP2_CACHE_PATH}")
-        print(f"   请确保exp2的数据集已生成")
+    SHARED_TEST_PATH = '../../data/processed/shared_test_indices.pkl'
+    if not os.path.exists(SHARED_TEST_PATH):
+        print(f"❌ 找不到共享测试集: {SHARED_TEST_PATH}")
+        print(f"   请先运行 create_shared_test_set.py 生成共享测试集")
         return
     
-    with open(EXP2_CACHE_PATH, 'rb') as f:
-        all_features, cached_label_encoder, cleaning_stats = pickle.load(f)
+    with open(SHARED_TEST_PATH, 'rb') as f:
+        shared_data = pickle.load(f)
     
-    # 转换为exp1需要的格式：(traj_features, segment_stats, label_str)
-    # exp2的traj_features是21维融合特征（9维轨迹 + 12维空间），exp1只需要前9维
+    valid_indices = shared_data['valid_indices']
+    test_indices = shared_data['test_indices']
+    cleaned_data = shared_data['cleaned_data']
+    shared_label_encoder = shared_data['label_encoder']
+    
+    # 提取测试集样本
     segments = []
-    for traj_features, spatial_features, segment_stats, label_encoded in all_features:
-        label_str = cached_label_encoder.inverse_transform([label_encoded])[0]
-        # 提取前9维轨迹特征
-        traj_features_exp1 = traj_features[:, :9]
-        segments.append((traj_features_exp1, segment_stats, label_str))
+    for idx in test_indices:
+        cleaned_idx = valid_indices[idx]
+        traj, stats, datetime_series, label = cleaned_data[cleaned_idx]
+        # EXP1只需要前9维轨迹特征
+        segments.append((traj, stats, label))
     
-    print(f"   ✓ 加载完成: {len(segments)} 个样本 (使用exp2数据集，提取前9维轨迹特征)")
-
-    # 显示清洗统计
-    if cleaning_stats:
-        print(f"\n{'=' * 60}")
-        print("数据清洗统计")
-        print(f"{'=' * 60}")
-        before = cleaning_stats.get('before', {})
-        after = cleaning_stats.get('after', {})
-        cleaner = cleaning_stats.get('cleaner', {})
-
-        if before:
-            print(f"\n第一阶段（基础预处理）:")
-            print(f"  输入轨迹段数: {before.get('total_segments', 0)}")
-            print(f"  输入点数: {before.get('total_points', 0)}")
-
-        if after:
-            print(f"\n第二阶段（深度清洗）:")
-            print(f"  有效轨迹段数: {after.get('valid_segments', 0)}")
-            print(f"  第一阶段丢弃: {after.get('stage1_discarded', 0)}")
-            print(f"  第二阶段丢弃: {after.get('stage2_discarded', 0)}")
-            print(f"  总丢弃: {after.get('total_discarded', 0)}")
-            print(f"  保留率: {after.get('retention_rate', 0):.2%}")
-
-        if cleaner:
-            print(f"\n清洗操作详情:")
-            print(f"  物理异常修复: {cleaner.get('physical_anomalies_fixed', 0)}")
-            print(f"  时间间隔插值: {cleaner.get('time_gaps_filled', 0)}")
-            print(f"  轨迹平滑优化: {cleaner.get('trajectory_smoothed', 0)}")
-            print(f"  方向异常修正: {cleaner.get('bearing_anomalies_fixed', 0)}")
-
-        discard_reasons = cleaning_stats.get('discard_reasons', {})
-        if discard_reasons:
-            print(f"\n丢弃原因分布:")
-            for reason, count in discard_reasons.items():
-                print(f"  {reason}: {count}")
-
-        print(f"{'=' * 60}\n")
+    print(f"   ✓ 加载完成: {len(segments)} 个测试样本 (使用共享测试集)")
+    print(f"   共享测试集索引: {len(test_indices)} 个")
 
     # 3. 准备测试数据
     print(f"\n[3/5] 正在准备测试数据...")
     dataset = TrajectoryDataset(
-        segments, cached_label_encoder,
+        segments, shared_label_encoder,
         traj_mean=traj_mean, traj_std=traj_std,
         stats_mean=stats_mean, stats_std=stats_std
     )
-    all_indices = np.arange(len(segments))
-    labels_stratify = [s[2] for s in segments]
-    train_indices, temp_indices = train_test_split(
-        all_indices, test_size=0.3, random_state=42, stratify=labels_stratify
-    )
-    temp_labels = [labels_stratify[i] for i in temp_indices]
-    val_indices, test_indices = train_test_split(
-        temp_indices, test_size=0.6667, random_state=42, stratify=temp_labels
-    )
-
+    
     test_loader = DataLoader(
-        Subset(dataset, test_indices),
+        dataset,
         batch_size=128,
         shuffle=False,
         num_workers=0  # Windows 兼容
     )
-    print(f"   ✓ 测试集大小: {len(test_indices)} 个样本")
+    print(f"   ✓ 测试集大小: {len(segments)} 个样本")
 
     # 4. 执行推理
     print(f"\n[4/5] 正在进行模型推理...")

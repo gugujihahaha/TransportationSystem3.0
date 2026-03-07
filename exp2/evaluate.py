@@ -21,6 +21,8 @@ import seaborn as sns
 
 # 导入模型
 from src.model import TransportationModeClassifier
+from src.feature_extraction import FeatureExtractor
+from src.osm_feature_extractor import OsmSpatialExtractor
 
 # 设置中文字体 (防止图片乱码)
 plt.rcParams['font.sans-serif'] = ['SimHei', 'DejaVu Sans', 'Arial Unicode MS']
@@ -151,105 +153,66 @@ def main():
     model.eval()
     print("   ✓ 模型加载完成")
 
-    # 2. 加载特征缓存
-    print(f"\n[2/5] 正在加载特征缓存...")
-
-    # 尝试多个缓存路径
-    cache_paths_to_try = [CACHE_PATH] + ALTERNATIVE_CACHE_PATHS
-    cache_loaded = False
-
-    for cp in cache_paths_to_try:
-        if os.path.exists(cp):
-            CACHE_PATH = cp
-            cache_loaded = True
-            break
-
-    if not cache_loaded:
-        print(f"❌ 错误: 找不到特征缓存，尝试过以下路径:")
-        for cp in cache_paths_to_try:
-            print(f"   - {cp}")
-        print("\n请先运行 train.py 生成特征缓存。")
+    # 2. 加载共享测试集
+    print(f"\n[2/5] 正在加载共享测试集...")
+    
+    SHARED_TEST_PATH = '../../data/processed/shared_test_indices.pkl'
+    if not os.path.exists(SHARED_TEST_PATH):
+        print(f"❌ 找不到共享测试集: {SHARED_TEST_PATH}")
+        print(f"   请先运行 create_shared_test_set.py 生成共享测试集")
         return
+    
+    with open(SHARED_TEST_PATH, 'rb') as f:
+        shared_data = pickle.load(f)
+    
+    valid_indices = shared_data['valid_indices']
+    test_indices = shared_data['test_indices']
+    cleaned_data = shared_data['cleaned_data']
+    shared_label_encoder = shared_data['label_encoder']
+    
+    print(f"   ✓ 加载完成: {len(test_indices)} 个测试样本 (使用共享测试集)")
+    
+    # 3. 提取21维融合特征
+    print(f"\n[3/5] 正在提取21维融合特征...")
+    
+    # 初始化特征提取器
+    spatial_extractor = OsmSpatialExtractor()
+    feature_extractor = FeatureExtractor(spatial_extractor)
+    
+    all_features_and_labels = []
+    for idx in tqdm(test_indices, desc="提取特征"):
+        cleaned_idx = valid_indices[idx]
+        traj, stats, datetime_series, label = cleaned_data[cleaned_idx]
+        
+        try:
+            # 提取21维融合特征（9轨迹 + 12空间）
+            trajectory_features, spatial_features = feature_extractor.extract_features(traj)
+            label_encoded = shared_label_encoder.transform([label])[0]
+            all_features_and_labels.append((trajectory_features, spatial_features, stats, label_encoded))
+        except Exception as e:
+            print(f"  警告: 样本 {idx} 特征提取失败: {e}")
+            continue
+    
+    print(f"   ✓ 特征提取完成: {len(all_features_and_labels)} 个样本")
 
-    print(f"   ✓ 找到缓存: {CACHE_PATH}")
-
-    with open(CACHE_PATH, 'rb') as f:
-        # 训练脚本保存的是 (all_features_and_labels, label_encoder, cleaning_stats)
-        cache_data = pickle.load(f)
-        if len(cache_data) == 3:
-            all_features, cached_label_encoder, cleaning_stats = cache_data
-        else:
-            all_features, cached_label_encoder = cache_data
-            cleaning_stats = {}
-
-    print(f"   ✓ 加载完成: {len(all_features)} 个样本")
-
-    # 显示清洗统计
-    if cleaning_stats:
-        print(f"\n{'=' * 60}")
-        print("数据清洗统计")
-        print(f"{'=' * 60}")
-        before = cleaning_stats.get('before', {})
-        after = cleaning_stats.get('after', {})
-        cleaner = cleaning_stats.get('cleaner', {})
-
-        if before:
-            print(f"\n第一阶段（基础预处理）:")
-            print(f"  输入轨迹段数: {before.get('total_segments', 0)}")
-            print(f"  输入点数: {before.get('total_points', 0)}")
-
-        if after:
-            print(f"\n第二阶段（深度清洗）:")
-            print(f"  有效轨迹段数: {after.get('valid_segments', 0)}")
-            print(f"  第一阶段丢弃: {after.get('stage1_discarded', 0)}")
-            print(f"  第二阶段丢弃: {after.get('stage2_discarded', 0)}")
-            print(f"  总丢弃: {after.get('total_discarded', 0)}")
-            print(f"  保留率: {after.get('retention_rate', 0):.2%}")
-
-        if cleaner:
-            print(f"\n清洗操作详情:")
-            print(f"  物理异常修复: {cleaner.get('physical_anomalies_fixed', 0)}")
-            print(f"  时间间隔插值: {cleaner.get('time_gaps_filled', 0)}")
-            print(f"  轨迹平滑优化: {cleaner.get('trajectory_smoothed', 0)}")
-            print(f"  方向异常修正: {cleaner.get('bearing_anomalies_fixed', 0)}")
-
-        discard_reasons = cleaning_stats.get('discard_reasons', {})
-        if discard_reasons:
-            print(f"\n丢弃原因分布:")
-            for reason, count in discard_reasons.items():
-                print(f"  {reason}: {count}")
-
-        print(f"{'=' * 60}\n")
-
-    # 3. 准备测试数据
-    print(f"\n[3/5] 正在准备测试数据...")
+    # 4. 准备测试数据
+    print(f"\n[4/5] 正在准备测试数据...")
     dataset = DualFeatureDataset(
-        all_features, label_encoder,
+        all_features_and_labels, shared_label_encoder,
         traj_mean=traj_mean, traj_std=traj_std,
         stats_mean=stats_mean, stats_std=stats_std
     )
-    labels_for_stratify = [item[3] for item in all_features]
-    all_indices = np.arange(len(all_features))
-    train_indices, temp_indices = train_test_split(
-        all_indices, test_size=0.3, random_state=42,
-        stratify=labels_for_stratify
-    )
-    temp_labels = [labels_for_stratify[i] for i in temp_indices]
-    val_indices, test_indices = train_test_split(
-        temp_indices, test_size=0.6667, random_state=42,
-        stratify=temp_labels
-    )
-
+    
     test_loader = DataLoader(
-        Subset(dataset, test_indices),
+        dataset,
         batch_size=64,
         shuffle=False,
         num_workers=0  # Windows 兼容
     )
-    print(f"   ✓ 测试集大小: {len(test_indices)} 个样本")
+    print(f"   ✓ 测试集大小: {len(all_features_and_labels)} 个样本")
 
-    # 4. 执行推理
-    print(f"\n[4/5] 正在进行模型推理...")
+    # 5. 执行推理
+    print(f"\n[5/5] 正在进行模型推理...")
     y_true, y_pred, y_probs = [], [], []
 
     with torch.no_grad():
