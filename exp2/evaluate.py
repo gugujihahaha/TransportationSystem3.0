@@ -227,7 +227,7 @@ def main():
     # 3. 准备测试数据
     print(f"\n[3/5] 正在准备测试数据...")
     dataset = DualFeatureDataset(
-        all_features, cached_label_encoder,
+        all_features, label_encoder,
         traj_mean=traj_mean, traj_std=traj_std,
         spatial_mean=spatial_mean, spatial_std=spatial_std,
         stats_mean=stats_mean, stats_std=stats_std

@@ -99,6 +99,12 @@ def main():
     stats_mean = norm_params.get('stats_mean', None)
     stats_std = norm_params.get('stats_std', None)
 
+    # 检查归一化参数是否存在
+    if traj_mean is None or traj_std is None:
+        print("❌ 错误: checkpoint 中没有 norm_params，评估结果不可信！")
+        print("   请使用新版本训练的 checkpoint（包含归一化参数）。")
+        return
+
     # 2. 加载特征缓存
     print(f"\n[2/5] 正在加载特征缓存...")
 

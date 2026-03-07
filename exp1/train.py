@@ -183,13 +183,6 @@ def main():
     TARGET_MODES_FINAL = ['Walk', 'Bike', 'Car & taxi', 'Bus', 'Train', 'Subway']
     segments = [s for s in segments if s[2] in TARGET_MODES_FINAL]
 
-    # 对少数类进行数据增强（仅对训练数据有效，此处对全量做增强后再split）
-    segments = BaseGeoLifePreprocessor.oversample_minority_classes(
-        segments,
-        target_ratio=0.3,
-        minority_classes=['Subway', 'Train']
-    )
-
     labels = [s[2] for s in segments]
     label_encoder = LabelEncoder()
     label_encoder.fit(labels)
@@ -223,49 +216,66 @@ def main():
         stratify=temp_labels
     )
 
-    # 第二步：用训练集计算归一化统计量
-    from common.train_utils import compute_feature_stats
+    # 第二步：对训练集进行数据增强（避免数据泄露）
     train_segments = [segments[i] for i in train_indices]
+    train_segments = BaseGeoLifePreprocessor.oversample_minority_classes(
+        train_segments,
+        target_ratio=0.3,
+        minority_classes=['Subway', 'Train']
+    )
+    print(f"\n✅ 训练集增强完成: {len(train_indices)} -> {len(train_segments)}")
+
+    # 第三步：用训练集计算归一化统计量
+    from common.train_utils import compute_feature_stats
     traj_mean, traj_std, stats_mean, stats_std = compute_feature_stats(train_segments)
     norm_params = {
         'traj_mean': traj_mean, 'traj_std': traj_std,
         'stats_mean': stats_mean, 'stats_std': stats_std
     }
-    print(f"\n✅ 归一化统计量计算完成（基于 {len(train_indices)} 个训练样本）")
+    print(f"\n✅ 归一化统计量计算完成（基于 {len(train_segments)} 个训练样本）")
 
-    # 第三步：创建带归一化的 dataset
+    # 第四步：创建包含所有数据的 dataset（验证集和测试集使用原始数据）
+    all_segments = train_segments + [segments[i] for i in val_indices] + [segments[i] for i in test_indices]
     dataset = TrajectoryDataset(
-        segments, label_encoder,
+        all_segments, label_encoder,
         traj_mean=traj_mean, traj_std=traj_std,
         stats_mean=stats_mean, stats_std=stats_std
     )
 
+    # 更新索引：训练集在前，验证集在中间，测试集在后
+    new_train_indices = list(range(len(train_segments)))
+    new_val_indices = list(range(len(train_segments), len(train_segments) + len(val_indices)))
+    new_test_indices = list(range(len(train_segments) + len(val_indices), len(all_segments)))
+
     print(f"\n✅ 数据集大小:")
     print(f"  总样本数: {len(dataset)}")
-    print(f"  特征样本数: {len(segments)}")
+    print(f"  训练样本数: {len(new_train_indices)}")
+    print(f"  验证样本数: {len(new_val_indices)}")
+    print(f"  测试样本数: {len(new_test_indices)}")
 
     train_loader = DataLoader(
-        torch.utils.data.Subset(dataset, train_indices),
+        torch.utils.data.Subset(dataset, new_train_indices),
         batch_size=args.batch_size,
         shuffle=True
     )
     val_loader = DataLoader(
-        torch.utils.data.Subset(dataset, val_indices),
+        torch.utils.data.Subset(dataset, new_val_indices),
         batch_size=args.batch_size,
         shuffle=False
     )
     test_loader = DataLoader(
-        torch.utils.data.Subset(dataset, test_indices),
+        torch.utils.data.Subset(dataset, new_test_indices),
         batch_size=args.batch_size,
         shuffle=False
     )
 
     print(f"\n✅ 数据加载完成:")
-    print(f"  Train: {len(train_indices)} 样本")
-    print(f"  Val:   {len(val_indices)} 样本")
-    print(f"  Test:  {len(test_indices)} 样本")
+    print(f"  Train: {len(new_train_indices)} 样本")
+    print(f"  Val:   {len(new_val_indices)} 样本")
+    print(f"  Test:  {len(new_test_indices)} 样本")
     print(f"  训练批次总数: {len(train_loader)}")
     print(f"  验证批次总数: {len(val_loader)}")
+    print(f"  测试批次总数: {len(test_loader)}")
 
     # 检查数据中是否有 NaN 或 Inf 值
     print("\n检查数据质量:")
@@ -433,6 +443,10 @@ def main():
         if epoch < 10:
             warmup_scheduler.step()
         else:
+            # warmup 结束后，重置 plateau_scheduler 的内部状态
+            if epoch == 10:
+                plateau_scheduler.num_bad_epochs = 0
+                print("🔄 Warmup 结束，重置 ReduceLROnPlateau 状态")
             plateau_scheduler.step(val_acc)
 
         current_lr = optimizer.param_groups[0]['lr']

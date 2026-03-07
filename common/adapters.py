@@ -49,7 +49,7 @@ class Exp3DataAdapter(BaseDataAdapter):
     """Exp3（天气实验）适配器：保留时间序列供天气特征使用"""
 
     def __init__(self, enable_cleaning=True, cleaning_mode='balanced',
-                 cache_dir='./data/processed'):
+                 cache_dir='../data/processed'):
         super().__init__(enable_cleaning, cleaning_mode, cache_dir)
 
     @property
