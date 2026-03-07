@@ -304,9 +304,9 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
         print(f"\n========== 阶段 3: 特征加载 (从缓存) ==========")
         try:
             with open(PROCESSED_FEATURE_CACHE_PATH, 'rb') as f:
-                all_features_and_labels, label_encoder = pickle.load(f)
+                all_features_and_labels, label_encoder, cleaning_stats = pickle.load(f)
             print(f"✅ 特征从缓存加载完成: {len(all_features_and_labels)} 条")
-            return all_features_and_labels, spatial_extractor, weather_processor, label_encoder, {}
+            return all_features_and_labels, spatial_extractor, weather_processor, label_encoder, cleaning_stats
         except Exception as e:
             print(f"⚠️ 特征缓存加载失败: {e}")
 
@@ -321,7 +321,7 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
 
         try:
             base_segments = BaseGeoLifePreprocessor.load_from_cache(BASE_DATA_PATH)
-            adapter = Exp4DataAdapter(target_length=FIXED_SEQUENCE_LENGTH, enable_cleaning=True, cleaning_mode=cleaning_mode)
+            adapter = Exp4DataAdapter(enable_cleaning=True, cleaning_mode=cleaning_mode)
             processed_segments_with_time = adapter.process_segments(base_segments)
             cleaning_stats = adapter.get_cleaning_stats()
         except Exception as e:
@@ -341,7 +341,7 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
                 labels = geolife_loader.load_labels(user_id)
                 if labels.empty:
                     continue
-                trajectory_dir = os.path.join(geolife_root, f"Data/{user_id}/Trajectory")
+                trajectory_dir = os.path.join(geolife_root, "Data", user_id, "Trajectory")
                 if not os.path.exists(trajectory_dir):
                     continue
 
@@ -581,8 +581,8 @@ def main():
     else:
         parser = argparse.ArgumentParser(description='训练交通方式识别模型 (Exp4 - 稳定版)')
         parser.add_argument('--geolife_root', type=str, default='../data/Geolife Trajectories 1.3')
-        parser.add_argument('--osm_path', type=str, default='../data/exp3.geojson')
-        parser.add_argument('--weather_path', type=str, default='../data/beijing_weather_hourly_2007_2012.csv')
+        parser.add_argument('--osm_path', type=str, default='./data/exp3.geojson')
+        parser.add_argument('--weather_path', type=str, default='./data/beijing_weather_hourly_2007_2012.csv')
 
         # 数据加载选项
         parser.add_argument('--use_base_data', action='store_true', default=True,

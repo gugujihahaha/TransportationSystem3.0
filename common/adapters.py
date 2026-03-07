@@ -33,16 +33,22 @@ class Exp2DataAdapter(BaseDataAdapter):
     """Exp2 适配器：返回 (features, label)，轨迹 + OSM 空间特征。"""
 
     def __init__(self, enable_cleaning=True, cleaning_mode='balanced',
-                 cache_dir='../data/processed'):
+                 cache_dir='./data/processed'):
         super().__init__(enable_cleaning, cleaning_mode, cache_dir)
 
     @property
     def experiment_name(self) -> str:
         return "Exp2"
 
-    def _format_output(self, cleaned_segments: List[Tuple]) -> List[Tuple[np.ndarray, np.ndarray, str]]:
-        """丢弃时间序列，返回 (traj_features, segment_stats, label)。"""
-        return [(traj, stats, label) for traj, stats, _, label in cleaned_segments]
+    def _format_output(self, cleaned_segments: List[Tuple]) -> List[Tuple[np.ndarray, str]]:
+        """丢弃时间序列，合并 traj 和 stats，返回 (features, label)。"""
+        result = []
+        for traj, stats, _, label in cleaned_segments:
+            N = traj.shape[0]
+            stats_expanded = np.tile(stats, (N, 1))
+            features = np.concatenate([traj, stats_expanded], axis=1)
+            result.append((features, label))
+        return result
 
 
 class Exp3DataAdapter(Exp2DataAdapter):
@@ -57,7 +63,7 @@ class Exp4DataAdapter(BaseDataAdapter):
     """Exp4 适配器：返回 (features, datetime_series, label)，保留时间序列供天气特征使用。"""
 
     def __init__(self, enable_cleaning=True, cleaning_mode='balanced',
-                 cache_dir='../data/processed'):
+                 cache_dir='./data/processed'):
         super().__init__(enable_cleaning, cleaning_mode, cache_dir)
 
     @property
