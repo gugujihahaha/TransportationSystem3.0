@@ -39,20 +39,15 @@ class DualFeatureDataset(Dataset):
         return len(self.segments)
 
     def __getitem__(self, idx):
-        # 适配训练脚本保存的格式: (traj_feat, spatial_feat, label)
-        traj_features, spatial_features, label = self.segments[idx]
+        # 适配训练脚本保存的格式: (traj_feat, spatial_feat, stats, label_encoded)
+        traj_features, spatial_features, segment_stats, label_encoded = self.segments[idx]
 
         traj_tensor = torch.FloatTensor(traj_features)
         spatial_tensor = torch.FloatTensor(spatial_features)
+        stats_tensor = torch.FloatTensor(segment_stats)
+        label_tensor = torch.LongTensor([label_encoded])[0]
 
-        # 标签处理：如果是字符串则转换，如果是数字则直接读取
-        if isinstance(label, (int, np.integer)):
-            label_tensor = torch.LongTensor([label])[0]
-        else:
-            label_encoded = self.label_encoder.transform([label])[0]
-            label_tensor = torch.LongTensor([label_encoded])[0]
-
-        return traj_tensor, spatial_tensor, label_tensor
+        return traj_tensor, spatial_tensor, stats_tensor, label_tensor
 
 
 def main():
@@ -196,7 +191,7 @@ def main():
     # 3. 准备测试数据
     print(f"\n[3/5] 正在准备测试数据...")
     dataset = DualFeatureDataset(all_features, cached_label_encoder)
-    labels_for_stratify = [item[2] for item in all_features]
+    labels_for_stratify = [item[3] for item in all_features]
 
     _, test_indices = train_test_split(
         range(len(dataset)),
@@ -218,11 +213,11 @@ def main():
     y_true, y_pred, y_probs = [], [], []
 
     with torch.no_grad():
-        for traj, spatial, labels in tqdm(test_loader, desc="Evaluation Progress", leave=True):
+        for traj, spatial, stats, labels in tqdm(test_loader, desc="Evaluation Progress", leave=True):
             try:
-                traj, spatial, labels = traj.to(DEVICE), spatial.to(DEVICE), labels.to(DEVICE)
+                traj, spatial, stats, labels = traj.to(DEVICE), spatial.to(DEVICE), stats.to(DEVICE), labels.to(DEVICE)
 
-                logits = model(traj, spatial)
+                logits = model(traj, spatial, segment_stats=stats)
                 probs = torch.softmax(logits, dim=1)
                 preds = torch.argmax(probs, dim=1)
 

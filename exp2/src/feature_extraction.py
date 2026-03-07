@@ -76,45 +76,15 @@ class FeatureExtractor:
 
     def _extract_trajectory_features(self, trajectory: np.ndarray) -> np.ndarray:
         """
-        提取并归一化轨迹特征
+        提取并返回原始轨迹特征
 
         Args:
             trajectory: (N, 9) 原始轨迹特征
 
         Returns:
-            normalized_features: (N, 9) 归一化后的特征
+            features: (N, 9) 原始特征（不做归一化）
         """
-        # 复制数组避免修改原始数据
-        features = trajectory.copy()
-
-        # Z-score 归一化
-        features = self._normalize_features(features)
-
-        return features
-
-    def _normalize_features(self, features: np.ndarray) -> np.ndarray:
-        """
-        归一化特征 (Z-score 归一化)
-
-        公式: z = (x - μ) / σ
-
-        Args:
-            features: (N, 9) 原始特征
-
-        Returns:
-            normalized: (N, 9) 归一化特征
-        """
-        # 计算均值和标准差（沿着第 0 维，即对每个特征维度单独计算）
-        mean = np.mean(features, axis=0, keepdims=True)
-        std = np.std(features, axis=0, keepdims=True) + 1e-8  # 避免除以零
-
-        # 归一化
-        normalized = (features - mean) / std
-
-        # 截断异常值到 [-5, 5] 范围
-        normalized = np.clip(normalized, -5, 5)
-
-        return normalized
+        return trajectory.copy().astype(np.float32)
 
     def combine_features(self, trajectory_features: np.ndarray,
                          spatial_features: np.ndarray) -> np.ndarray:
