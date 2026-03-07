@@ -1,10 +1,10 @@
 """
-深度学习模型 (Exp5 - 弱监督上下文表示增强)
+深度学习模型 (Exp4 - 弱监督上下文表示增强)
 核心思想：GTA-Seg - 上下文特征仅用于改善轨迹编码器表示，不参与分类决策
 
 与Exp4的关键区别：
 - Exp4: trajectory + spatial + weather 硬拼接 → classifier
-- Exp5: trajectory → classifier，spatial+weather 仅作为 context encoder 约束
+- Exp4: trajectory → classifier，spatial+weather 仅作为 context encoder 约束
 """
 import torch
 import torch.nn as nn
@@ -14,11 +14,11 @@ from typing import Tuple
 
 class WeaklySupervisedContextModel(nn.Module):
     """
-    跨模态对比学习模型 (Exp5 - 论文核心创新)
+    跨模态对比学习模型 (Exp4 - 论文核心创新)
 
     与 Exp4 的关键区别：
         Exp4: traj + spatial + weather 硬拼接 → 分类器
-        Exp5: traj → 分类器（主路径）
+        Exp4: traj → 分类器（主路径）
               spatial + weather → 上下文编码器（辅助路径）
               两路径用 InfoNCE loss 在表示空间对齐
 
@@ -167,10 +167,10 @@ class WeaklySupervisedContextModel(nn.Module):
         return preds, probs
 
 
-class TransportationModeClassifierExp5(nn.Module):
-    """Exp5兼容接口（保持与Exp4相同的接口）"""
+class TransportationModeClassifierExp4(nn.Module):
+    """Exp4兼容接口（保持与Exp4相同的接口）"""
     def __init__(self, *args, **kwargs):
-        super(TransportationModeClassifierExp5, self).__init__()
+        super(TransportationModeClassifierExp4, self).__init__()
         self.model = WeaklySupervisedContextModel(*args, **kwargs)
 
     def forward(self, trajectory_features: torch.Tensor,

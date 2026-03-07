@@ -441,6 +441,14 @@ def main():
     print("最终测试集评估")
     print("=" * 80)
 
+    # 加载最佳checkpoint进行最终评估
+    best_ckpt = torch.load(
+        'checkpoints/exp1_model.pth',
+        map_location=args.device, weights_only=False
+    )
+    model.load_state_dict(best_ckpt['model_state_dict'])
+    print("✅ 已加载最佳checkpoint进行最终评估")
+
     test_loss, test_report, all_preds, all_labels = evaluate(
         model, test_loader, criterion, args.device, label_encoder.classes_
     )

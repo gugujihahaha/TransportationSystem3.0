@@ -1,5 +1,5 @@
 """
-深度学习模型 (Exp4)
+深度学习模型 (Exp3)
 三输入架构: 轨迹(9维) + 空间(15维) + 天气(12维)
 """
 import torch
@@ -16,7 +16,7 @@ from common.base_model import (BaseTransportationClassifier,
 
 
 class TransportationModeClassifierWithWeather(HierarchicalTransportationClassifier):
-    """交通方式分类器 (Exp4 - 含天气特征) - 任务定义统一 num_classes = 7"""
+    """交通方式分类器 (Exp3 - 含天气特征) - 任务定义统一 num_classes = 7"""
 
     def __init__(
         self,

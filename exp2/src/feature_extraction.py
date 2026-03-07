@@ -27,10 +27,7 @@ class FeatureExtractor:
 
     def extract_features(self, trajectory: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
-        提取轨迹特征和空间特征
-
-        关键：这里只调用一次 spatial_extractor.extract_spatial_features()，
-              不会出现嵌套循环问题
+        提取轨迹特征和空间特征（点级融合）
 
         Args:
             trajectory: 已预处理的 NumPy 数组 (N, 9)
@@ -45,34 +42,31 @@ class FeatureExtractor:
                 [:, 8] = total_time
 
         Returns:
-            trajectory_features: 归一化后的轨迹特征 (N, 9)
-            spatial_features: 空间特征 (N, 11)
+            combined: 点级融合后的特征 (N, 21) = 9轨迹 + 12空间
+            placeholder: 占位符 (N, 1)，保持接口兼容
         """
-        # 1. 提取和归一化轨迹特征
+        # 1. 提取轨迹特征
         trajectory_features = self._extract_trajectory_features(trajectory)
 
-        # 2. 提取空间特征（关键：这里是批量提取，不是逐点循环）
+        # 2. 提取空间特征
         try:
-            # 这里调用 spatial_extractor.extract_spatial_features(trajectory)
-            # 在 osm_feature_extractor.py 中实现了：
-            #   - 向量化网格键生成
-            #   - 批量缓存查询
-            #   - 批量 KDTree 查询
-            # 因此不会出现嵌套循环
             spatial_features = self.spatial_extractor.extract_spatial_features(trajectory)
         except Exception as e:
-            # 如果空间特征提取失败，使用零填充
             print(f"警告: 空间特征提取失败 ({e}). 使用零填充代替。")
-            spatial_features = np.zeros((trajectory.shape[0], 11), dtype=np.float32)
+            spatial_features = np.zeros((trajectory.shape[0], 12), dtype=np.float32)
 
         # 3. 验证维度
-        if spatial_features.shape[1] != 11:
-            raise ValueError(f"空间特征维度错误：预期 11 维，实际 {spatial_features.shape[1]} 维。")
+        if spatial_features.shape[1] != 12:
+            raise ValueError(f"空间特征维度错误：预期12维，实际{spatial_features.shape[1]}维")
 
         if trajectory_features.shape[1] != 9:
             raise ValueError(f"轨迹特征维度错误：预期 9 维，实际 {trajectory_features.shape[1]} 维。")
 
-        return trajectory_features, spatial_features
+        # 4. 点级融合：每个时间步直接拼接空间特征
+        combined = np.concatenate([trajectory_features, spatial_features], axis=1)
+        # 返回 (combined_21dim, zeros占位, ) 保持接口兼容
+        placeholder = np.zeros((trajectory.shape[0], 1), dtype=np.float32)
+        return combined, placeholder
 
     def _extract_trajectory_features(self, trajectory: np.ndarray) -> np.ndarray:
         """
