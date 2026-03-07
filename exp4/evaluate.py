@@ -7,9 +7,13 @@ import os
 import sys
 import argparse
 import pickle
+import json
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
+import matplotlib.pyplot as plt
+import seaborn as sns
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix
@@ -32,6 +36,7 @@ from exp2.src.model import TransportationModeClassifier
 CACHE_DIR = 'cache'
 PROCESSED_FEATURE_CACHE = os.path.join(CACHE_DIR, 'processed_features_exp4.pkl')
 EXP2_FEATURE_CACHE = os.path.join('..', 'exp2', 'cache', 'processed_features.pkl')
+OUTPUT_DIR = 'evaluation_results'
 # ==================================================================
 
 
@@ -98,7 +103,11 @@ class TrajectoryDatasetExp4(Dataset):
         else:
             stats_norm = stats
 
+        # ✅ 关键：加placeholder，与exp2的Dataset格式完全一致
+        placeholder = np.zeros((traj.shape[0], 1), dtype=np.float32)
+
         return (torch.FloatTensor(traj),
+                torch.FloatTensor(placeholder),
                 torch.FloatTensor(stats_norm),
                 torch.LongTensor([label])[0])
 
@@ -272,34 +281,139 @@ def main():
         weight=class_weights
     )
 
-    # 评估
+    # 创建输出目录
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    # 执行推理
     print(f"\n========== 测试集评估 ==========")
-    test_loss, test_acc, test_report, all_preds, all_labels = common_evaluate(
-        model, test_loader, criterion, DEVICE, label_encoder.classes_
+    model.eval()
+    all_preds, all_labels, all_probs = [], [], []
+
+    with torch.no_grad():
+        for batch in tqdm(test_loader, desc="Evaluation Progress", leave=True):
+            traj, placeholder, stats, labels = batch
+            traj = traj.to(DEVICE)
+            placeholder = placeholder.to(DEVICE)
+            stats = stats.to(DEVICE)
+            labels = labels.to(DEVICE)
+
+            logits = model(traj, placeholder, segment_stats=stats)
+            probs = torch.softmax(logits, dim=1)
+            preds = torch.argmax(logits, dim=1)
+
+            all_preds.extend(preds.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
+            all_probs.extend(probs.cpu().numpy())
+
+    # 转换为 Numpy 数组
+    all_preds = np.array(all_preds)
+    all_labels = np.array(all_labels)
+    all_probs = np.array(all_probs)
+
+    # 生成评估报告
+    print(f"\n========== 评估报告 ==========")
+    class_names = label_encoder.classes_
+
+    # 打印分类报告
+    print("\n" + "=" * 60)
+    print("分类报告")
+    print("=" * 60)
+    report_text = classification_report(
+        all_labels, all_preds,
+        target_names=class_names,
+        zero_division=0,
+        digits=4
     )
+    print(report_text)
 
-    print(f"\nTest Loss: {test_loss:.4f} | Test Acc: {test_acc:.4f}")
-    print("\n各类别详细指标:")
-    for cls in label_encoder.classes_:
-        if cls in test_report:
-            metrics = test_report[cls]
-            print(f"  {cls:15s}: P={metrics['precision']:.4f}, R={metrics['recall']:.4f}, F1={metrics['f1-score']:.4f}")
+    # 保存 JSON 报告
+    report_dict = classification_report(
+        all_labels, all_preds,
+        target_names=class_names,
+        output_dict=True,
+        zero_division=0
+    )
+    json_path = os.path.join(OUTPUT_DIR, 'evaluation_report.json')
+    with open(json_path, 'w', encoding='utf-8') as f:
+        json.dump(report_dict, f, indent=4, ensure_ascii=False)
+    print(f"   ✓ 保存: {json_path}")
 
-    # 混淆矩阵
-    cm = confusion_matrix(all_labels, all_preds)
-    print("\n混淆矩阵（行=真实，列=预测）:")
-    classes = label_encoder.classes_
-    print(f"{'':15s}", end="")
-    for c in classes:
-        print(f"{c[:6]:>8s}", end="")
-    print()
-    for i, row in enumerate(cm):
-        print(f"{classes[i]:15s}", end="")
-        for val in row:
-            print(f"{val:8d}", end="")
-        print()
+    # 保存 CSV 预测结果
+    conf_list = [float(all_probs[i, p]) for i, p in enumerate(all_preds)]
+    csv_path = os.path.join(OUTPUT_DIR, 'predictions_exp4.csv')
+    pd.DataFrame({
+        'true_label': [class_names[i] for i in all_labels],
+        'pred_label': [class_names[i] for i in all_preds],
+        'confidence': conf_list,
+        'correct': all_labels == all_preds
+    }).to_csv(csv_path, index=False, encoding='utf-8-sig')
+    print(f"   ✓ 保存: {csv_path}")
 
-    print(f"\n模型路径: {args.checkpoint}")
+    # 保存混淆矩阵图
+    try:
+        plt.figure(figsize=(10, 8))
+        cm = confusion_matrix(all_labels, all_preds)
+        sns.heatmap(
+            cm, annot=True, fmt='d', cmap='Blues',
+            xticklabels=class_names, yticklabels=class_names
+        )
+        plt.title('Exp4 Confusion Matrix (Label Smoothing + Focal Loss)', fontsize=14)
+        plt.xlabel('Predicted')
+        plt.ylabel('True')
+        plt.tight_layout()
+        cm_path = os.path.join(OUTPUT_DIR, 'confusion_matrix.png')
+        plt.savefig(cm_path, dpi=300)
+        plt.close()
+        print(f"   ✓ 保存: {cm_path}")
+    except Exception as e:
+        print(f"   ⚠️ 混淆矩阵图生成失败: {e}")
+
+    # 保存各类别 F1-Score 图
+    try:
+        f1_scores = [report_dict[cls]['f1-score'] for cls in class_names]
+        plt.figure(figsize=(12, 6))
+        bars = sns.barplot(x=list(class_names), y=f1_scores, palette='viridis')
+        plt.title('Exp4 F1-Score by Transportation Mode', fontsize=14)
+        plt.xlabel('Transportation Mode')
+        plt.ylabel('F1-Score')
+        plt.ylim(0, 1.0)
+        for i, v in enumerate(f1_scores):
+            plt.text(i, v + 0.02, f"{v:.3f}", ha='center', fontsize=10)
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        f1_path = os.path.join(OUTPUT_DIR, 'per_class_f1_scores.png')
+        plt.savefig(f1_path, dpi=300)
+        plt.close()
+        print(f"   ✓ 保存: {f1_path}")
+    except Exception as e:
+        print(f"   ⚠️ F1-Score 图生成失败: {e}")
+
+    # 保存错误分析
+    try:
+        errors_df = pd.DataFrame({
+            'true_label': [class_names[i] for i in all_labels],
+            'pred_label': [class_names[i] for i in all_preds],
+            'confidence': conf_list
+        })
+        errors_df = errors_df[errors_df['true_label'] != errors_df['pred_label']]
+        errors_path = os.path.join(OUTPUT_DIR, 'error_analysis.csv')
+        errors_df.to_csv(errors_path, index=False, encoding='utf-8-sig')
+        print(f"   ✓ 保存: {errors_path} ({len(errors_df)} 个错误样本)")
+    except Exception as e:
+        print(f"   ⚠️ 错误分析保存失败: {e}")
+
+    # 汇总统计
+    print("\n" + "=" * 60)
+    print("评估汇总")
+    print("=" * 60)
+    print(f"总样本数: {len(all_labels)}")
+    print(f"正确预测: {(all_labels == all_preds).sum()}")
+    print(f"错误预测: {(all_labels != all_preds).sum()}")
+    print(f"准确率: {report_dict['accuracy']:.4f}")
+    print(f"加权 F1: {report_dict['weighted avg']['f1-score']:.4f}")
+    print(f"宏平均 F1: {report_dict['macro avg']['f1-score']:.4f}")
+
+    print(f"\n✅ 所有评估结果已保存至: {os.path.abspath(OUTPUT_DIR)}")
 
 
 if __name__ == "__main__":

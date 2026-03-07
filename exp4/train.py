@@ -127,7 +127,11 @@ class TrajectoryDatasetExp4(Dataset):
         else:
             stats_norm = stats
 
+        # ✅ 关键：加placeholder，与exp2的Dataset格式完全一致
+        placeholder = np.zeros((traj.shape[0], 1), dtype=np.float32)
+
         return (torch.FloatTensor(traj),
+                torch.FloatTensor(placeholder),
                 torch.FloatTensor(stats_norm),
                 torch.LongTensor([label])[0])
 
@@ -461,9 +465,9 @@ def main():
             consecutive_nan_count = 0  # 正常训练，重置计数器
 
         # 验证
-        val_loss, val_acc, _, _ = evaluate(
+        val_loss, val_acc, val_report, _, _ = evaluate(
             model, val_loader, criterion, DEVICE,
-            label_names=None  # 验证时不计算 CCA 损失
+            label_names=label_encoder.classes_
         )
 
         # 学习率调度
