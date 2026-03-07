@@ -117,8 +117,8 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
         try:
             with open(PROCESSED_FEATURE_CACHE_PATH, 'rb') as f:
                 with torch.serialization.safe_globals({LabelEncoder: LabelEncoder}):
-                    all_features_and_labels, label_encoder = pickle.load(f)
-            return all_features_and_labels, spatial_extractor, label_encoder, {}
+                    all_features_and_labels, label_encoder, cleaning_stats = pickle.load(f)
+            return all_features_and_labels, spatial_extractor, label_encoder, cleaning_stats
         except Exception:
             pass
 
@@ -130,7 +130,7 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
     if use_base_data and os.path.exists(BASE_DATA_PATH):
         print(f"\n========== 阶段 2: 使用预处理基础数据 (快速模式 - 清洗模式: {cleaning_mode}) ==========")
         base_segments = BaseGeoLifePreprocessor.load_from_cache(BASE_DATA_PATH)
-        adapter = Exp2DataAdapter(target_length=FIXED_SEQUENCE_LENGTH, enable_cleaning=True, cleaning_mode=cleaning_mode)
+        adapter = Exp2DataAdapter(enable_cleaning=True, cleaning_mode=cleaning_mode)
         processed_segments = adapter.process_segments(base_segments)
         cleaning_stats = adapter.get_cleaning_stats()
 
@@ -164,7 +164,7 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
             for user_id in tqdm(users, desc="[用户加载]"):
                 labels = geolife_loader.load_labels(user_id)
                 if labels.empty: continue
-                trajectory_dir = os.path.join(geolife_root, f"Data/{user_id}/Trajectory")
+                trajectory_dir = os.path.join(geolife_root, "Data", user_id, "Trajectory")
                 for traj_file in os.listdir(trajectory_dir):
                     if not traj_file.endswith('.plt'): continue
                     try:
@@ -191,9 +191,11 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
     print("\n========== 2.2: 特征提取 ==========")
     feature_extractor = FeatureExtractor(spatial_extractor)
     all_features_and_labels = []
-    for trajectory, segment_stats, label_str in tqdm(processed_segments, desc="[特征提取]"):
+    for features, label_str in tqdm(processed_segments, desc="[特征提取]"):
         try:
-            trajectory_features, spatial_features = feature_extractor.extract_features(trajectory)
+            trajectory_features = features[:, :9]
+            segment_stats = features[:, 9:]
+            trajectory_features, spatial_features = feature_extractor.extract_features(trajectory_features)
             label_encoded = label_encoder.transform([label_str])[0]
             all_features_and_labels.append((trajectory_features, spatial_features, segment_stats, label_encoded))
         except: continue
@@ -206,8 +208,8 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
 # ===== ✅ 修改 3：main 函数参数接入 =====
 def main():
     parser = argparse.ArgumentParser(description='训练交通方式识别模型 (Exp2 优化版)')
-    parser.add_argument('--geolife_root', type=str, default='../data/Geolife Trajectories 1.3')
-    parser.add_argument('--osm_path', type=str, default='../data/exp2.geojson')
+    parser.add_argument('--geolife_root', type=str, default='./data/Geolife Trajectories 1.3')
+    parser.add_argument('--osm_path', type=str, default='./data/exp2.geojson')
 
     # 新增参数
     parser.add_argument('--use_base_data', action='store_true', default=True, help='使用预处理的基础数据')
@@ -247,7 +249,7 @@ def main():
 
     # 第一步：先划分索引（不需要 dataset）
     all_indices = np.arange(len(all_features_and_labels))
-    labels_stratify = [label_encoder.inverse_transform([label_encoded])[0] for _, _, label_encoded in all_features_and_labels]
+    labels_stratify = [label_encoder.inverse_transform([label_encoded])[0] for _, _, _, label_encoded in all_features_and_labels]
 
     train_indices, temp_indices = train_test_split(
         all_indices, test_size=0.3, random_state=42,

@@ -211,9 +211,9 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
         print(f"\n========== 阶段 2: 特征加载 (从最终缓存) ==========")
         try:
             with open(PROCESSED_FEATURE_CACHE_PATH, 'rb') as f:
-                all_features_and_labels, label_encoder = pickle.load(f)
+                all_features_and_labels, label_encoder, cleaning_stats = pickle.load(f)
             print(f"✅ 预提取特征加载完成: {len(all_features_and_labels)} 条记录")
-            return all_features_and_labels, spatial_extractor, label_encoder, {}
+            return all_features_and_labels, spatial_extractor, label_encoder, cleaning_stats
         except Exception:
             pass
 
@@ -227,7 +227,7 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
         print(f"{'='*80}\n")
 
         base_segments = BaseGeoLifePreprocessor.load_from_cache(BASE_DATA_PATH)
-        adapter = Exp3DataAdapter(target_length=50, enable_cleaning=True, cleaning_mode=cleaning_mode)
+        adapter = Exp3DataAdapter(enable_cleaning=True, cleaning_mode=cleaning_mode)
         processed_segments = adapter.process_segments(base_segments)
         cleaning_stats = adapter.get_cleaning_stats()
 
@@ -241,7 +241,7 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
         for user_id in tqdm(users, desc="[用户加载]"):
             labels = geolife_loader.load_labels(user_id)
             if labels.empty: continue
-            trajectory_dir = os.path.join(geolife_root, f"Data/{user_id}/Trajectory")
+            trajectory_dir = os.path.join(geolife_root, "Data", user_id, "Trajectory")
             if not os.path.exists(trajectory_dir): continue
 
             for traj_file in os.listdir(trajectory_dir):
@@ -274,9 +274,11 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
     feature_extractor = FeatureExtractor(spatial_extractor)
     all_features_and_labels = []
 
-    for trajectory, segment_stats, label_str in tqdm(processed_segments, desc="[Exp3 特征提取]"):
+    for features, label_str in tqdm(processed_segments, desc="[Exp3 特征提取]"):
         try:
-            trajectory_features, spatial_features = feature_extractor.extract_features(trajectory)
+            trajectory_features = features[:, :9]
+            segment_stats = features[:, 9:]
+            trajectory_features, spatial_features = feature_extractor.extract_features(trajectory_features)
             label_encoded = label_encoder.transform([label_str])[0]
             all_features_and_labels.append((trajectory_features, spatial_features, segment_stats, label_encoded))
         except Exception:
@@ -297,7 +299,7 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
 def main():
     parser = argparse.ArgumentParser(description='训练交通方式识别模型 (Exp3)')
     parser.add_argument('--geolife_root', type=str, default='../data/Geolife Trajectories 1.3')
-    parser.add_argument('--osm_path', type=str, default='../data/exp3.geojson')
+    parser.add_argument('--osm_path', type=str, default='./data/exp3.geojson')
 
     # ===== ✅ 新增参数 =====
     parser.add_argument('--use_base_data', action='store_true', default=True, help='使用预处理的基础数据（推荐）')

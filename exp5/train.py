@@ -652,8 +652,8 @@ def main():
     else:
         parser = argparse.ArgumentParser(description='训练交通方式识别模型 (Exp5 - 改进版)')
         parser.add_argument('--geolife_root', type=str, default='../data/Geolife Trajectories 1.3')
-        parser.add_argument('--osm_path', type=str, default='../data/exp3.geojson')
-        parser.add_argument('--weather_path', type=str, default='../data/beijing_weather_hourly_2007_2012.csv')
+        parser.add_argument('--osm_path', type=str, default='./data/exp3.geojson')
+        parser.add_argument('--weather_path', type=str, default='./data/beijing_weather_hourly_2007_2012.csv')
 
         parser.add_argument('--use_base_data', action='store_true', default=True)
         parser.add_argument('--max_users', type=int, default=None)
