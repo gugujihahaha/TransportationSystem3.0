@@ -16,7 +16,24 @@ from typing import Tuple, List
 
 
 def train_epoch(model, dataloader, criterion, optimizer, device,
-                max_grad_norm=1.0):
+                max_grad_norm=1.0, use_cca=False, context_loss_weight=0.1):
+    """
+    训练一个 epoch
+
+    Args:
+        model: 模型
+        dataloader: 数据加载器
+        criterion: 分类损失函数
+        optimizer: 优化器
+        device: 设备
+        max_grad_norm: 梯度裁剪阈值
+        use_cca: 是否使用 CCA 对比学习
+        context_loss_weight: CCA 损失权重
+
+    Returns:
+        avg_loss: 平均损失
+        accuracy: 准确率
+    """
     model.train()
     total_loss, correct, total = 0.0, 0, 0
 
@@ -37,12 +54,23 @@ def train_epoch(model, dataloader, criterion, optimizer, device,
 
         optimizer.zero_grad()
 
-        if segment_stats is not None:
-            logits = model(*seq_features, segment_stats=segment_stats)
+        if use_cca:
+            # CCA 模式：返回 logits, traj_z, ctx_z
+            logits, traj_z, ctx_z = model(*seq_features, segment_stats=segment_stats, return_context=True)
+            # 计算分类损失
+            cls_loss = criterion(logits, labels)
+            # 计算 InfoNCE 对比损失
+            infonce_loss = model.compute_infonce_loss(traj_z, ctx_z)
+            # 总损失
+            loss = cls_loss + context_loss_weight * infonce_loss
         else:
-            logits = model(*seq_features)
+            # 普通模式
+            if segment_stats is not None:
+                logits = model(*seq_features, segment_stats=segment_stats)
+            else:
+                logits = model(*seq_features)
+            loss = criterion(logits, labels)
 
-        loss = criterion(logits, labels)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
         optimizer.step()
@@ -56,9 +84,29 @@ def train_epoch(model, dataloader, criterion, optimizer, device,
     return total_loss / max(len(dataloader), 1), correct / max(total, 1)
 
 
-def evaluate(model, dataloader, criterion, device, label_names):
+def evaluate(model, dataloader, criterion, device, label_names=None,
+            use_cca=False):
+    """
+    评估模型
+
+    Args:
+        model: 模型
+        dataloader: 数据加载器
+        criterion: 损失函数
+        device: 设备
+        label_names: 类别名称列表
+        use_cca: 是否使用 CCA 模式（评估时不计算对比损失）
+
+    Returns:
+        avg_loss: 平均损失
+        accuracy: 准确率
+        report: 分类报告（如果提供 label_names）
+        all_preds: 所有预测
+        all_labels: 所有标签
+    """
     model.eval()
-    total_loss, all_preds, all_labels = 0.0, [], []
+    total_loss, correct, total = 0.0, 0, 0
+    all_preds, all_labels = [], []
 
     with torch.no_grad():
         for batch in tqdm(dataloader, desc="Evaluating", leave=False):
@@ -74,24 +122,37 @@ def evaluate(model, dataloader, criterion, device, label_names):
                 else:
                     seq_features.append(f)
 
-            if segment_stats is not None:
-                logits = model(*seq_features, segment_stats=segment_stats)
+            if use_cca:
+                # CCA 模式：仅返回 logits（不计算对比损失）
+                logits, _, _ = model(*seq_features, segment_stats=segment_stats, return_context=True)
             else:
-                logits = model(*seq_features)
+                # 普通模式
+                if segment_stats is not None:
+                    logits = model(*seq_features, segment_stats=segment_stats)
+                else:
+                    logits = model(*seq_features)
 
             total_loss += criterion(logits, labels).item()
             preds = torch.argmax(logits, dim=1)
+            correct += (preds == labels).sum().item()
+            total += labels.size(0)
+
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
 
     avg_loss = total_loss / max(len(dataloader), 1)
-    report = classification_report(
-        all_labels, all_preds,
-        target_names=label_names,
-        output_dict=True,
-        zero_division=0,
-    )
-    return avg_loss, report, all_preds, all_labels
+    accuracy = correct / max(total, 1)
+
+    if label_names is not None:
+        report = classification_report(
+            all_labels, all_preds,
+            target_names=label_names,
+            output_dict=True,
+            zero_division=0,
+        )
+        return avg_loss, accuracy, report, all_preds, all_labels
+    else:
+        return avg_loss, accuracy, all_preds, all_labels
 
 
 def compute_class_weights(label_encoder, all_features_and_labels,
