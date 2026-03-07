@@ -373,10 +373,19 @@ def main():
     if os.path.exists(CHECKPOINT_PATH):
         try:
             prev = torch.load(CHECKPOINT_PATH, map_location=args.device, weights_only=False)
-            if 'val_loss' in prev:
-                best_val_loss = prev['val_loss']
-            if prev.get('model_config', {}).get('num_classes') == len(label_encoder.classes_):
+            prev_config = prev.get('model_config', {})
+
+            # 检查输入维度是否一致
+            prev_input_dim = prev_config.get('input_dim', prev_config.get('trajectory_feature_dim'))
+            curr_input_dim = TRAJECTORY_FEATURE_DIM  # 21
+
+            if prev_input_dim != curr_input_dim:
+                print(f"⚠️ 输入维度不匹配（历史={prev_input_dim}, 当前={curr_input_dim}），从零开始训练")
+                # 不加载权重，best_val_loss保持inf
+            elif prev_config.get('num_classes') == len(label_encoder.classes_):
                 model.load_state_dict(prev['model_state_dict'])
+                if 'val_loss' in prev:
+                    best_val_loss = prev['val_loss']
                 print(f"✅ 加载历史最佳权重，val_loss={best_val_loss:.4f}，从 epoch 0 重新训练")
             else:
                 print(f"⚠️ 模型类别数不匹配，从零开始")
