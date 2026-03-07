@@ -137,14 +137,10 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
         processed_segments = adapter.process_segments(base_segments)
         cleaning_stats = adapter.get_cleaning_stats()
 
-        # 对少数类进行数据增强（仅对训练数据有效，此处对全量做增强后再split）
-        processed_segments = BaseGeoLifePreprocessor.oversample_minority_classes(
-            processed_segments,
-            target_ratio=0.3,
-            minority_classes=['Subway', 'Train']
-        )
+        TARGET_MODES = ['Walk', 'Bike', 'Bus', 'Car & taxi', 'Train', 'Subway']
+        processed_segments = [s for s in processed_segments if s[2] in TARGET_MODES]
 
-        all_labels_str = [label for _, label in processed_segments]
+        all_labels_str = [label for _, _, label in processed_segments]
         label_encoder = LabelEncoder().fit(all_labels_str)
         print(f"✅ 基础数据适配完成: {len(processed_segments)} 个段")
 
@@ -200,6 +196,14 @@ def load_data(geolife_root: str, osm_path: str, max_users: int = None, use_base_
             label_encoded = label_encoder.transform([label_str])[0]
             all_features_and_labels.append((trajectory_features, spatial_features, stats, label_encoded))
         except: continue
+
+    all_features_and_labels = [
+        item for item in all_features_and_labels
+        if not (np.isnan(item[0]).any() or np.isinf(item[0]).any() or
+                np.isnan(item[1]).any() or np.isinf(item[1]).any() or
+                np.isnan(item[2]).any() or np.isinf(item[2]).any())
+    ]
+    print(f"✅ NaN/Inf过滤后剩余: {len(all_features_and_labels)} 个样本")
 
     with open(PROCESSED_FEATURE_CACHE_PATH, 'wb') as f:
         pickle.dump((all_features_and_labels, label_encoder, cleaning_stats), f, protocol=pickle.HIGHEST_PROTOCOL)
@@ -308,19 +312,19 @@ def main():
         torch.utils.data.Subset(dataset, train_indices),
         batch_size=args.batch_size,
         shuffle=True,
-        num_workers=args.num_workers
+        num_workers=0
     )
     val_loader = DataLoader(
         torch.utils.data.Subset(dataset, val_indices),
         batch_size=args.batch_size,
         shuffle=False,
-        num_workers=args.num_workers
+        num_workers=0
     )
     test_loader = DataLoader(
         torch.utils.data.Subset(dataset, test_indices),
         batch_size=args.batch_size,
         shuffle=False,
-        num_workers=args.num_workers
+        num_workers=0
     )
 
     print(f"\n✅ 数据加载完成:")
@@ -373,7 +377,7 @@ def main():
     # ========================================================
     # ✅ Early Stopping 配置
     # ========================================================
-    CHECKPOINT_PATH = "checkpoints/exp2_model.pth"
+    CHECKPOINT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'checkpoints/exp2_model.pth')
 
     # 加载历史最佳 val_loss 作为初始基准
     best_val_loss = float("inf")

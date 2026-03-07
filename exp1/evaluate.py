@@ -76,7 +76,7 @@ def main():
     class_names = le.classes_
 
     print(f"   模型配置:")
-    print(f"     - 输入维度: {config['input_dim']}")
+    print(f"     - 输入维度: {config.get('trajectory_feature_dim', config.get('input_dim', 9))}")
     print(f"     - 隐藏层维度: {config['hidden_dim']}")
     print(f"     - 层数: {config['num_layers']}")
     print(f"     - 类别数: {config['num_classes']}")

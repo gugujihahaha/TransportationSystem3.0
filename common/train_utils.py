@@ -24,7 +24,7 @@ def train_epoch(model, dataloader, criterion, optimizer, device,
     for batch in tqdm(dataloader, desc="Training", leave=False):
         batch_count += 1
         *features, labels = batch
-        labels = labels.squeeze().to(device)
+        labels = labels.view(-1).to(device)
 
         seq_features = []
         segment_stats = None
@@ -63,7 +63,7 @@ def evaluate(model, dataloader, criterion, device, label_names):
     with torch.no_grad():
         for batch in tqdm(dataloader, desc="Evaluating", leave=False):
             *features, labels = batch
-            labels = labels.squeeze().to(device)
+            labels = labels.view(-1).to(device)
 
             seq_features = []
             segment_stats = None
