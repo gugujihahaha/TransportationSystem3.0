@@ -30,6 +30,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
@@ -45,7 +46,7 @@ os.chdir(SCRIPT_DIR)
 # ==============================================================
 
 from common import (BaseGeoLifePreprocessor, Exp4DataAdapter,
-                    compute_class_weights)
+                    compute_class_weights, evaluate)
 
 # exp4 专用模块
 from src.model_cca import CCATransportationClassifier
@@ -188,44 +189,6 @@ def train_epoch_cca(model, dataloader, criterion, optimizer, device,
     return total_loss / max(len(dataloader), 1), correct / max(total, 1)
 
 
-def evaluate_cca(model, dataloader, criterion, device):
-    """
-    评估模型（CCA 版本）
-
-    Args:
-        model: 模型
-        dataloader: 数据加载器
-        criterion: 损失函数
-        device: 设备
-
-    Returns:
-        avg_loss: 平均损失
-        accuracy: 准确率
-    """
-    model.eval()
-    total_loss, correct, total = 0.0, 0, 0
-
-    with torch.no_grad():
-        for batch in tqdm(dataloader, desc="Evaluating", leave=False):
-            traj, stats, labels = batch
-            traj = traj.to(device)
-            stats = stats.to(device)
-            labels = labels.to(device)
-
-            # 仅返回 logits（不计算对比损失）
-            logits = model(traj, segment_stats=stats, return_context=False)
-
-            total_loss += criterion(logits, labels).item()
-            preds = torch.argmax(logits, dim=1)
-            correct += (preds == labels).sum().item()
-            total += labels.size(0)
-
-    avg_loss = total_loss / max(len(dataloader), 1)
-    accuracy = correct / max(total, 1)
-
-    return avg_loss, accuracy
-
-
 def load_data(geolife_root: str, osm_path: str, weather_path: str,
               max_users=None, use_base_data=True, cleaning_mode='balanced'):
     """
@@ -259,7 +222,12 @@ def load_data(geolife_root: str, osm_path: str, weather_path: str,
         exp2_raw, label_encoder, cleaning_stats = pickle.load(f)
     
     print(f"✅ exp2 特征加载完成: {len(exp2_raw)} 个样本")
-
+    
+    # 验证 exp2 缓存格式
+    if len(exp2_raw) > 0:
+        print(f"exp2样本格式: {type(exp2_raw[0])}, 长度: {len(exp2_raw[0])}")
+        print(f"exp2样本0的形状: {[x.shape if hasattr(x, 'shape') else type(x) for x in exp2_raw[0]]}")
+    
     # ===== 转换数据格式 =====
     # exp2 格式: (traj_21dim, placeholder, stats_18dim, label_encoded)
     # exp4 格式: (traj_21dim, stats_18dim, label_encoded)
@@ -419,6 +387,11 @@ def main():
         mode='sqrt_inverse'
     ).to(DEVICE)
 
+    print(f"\n类别权重 (mode=sqrt_inverse):")
+    for cls, weight in zip(label_encoder.classes_, class_weights):
+        count = sum(1 for l in train_labels if l == label_encoder.transform([cls])[0])
+        print(f"  {cls}: count={count:4d}, weight={weight:.4f}")
+
     # 优化器
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
 
@@ -428,14 +401,14 @@ def main():
         optimizer, lr_lambda=lambda epoch: min(1.0, (epoch + 1) / warmup_epochs)
     )
     plateau_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='max', factor=0.5, patience=8, verbose=True
+        optimizer, mode='max', factor=0.5, patience=8
     )
 
     # Early stopping 计数器
     epochs_no_improve = 0
 
     # 损失函数
-    criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
 
     # Checkpoint 路径
     os.makedirs(args.save_dir, exist_ok=True)
@@ -481,13 +454,18 @@ def main():
         )
 
         # 验证
-        val_loss, val_acc = evaluate_cca(
-            model, val_loader, criterion, DEVICE
+        val_loss, val_acc, _, _ = evaluate(
+            model, val_loader, criterion, DEVICE,
+            label_names=None, use_cca=False  # 验证时不计算 CCA 损失
         )
 
         # 学习率调度
         if epoch >= warmup_epochs:
+            old_lr = optimizer.param_groups[0]['lr']
             plateau_scheduler.step(val_acc)
+            new_lr = optimizer.param_groups[0]['lr']
+            if old_lr != new_lr:
+                print(f"📉 学习率调整: {old_lr:.6f} → {new_lr:.6f}")
 
         # 保存最佳模型
         if val_acc > best_val_acc:
@@ -541,8 +519,9 @@ def main():
         checkpoint = torch.load(CHECKPOINT_PATH, map_location=DEVICE, weights_only=False)
         model.load_state_dict(checkpoint['model_state_dict'])
 
-    test_loss, test_acc = evaluate_cca(
-        model, test_loader, criterion, DEVICE
+    test_loss, test_acc, _, _ = evaluate(
+        model, test_loader, criterion, DEVICE,
+        label_names=None, use_cca=False  # 测试时不计算 CCA 损失
     )
 
     print(f"\nTest Loss: {test_loss:.4f} | Test Acc: {test_acc:.4f}")
