@@ -570,181 +570,95 @@ class BaseGeoLifePreprocessor:
 
         if has_datetime:
             by_class = {}
-            for feat, dt, label in segments:
-                by_class.setdefault(label, []).append((feat, dt, label))
+            for traj, dt, label in segments:
+                if label not in by_class:
+                    by_class[label] = []
+                by_class[label].append((traj, dt, label))
         elif has_weather:
             by_class = {}
             for traj, weather, stats, label in segments:
-                by_class.setdefault(label, []).append((traj, weather, stats, label))
+                if label not in by_class:
+                    by_class[label] = []
+                by_class[label].append((traj, weather, stats, label))
         else:
             by_class = {}
-            for feat, label in segments:
-                by_class.setdefault(label, []).append((feat, label))
-
-        # 统计各类样本数
-        class_counts = {cls: len(items) for cls, items in by_class.items()}
-        max_count = max(class_counts.values())
-        target_count = int(max_count * target_ratio)
+            for traj, label in segments:
+                if label not in by_class:
+                    by_class[label] = []
+                by_class[label].append((traj, label))
 
         # 自动识别少数类
         if minority_classes is None:
-            minority_classes = [
-                cls for cls, cnt in class_counts.items()
-                if cnt < target_count
-            ]
+            counts = {label: len(samples) for label, samples in by_class.items()}
+            max_count = max(counts.values())
+            minority_classes = [label for label, count in counts.items()
+                            if count < max_count * target_ratio]
 
-        print(f"\n过采样统计 (target_ratio={target_ratio}):")
-        for cls, cnt in sorted(class_counts.items()):
-            marker = " ← 需要增强" if cls in minority_classes else ""
-            print(f"  {cls:15s}: {cnt:5d}{marker}")
+        # 对少数类进行过采样
+        augmented_segments = list(segments)
 
-        augmented = list(segments)
+        for label in minority_classes:
+            samples = by_class[label]
+            current_count = len(samples)
+            target_count = int(max(len(s) for s in by_class.values()) * target_ratio)
 
-        for cls in minority_classes:
-            items = by_class.get(cls, [])
-            if not items:
+            if current_count >= target_count:
                 continue
 
-            needed = target_count - len(items)
-            if needed <= 0:
-                continue
+            # 需要增强的样本数
+            needed = target_count - current_count
 
-            added = 0
-            while added < needed:
-                # 随机选一个原始样本做增强
+            # 对每个样本进行多次增强
+            for i in range(needed):
+                original_sample = samples[i % current_count]
+
                 if has_datetime:
-                    src_feat, src_dt, src_label = random.choice(items)
+                    traj, dt, lbl = original_sample
+                    traj_aug = BaseGeoLifePreprocessor.augment_segment(traj, lbl)
+                    for aug_traj, _ in traj_aug:
+                        augmented_segments.append((aug_traj, dt, lbl))
                 elif has_weather:
-                    src_traj, src_weather, src_stats, src_label = random.choice(items)
+                    traj, weather, stats, lbl = original_sample
+                    traj_aug = BaseGeoLifePreprocessor.augment_segment(traj, lbl)
+                    for aug_traj, _ in traj_aug:
+                        augmented_segments.append((aug_traj, weather, stats, lbl))
                 else:
-                    src_feat, src_label = random.choice(items)
+                    traj, lbl = original_sample
+                    traj_aug = BaseGeoLifePreprocessor.augment_segment(traj, lbl)
+                    for aug_traj, _ in traj_aug:
+                        augmented_segments.append((aug_traj, lbl))
 
-                # 只对轨迹特征进行增强
-                if has_weather:
-                    aug_results = BaseGeoLifePreprocessor.augment_segment(
-                        src_traj, src_label,
-                        augment_types=['noise', 'scale', 'time_warp']
-                    )
-                elif has_datetime:
-                    aug_results = BaseGeoLifePreprocessor.augment_segment(
-                        src_feat, src_label,
-                        augment_types=['noise', 'scale', 'time_warp']
-                    )
-                else:
-                    aug_results = BaseGeoLifePreprocessor.augment_segment(
-                        src_feat, src_label,
-                        augment_types=['noise', 'scale', 'time_warp']
-                    )
+        # 随机打乱
+        random.shuffle(augmented_segments)
 
-                for aug_feat, aug_label in aug_results:
-                    if added >= needed:
-                        break
-                    if has_datetime:
-                        augmented.append((aug_feat, src_dt, aug_label))
-                    elif has_weather:
-                        augmented.append((aug_feat, src_weather, src_stats, aug_label))
-                    else:
-                        augmented.append((aug_feat, aug_label))
-                    added += 1
-
-            print(f"  {cls:15s}: +{added} 个增强样本 → 共 {len(items) + added}")
-
-        random.shuffle(augmented)
-        print(f"\n增强后总样本数: {len(augmented)}（原始: {len(segments)}）")
-        return augmented
+        return augmented_segments
 
 
-class BaseGeoLifeDataLoader:
-    """
-    GeoLife 数据加载器基类（轻量版）。
-    
-    特征计算完全委托给 BaseGeoLifePreprocessor， 
-    供 exp1/src/data_loader.py 等继承使用。
-    """
-
-    def __init__(self, data_root: str):
-        self.data_root = data_root
-        self._preprocessor = BaseGeoLifePreprocessor(data_root)
-
-    def load_trajectory(self, file_path: str):
-        """加载轨迹文件并计算9维特征，委托给 BaseGeoLifePreprocessor。"""
-        return self._preprocessor._load_and_compute_features(file_path)
-
-    def load_labels(self, user_id: str):
-        """加载用户标签，委托给 BaseGeoLifePreprocessor。"""
-        return self._preprocessor._load_labels(user_id)
-
-    def get_all_users(self):
-        """获取所有用户ID，委托给 BaseGeoLifePreprocessor。"""
-        return self._preprocessor._get_all_users()
-
-    def segment_trajectory(self, trajectory, labels):
-        """
-        按标签分割轨迹（基础版，子类可覆盖）。
-        
-        参数：
-            trajectory: 含 datetime 列的 DataFrame
-            labels:     含 Start Time / End Time / Transportation Mode 列的 DataFrame
-        返回：
-            List of (segment_df, mode_str)
-        """
-        segments = []
-        if labels.empty:
-            return [(trajectory, 'unknown')]
-        for _, label_row in labels.iterrows():
-            start_time = label_row['Start Time']
-            end_time   = label_row['End Time']
-            mode       = label_row['Transportation Mode']
-            mask = (
-                (trajectory['datetime'] >= start_time) & 
-                (trajectory['datetime'] <= end_time)
-            )
-            seg = trajectory[mask].copy()
-            if len(seg) > 0:
-                segments.append((seg, mode))
-        return segments
+def normalize_datetime_series(datetime_series, target_length: int):
+    """将时间序列统一到 target_length（供prepare_data.py使用）"""
+    current_len = len(datetime_series)
+    if current_len == target_length:
+        return datetime_series.reset_index(drop=True)
+    elif current_len > target_length:
+        indices = np.linspace(0, current_len - 1, target_length, dtype=int)
+        return datetime_series.iloc[indices].reset_index(drop=True)
+    else:
+        last_time = datetime_series.iloc[-1]
+        padding = pd.Series([last_time] * (target_length - current_len))
+        return pd.concat([datetime_series.reset_index(drop=True), padding], ignore_index=True)
 
 
-def main():
-    """示例：生成基础数据"""
-    import argparse
+def print_cleaned_stats(cleaned_path: str, data=None):
+    """打印标签分布统计（供prepare_data.py使用）"""
+    from collections import Counter
+    if data is None:
+        with open(cleaned_path, 'rb') as f:
+            data = pickle.load(f)
 
-    parser = argparse.ArgumentParser(description='GeoLife基础数据预处理')
-    parser.add_argument(
-        '--geolife_root',
-        type=str,
-        default='../data/Geolife Trajectories 1.3',
-        help='GeoLife数据根目录'
-    )
-    parser.add_argument(
-        '--output',
-        type=str,
-        default='../data/processed/base_segments.pkl',
-        help='输出缓存路径'
-    )
-    parser.add_argument(
-        '--max_users',
-        type=int,
-        default=None,
-        help='最大用户数（测试用）'
-    )
-
-    args = parser.parse_args()
-
-    # 创建预处理器
-    preprocessor = BaseGeoLifePreprocessor(args.geolife_root)
-
-    # 处理数据
-    segments = preprocessor.process_all_users(max_users=args.max_users)
-
-    # 保存缓存
-    preprocessor.save_to_cache(segments, args.output)
-
-    print("\n" + "=" * 80)
-    print("✅ 基础数据预处理完成！")
-    print("=" * 80)
-    print("\n后续实验可直接使用此缓存，无需重复处理GeoLife数据")
-
-
-if __name__ == '__main__':
-    main()
+    labels = [item[3] for item in data]
+    counts = Counter(labels)
+    total = len(data)
+    print(f"\n📊 标签分布 (共 {total} 条):")
+    for label in sorted(counts.keys()):
+        pct = counts[label] / total * 100
+        print(f"   {label:15s}: {counts[label]:5d} ({pct:5.1f}%)")
