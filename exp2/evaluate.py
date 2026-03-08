@@ -53,7 +53,7 @@ class TrajectoryDataset(Dataset):
         return len(self.data)
 
     def __getitem__(self, idx):
-        traj_21, _, stats, label_encoded = self.data[idx]
+        traj_21, stats, label_encoded = self.data[idx]
         traj  = traj_21.astype(np.float32)
         stats = stats.astype(np.float32)
         if self.traj_mean is not None:
@@ -106,15 +106,11 @@ def main():
     model.eval()
     print(f"   ✓ 加载完成 | 输入维度={input_dim} | 类别={list(class_names)}")
 
-    # ── 2. 从缓存加载测试数据（不实时提取OSM特征）─────────────────
+    # ── 2. 从缓存加载测试数据（自行划分）───────────────────────
     print(f"\n[2/4] 加载测试数据...")
     if not os.path.exists(EXP2_FEATURE_CACHE):
         print(f"❌ EXP2 特征缓存不存在: {EXP2_FEATURE_CACHE}")
         print("   请先运行 exp2/train.py")
-        return
-    if not os.path.exists(SHARED_TEST_PATH):
-        print(f"❌ 共享测试集不存在: {SHARED_TEST_PATH}")
-        print("   请先运行 create_shared_test_set.py")
         return
 
     with open(EXP2_FEATURE_CACHE, 'rb') as f:
@@ -122,41 +118,21 @@ def main():
     # 兼容两种缓存格式：(data, mu, sigma) 或 仅 data
     all_data = cache[0] if isinstance(cache, tuple) else cache
 
-    with open(SHARED_TEST_PATH, 'rb') as f:
-        shared_data = pickle.load(f)
-    
-    valid_indices = shared_data['valid_indices']
-    test_indices = shared_data['test_indices']
-    cleaned_data = shared_data['cleaned_data']
-    # 使用模型checkpoint中的label_encoder，而不是共享测试集中的
-    # shared_label_encoder = shared_data['label_encoder']
-    
-    # 从共享测试集提取特征
-    from exp2.src.feature_extraction import FeatureExtractor
-    from exp2.src.osm_feature_extractor import OsmSpatialExtractor
-    
-    spatial_extractor = OsmSpatialExtractor()
-    feature_extractor = FeatureExtractor(spatial_extractor)
-    
-    test_data = []
-    for idx in test_indices:
-        cleaned_idx = valid_indices[idx]
-        traj, stats, datetime_series, label = cleaned_data[cleaned_idx]
-        
-        try:
-            # 提取21维融合特征（9轨迹 + 12空间）
-            traj_21, spatial_features = feature_extractor.extract_features(traj)
-            # 使用模型checkpoint中的label_encoder进行编码
-            if label in label_encoder.classes_:
-                label_encoded = label_encoder.transform([label])[0]
-                # EXP2缓存格式: (traj_21, spatial_placeholder, stats_18, label_encoded)
-                spatial_placeholder = np.zeros((traj_21.shape[0], 1), dtype=np.float32)
-                test_data.append((traj_21, spatial_placeholder, stats, label_encoded))
-        except Exception as e:
-            print(f"  警告: 样本 {idx} 特征提取失败: {e}")
-            continue
-    
-    print(f"   ✓ 测试样本: {len(test_data)}（共享测试集，random_state=42）")
+    # 使用与train.py相同的划分逻辑（70/10/20，random_state=42）
+    from sklearn.model_selection import train_test_split
+    all_indices = np.arange(len(all_data))
+    labels_encoded = [item[2] for item in all_data]
+
+    train_indices, temp_indices = train_test_split(
+        all_indices, test_size=0.3, random_state=42, stratify=labels_encoded
+    )
+    temp_labels = [labels_encoded[i] for i in temp_indices]
+    val_indices, test_indices = train_test_split(
+        temp_indices, test_size=0.6667, random_state=42, stratify=temp_labels
+    )
+
+    test_data = [all_data[i] for i in test_indices]
+    print(f"   ✓ 测试样本: {len(test_data)}")
 
     # ── 3. 推理 ──────────────────────────────────────────────────
     print(f"\n[3/4] 推理中...")

@@ -189,7 +189,7 @@ def compute_class_weights(label_encoder, all_features_and_labels,
     else:
         label_counts = np.zeros(num_classes, dtype=np.float64)
         for lbl in labels:
-            label_counts[int(lbl)] += 1
+            label_counts[int(lbl.item()) if hasattr(lbl, 'item') else int(lbl)] += 1
 
     # 防止除零
     label_counts = np.where(label_counts == 0, 1, label_counts)
@@ -212,7 +212,7 @@ def compute_class_weights(label_encoder, all_features_and_labels,
 
     print(f"\n类别权重 (mode={mode}):")
     for i, cls in enumerate(label_encoder.classes_):
-        print(f"  {cls:15s}: count={int(label_counts[i]):5d}, weight={weights[i]:.4f}")
+        print(f"  {str(cls):15s}: count={int(label_counts[i]):5d}, weight={weights[i]:.4f}")
 
     return torch.FloatTensor(weights)
 

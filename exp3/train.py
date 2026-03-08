@@ -1,9 +1,9 @@
 """
 exp3/train.py（简化版）
 ======================
-1. 从cleaned_balanced.pkl加载数据
+1. 从exp2/cache/processed_features.pkl读取traj_21
 2. 自己划分训练集、验证集、测试集（random_state=42）
-3. 使用9维轨迹特征+7维天气特征
+3. 使用21维轨迹特征（traj_9 + OSM 12）+ 10维天气特征
 """
 
 import argparse
@@ -22,23 +22,23 @@ from tqdm import tqdm
 # 路径设置
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PARENT_DIR = os.path.dirname(SCRIPT_DIR)
+EXP2_DIR = os.path.join(PARENT_DIR, 'exp2')
 sys.path.insert(0, SCRIPT_DIR)
 sys.path.insert(0, PARENT_DIR)
 os.chdir(SCRIPT_DIR)
 
-from common import (BaseGeoLifePreprocessor, train_epoch, evaluate,
-                    compute_class_weights)
+from common import (train_epoch, evaluate, compute_class_weights)
 from src.model_weather import TransportationModeClassifierWithWeather
 from src.weather_preprocessing import WeatherDataProcessor
 
-TRAJECTORY_FEATURE_DIM = 9
-WEATHER_FEATURE_DIM    = 7
-FIXED_SEQUENCE_LENGTH   = 50
+TRAJECTORY_FEATURE_DIM = 21
+WEATHER_FEATURE_DIM    = 10
 
 CACHE_DIR          = os.path.join(SCRIPT_DIR, 'cache')
 PROCESSED_FEATURE_CACHE = os.path.join(CACHE_DIR, 'processed_features.pkl')
+EXP2_CACHE_PATH    = os.path.join(EXP2_DIR, 'cache', 'processed_features.pkl')
 CLEANED_DATA_PATH  = os.path.join(PARENT_DIR, 'data', 'processed', 'cleaned_balanced.pkl')
-WEATHER_CSV_PATH   = os.path.join(PARENT_DIR, 'data', 'weather', 'weather_data.csv')
+WEATHER_CSV_PATH   = os.path.join(PARENT_DIR, 'data', 'beijing_weather_daily_2007_2012.csv')
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 
@@ -59,10 +59,10 @@ class TrajectoryDataset(Dataset):
         return len(self.data)
 
     def __getitem__(self, idx):
-        traj, weather, stats, label = self.data[idx]
+        traj, stats, label, weather = self.data[idx]
         traj    = traj.astype(np.float32)
-        weather = weather.astype(np.float32)
         stats   = stats.astype(np.float32)
+        weather = weather.astype(np.float32)
 
         if self.traj_mean is not None:
             traj    = (traj    - self.traj_mean)    / (self.traj_std    + 1e-8)
@@ -78,39 +78,53 @@ class TrajectoryDataset(Dataset):
 
 
 def load_data():
-    """从cleaned_balanced.pkl加载数据，提取9维轨迹特征+7维天气特征"""
+    """从exp2/cache读取traj_21，从cleaned_balanced.pkl读取时间戳提取天气特征"""
+    if not os.path.exists(EXP2_CACHE_PATH):
+        raise FileNotFoundError(f"找不到 {EXP2_CACHE_PATH}")
     if not os.path.exists(CLEANED_DATA_PATH):
         raise FileNotFoundError(f"找不到 {CLEANED_DATA_PATH}")
 
-    print(f"\n[数据加载] 从cleaned_balanced.pkl加载...")
+    print(f"\n[数据加载] 从exp2/cache读取traj_21...")
+    with open(EXP2_CACHE_PATH, 'rb') as f:
+        exp2_data = pickle.load(f)
+    exp2_features = exp2_data[0]
+    exp2_label_encoder = exp2_data[1]
+    print(f"   EXP2样本数: {len(exp2_features)}")
+
+    print(f"\n[数据加载] 从cleaned_balanced.pkl读取时间戳...")
     with open(CLEANED_DATA_PATH, 'rb') as f:
         cleaned_data = pickle.load(f)
-
     print(f"   原始样本数: {len(cleaned_data)}")
+
+    # 按索引对齐，取最小值
+    min_samples = min(len(exp2_features), len(cleaned_data))
+    exp2_features = exp2_features[:min_samples]
+    cleaned_data = cleaned_data[:min_samples]
+    print(f"   对齐后样本数: {min_samples}")
 
     # 加载天气数据处理器
     weather_processor = WeatherDataProcessor(weather_csv_path=WEATHER_CSV_PATH)
+    weather_processor.load_and_process()  # 加载天气数据
 
-    # 提取9维轨迹特征+7维天气特征
-    print(f"\n[特征提取] 提取9维轨迹特征+7维天气特征...")
+    # 提取21维轨迹特征+10维天气特征
+    print(f"\n[特征提取] 提取21维轨迹特征+10维天气特征...")
     all_features = []
-    for traj, stats, datetime_series, label in tqdm(cleaned_data, desc="[特征提取]"):
+    for idx in tqdm(range(min_samples), desc="[特征提取]"):
+        traj_21, stats, label_encoded = exp2_features[idx]
+        _, _, datetime_series, _ = cleaned_data[idx]
         try:
             # 提取天气特征
-            weather_features = weather_processor.extract_weather_features(datetime_series)
-            all_features.append((traj, stats, label, weather_features))
-        except Exception:
+            weather_features = weather_processor.get_weather_features_for_trajectory(datetime_series)
+            all_features.append((traj_21, stats, label_encoded, weather_features))
+        except Exception as e:
             continue
 
-    # 编码标签
-    all_labels_str = [item[2] for item in all_features]
-    label_encoder = LabelEncoder().fit(all_labels_str)
-    all_features = [(traj, stats, label_encoder.transform([label])[0], weather)
-                    for traj, stats, label, weather in all_features]
+    # 使用exp2的标签编码器
+    label_encoder = exp2_label_encoder
 
     # 过滤NaN和Inf
     all_features = [
-        (traj, weather, stats, label)
+        (traj, stats, label, weather)
         for traj, stats, label, weather in all_features
         if not (np.isnan(traj).any() or np.isinf(traj).any() or
                 np.isnan(weather).any() or np.isinf(weather).any() or
@@ -157,7 +171,7 @@ def main():
     # 2. 划分数据集（70/10/20，random_state=42）
     print(f"\n[数据划分] 70/10/20，random_state=42...")
     all_indices = np.arange(len(all_features))
-    labels_encoded = [item[3] for item in all_features]
+    labels_encoded = [item[2] for item in all_features]
 
     train_indices, temp_indices = train_test_split(
         all_indices, test_size=0.3, random_state=42, stratify=labels_encoded
@@ -177,8 +191,14 @@ def main():
 
     # 3. 计算归一化参数（仅基于训练集）
     traj_all    = np.vstack([s[0] for s in train_data])
-    weather_all = np.vstack([s[1] for s in train_data])
-    stats_all   = np.vstack([s[2] for s in train_data])
+    stats_all   = np.vstack([s[1] for s in train_data])
+    weather_all = np.vstack([s[3] for s in train_data])
+
+    print(f"\n[数据统计] 训练集特征统计:")
+    print(f"   traj_all: shape={traj_all.shape}, min={traj_all.min():.4f}, max={traj_all.max():.4f}, mean={traj_all.mean():.4f}, std={traj_all.std():.4f}")
+    print(f"   weather_all: shape={weather_all.shape}, min={weather_all.min():.4f}, max={weather_all.max():.4f}, mean={weather_all.mean():.4f}, std={weather_all.std():.4f}")
+    print(f"   stats_all: shape={stats_all.shape}, min={stats_all.min():.4f}, max={stats_all.max():.4f}, mean={stats_all.mean():.4f}, std={stats_all.std():.4f}")
+    print(f"   NaN检查: traj={np.isnan(traj_all).any()}, weather={np.isnan(weather_all).any()}, stats={np.isnan(stats_all).any()}")
 
     def safe_stats(arr):
         mean = arr.mean(0).astype(np.float32)
@@ -188,6 +208,12 @@ def main():
     traj_mean,    traj_std    = safe_stats(traj_all)
     weather_mean, weather_std = safe_stats(weather_all)
     stats_mean,   stats_std   = safe_stats(stats_all)
+
+    print(f"\n[归一化参数]")
+    print(f"   traj_mean: {traj_mean[:5]}... (前5维)")
+    print(f"   traj_std: {traj_std[:5]}... (前5维)")
+    print(f"   weather_mean: {weather_mean}")
+    print(f"   weather_std: {weather_std}")
 
     norm_params = dict(traj_mean=traj_mean, traj_std=traj_std,
                        weather_mean=weather_mean, weather_std=weather_std,
@@ -213,7 +239,7 @@ def main():
     ).to(args.device)
 
     class_weights = compute_class_weights(
-        label_encoder, train_data, label_index=3, mode='sqrt_inverse'
+        label_encoder, train_data, label_index=2, mode='sqrt_inverse'
     )
     class_weights = torch.FloatTensor(class_weights).to(args.device)
 
@@ -223,22 +249,28 @@ def main():
     # 6. 训练
     # 加载历史最佳模型（如果存在）
     model_path = os.path.join(args.save_dir, 'exp3_model.pth')
-    best_val_acc = 0.0
+    best_val_loss = float('inf')
+    start_epoch = 0
     if os.path.exists(model_path):
         try:
             checkpoint = torch.load(model_path, map_location=args.device, weights_only=False)
-            best_val_acc = checkpoint.get('val_acc', 0.0)
-            print(f"\n[加载历史最佳模型] 历史最佳验证准确率: {best_val_acc:.4f}")
+            model.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            best_val_loss = checkpoint.get('val_loss', float('inf'))
+            start_epoch = checkpoint.get('epoch', 0) + 1
+            print(f"\n[加载历史最佳模型] 历史最佳验证损失: {best_val_loss:.4f}")
+            print(f"[继续训练] 从第 {start_epoch} 轮开始")
         except Exception as e:
             print(f"\n[警告] 无法加载历史最佳模型: {e}")
-            best_val_acc = 0.0
+            best_val_loss = float('inf')
+            start_epoch = 0
     else:
         print(f"\n[训练] 未找到历史最佳模型，从头开始训练")
 
     epochs_no_improve = 0
     patience = args.patience
 
-    for epoch in range(args.epochs):
+    for epoch in range(start_epoch, args.epochs):
         train_loss, train_acc = train_epoch(
             model, train_loader, criterion, optimizer, args.device
         )
@@ -246,14 +278,16 @@ def main():
             model, val_loader, criterion, args.device, label_encoder.classes_
         )
 
-        if val_acc > best_val_acc:
-            old_best = best_val_acc
-            best_val_acc = val_acc
+        if val_loss < best_val_loss:
+            old_best = best_val_loss
+            best_val_loss = val_loss
             epochs_no_improve = 0
             torch.save({
+                'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'label_encoder': label_encoder,
+                'val_loss': val_loss,
                 'val_acc': val_acc,
                 'norm_params': norm_params,
                 'model_config': {
@@ -269,13 +303,13 @@ def main():
             print(f"Epoch {epoch+1}/{args.epochs}: "
                   f"Train Loss={train_loss:.4f}, Train Acc={train_acc:.4f}, "
                   f"Val Loss={val_loss:.4f}, Val Acc={val_acc:.4f} "
-                  f"[✅ 保存最佳模型: {val_acc:.4f} > {old_best:.4f}]")
+                  f"[✅ 保存最佳模型: {val_loss:.4f} < {old_best:.4f}]")
         else:
             epochs_no_improve += 1
             print(f"Epoch {epoch+1}/{args.epochs}: "
                   f"Train Loss={train_loss:.4f}, Train Acc={train_acc:.4f}, "
                   f"Val Loss={val_loss:.4f}, Val Acc={val_acc:.4f} "
-                  f"[❌ 未超最佳: {val_acc:.4f} <= {best_val_acc:.4f}]")
+                  f"[❌ 未超最佳: {val_loss:.4f} >= {best_val_loss:.4f}]")
 
         if epochs_no_improve >= patience:
             print(f"Early stopping at epoch {epoch+1}")

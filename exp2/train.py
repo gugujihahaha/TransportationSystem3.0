@@ -57,7 +57,7 @@ class TrajectoryDataset(Dataset):
         return len(self.data)
 
     def __getitem__(self, idx):
-        traj_21, spatial_placeholder, stats, label = self.data[idx]
+        traj_21, stats, label = self.data[idx]
         traj  = traj_21.astype(np.float32)
         stats = stats.astype(np.float32)
 
@@ -114,7 +114,10 @@ def load_data(osm_path):
     for traj, stats, datetime_series, label in tqdm(cleaned_data, desc="[特征提取]"):
         try:
             traj_21, spatial = feature_extractor.extract_features(traj)
-            all_features.append((traj, stats, label))
+            # 检查NaN和Inf
+            if np.isnan(traj_21).any() or np.isinf(traj_21).any():
+                continue
+            all_features.append((traj_21, stats, label))
         except Exception:
             continue
 
@@ -124,12 +127,11 @@ def load_data(osm_path):
     all_features = [(traj, stats, label_encoder.transform([label])[0])
                     for traj, stats, label in all_features]
 
-    # 过滤NaN和Inf
+    # 过滤NaN和Inf（stats）
     all_features = [
-        (traj_21, np.zeros((traj_21.shape[0], 1), dtype=np.float32), stats, label)
+        (traj, stats, label)
         for traj, stats, label in all_features
-        if not (np.isnan(traj).any() or np.isinf(traj).any() or
-                np.isnan(stats).any() or np.isinf(stats).any())
+        if not (np.isnan(stats).any() or np.isinf(stats).any())
     ]
 
     print(f"   处理后样本数: {len(all_features)}")
@@ -175,7 +177,7 @@ def main():
     # 2. 划分数据集（70/10/20，random_state=42）
     print(f"\n[数据划分] 70/10/20，random_state=42...")
     all_indices = np.arange(len(all_features))
-    labels_encoded = [item[3] for item in all_features]
+    labels_encoded = [item[2] for item in all_features]
 
     train_indices, temp_indices = train_test_split(
         all_indices, test_size=0.3, random_state=42, stratify=labels_encoded
@@ -195,7 +197,7 @@ def main():
 
     # 3. 计算归一化参数（仅基于训练集）
     traj_all  = np.vstack([s[0] for s in train_data])
-    stats_all = np.vstack([s[2] for s in train_data])
+    stats_all = np.vstack([s[1] for s in train_data])
 
     traj_mean  = traj_all.mean(0).astype(np.float32)
     traj_std   = np.where(traj_all.std(0) < 1e-6, 1.0, traj_all.std(0)).astype(np.float32)
@@ -224,7 +226,7 @@ def main():
     ).to(args.device)
 
     class_weights = compute_class_weights(
-        label_encoder, train_data, label_index=3, mode='sqrt_inverse'
+        label_encoder, train_data, label_index=2, mode='sqrt_inverse'
     )
     class_weights = torch.FloatTensor(class_weights).to(args.device)
 
@@ -234,22 +236,28 @@ def main():
     # 6. 训练
     # 加载历史最佳模型（如果存在）
     model_path = os.path.join(args.save_dir, 'exp2_model.pth')
-    best_val_acc = 0.0
+    best_val_loss = float('inf')
+    start_epoch = 0
     if os.path.exists(model_path):
         try:
             checkpoint = torch.load(model_path, map_location=args.device, weights_only=False)
-            best_val_acc = checkpoint.get('val_acc', 0.0)
-            print(f"\n[加载历史最佳模型] 历史最佳验证准确率: {best_val_acc:.4f}")
+            model.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            best_val_loss = checkpoint.get('val_loss', float('inf'))
+            start_epoch = checkpoint.get('epoch', 0) + 1
+            print(f"\n[加载历史最佳模型] 历史最佳验证损失: {best_val_loss:.4f}")
+            print(f"[继续训练] 从第 {start_epoch} 轮开始")
         except Exception as e:
             print(f"\n[警告] 无法加载历史最佳模型: {e}")
-            best_val_acc = 0.0
+            best_val_loss = float('inf')
+            start_epoch = 0
     else:
         print(f"\n[训练] 未找到历史最佳模型，从头开始训练")
 
     epochs_no_improve = 0
     patience = args.patience
 
-    for epoch in range(args.epochs):
+    for epoch in range(start_epoch, args.epochs):
         train_loss, train_acc = train_epoch(
             model, train_loader, criterion, optimizer, args.device
         )
@@ -257,14 +265,16 @@ def main():
             model, val_loader, criterion, args.device, label_encoder.classes_
         )
 
-        if val_acc > best_val_acc:
-            old_best = best_val_acc
-            best_val_acc = val_acc
+        if val_loss < best_val_loss:
+            old_best = best_val_loss
+            best_val_loss = val_loss
             epochs_no_improve = 0
             torch.save({
+                'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'label_encoder': label_encoder,
+                'val_loss': val_loss,
                 'val_acc': val_acc,
                 'norm_params': norm_params,
                 'model_config': {
@@ -283,13 +293,13 @@ def main():
             print(f"Epoch {epoch+1}/{args.epochs}: "
                   f"Train Loss={train_loss:.4f}, Train Acc={train_acc:.4f}, "
                   f"Val Loss={val_loss:.4f}, Val Acc={val_acc:.4f} "
-                  f"[✅ 保存最佳模型: {val_acc:.4f} > {old_best:.4f}]")
+                  f"[✅ 保存最佳模型: {val_loss:.4f} < {old_best:.4f}]")
         else:
             epochs_no_improve += 1
             print(f"Epoch {epoch+1}/{args.epochs}: "
                   f"Train Loss={train_loss:.4f}, Train Acc={train_acc:.4f}, "
                   f"Val Loss={val_loss:.4f}, Val Acc={val_acc:.4f} "
-                  f"[❌ 未超最佳: {val_acc:.4f} <= {best_val_acc:.4f}]")
+                  f"[❌ 未超最佳: {val_loss:.4f} >= {best_val_loss:.4f}]")
 
         if epochs_no_improve >= patience:
             print(f"Early stopping at epoch {epoch+1}")
