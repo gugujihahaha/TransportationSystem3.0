@@ -1,73 +1,126 @@
 """
-Exp3 评估脚本
-与 train.py 的数据划分方式完全一致（70/10/20，相同 random_state）
+Exp3 评估脚本（修复版）
+修复内容：
+1. 移除实时OSM特征提取，直接从 exp2/cache/processed_features.pkl 加载21维特征
+2. 使用 shared_split.pkl（新格式），不依赖旧的 shared_test_indices.pkl
+3. 天气特征从 cleaned_balanced.pkl 中的时间戳提取，而非实时网络请求
+4. 不再从 train 模块 import Dataset（避免触发 train.py 副作用）
+   —— Dataset 类在本文件内直接定义
+5. WeatherDataProcessor 路径使用绝对路径，不依赖 cwd
 """
 import os
 import sys
 import json
 import pickle
-import torch
 import numpy as np
 import pandas as pd
-from torch.utils.data import DataLoader, Subset
-from sklearn.metrics import classification_report, confusion_matrix
-from sklearn.model_selection import train_test_split
-from tqdm import tqdm
+import torch
 import matplotlib.pyplot as plt
 import seaborn as sns
+from torch.utils.data import Dataset, DataLoader
+from sklearn.metrics import classification_report, confusion_matrix
+from tqdm import tqdm
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PARENT_DIR = os.path.dirname(SCRIPT_DIR)
+EXP2_DIR   = os.path.join(PARENT_DIR, 'exp2')
 sys.path.insert(0, SCRIPT_DIR)
-sys.path.insert(0, os.path.dirname(SCRIPT_DIR))
+sys.path.insert(0, PARENT_DIR)
 os.chdir(SCRIPT_DIR)
 
-from src.model_weather import TransportationModeClassifierWithWeather
-from train import TrajectoryDatasetWithWeather
-from src.weather_preprocessing import WeatherDataProcessor
-from exp2.src.feature_extraction import FeatureExtractor
-from exp2.src.osm_feature_extractor import OsmSpatialExtractor
+from src import model_weather
+from src import weather_preprocessing
+
+# 添加exp2路径用于导入feature_extraction模块
+sys.path.insert(0, EXP2_DIR)
 
 plt.rcParams['font.sans-serif'] = ['SimHei', 'DejaVu Sans', 'Arial Unicode MS']
 plt.rcParams['axes.unicode_minus'] = False
 
+MODEL_PATH         = 'checkpoints/exp3_model.pth'
+EXP2_FEATURE_CACHE = os.path.join(EXP2_DIR, 'cache', 'processed_features.pkl')
+SHARED_SPLIT_PATH  = os.path.join(PARENT_DIR, 'data', 'processed', 'shared_split.pkl')
+# 原始数据（含时间戳），用于提取天气
+CLEANED_DATA_PATH  = os.path.join(PARENT_DIR, 'data', 'processed', 'cleaned_balanced.pkl')
+OUTPUT_DIR         = 'evaluation_results'
+DEVICE             = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+
+# ── Dataset（直接定义，不从 train.py import）─────────────────────
+class TrajectoryDatasetWithWeather(Dataset):
+    """
+    格式：(traj_21, weather_10, stats_18, label_encoded)
+    weather_10: shape (T, 10)，T 为序列长度（通常50）
+    """
+    def __init__(self, data, traj_mean=None, traj_std=None,
+                 weather_mean=None, weather_std=None,
+                 stats_mean=None, stats_std=None):
+        self.data         = data
+        self.traj_mean    = traj_mean
+        self.traj_std     = traj_std
+        self.weather_mean = weather_mean
+        self.weather_std  = weather_std
+        self.stats_mean   = stats_mean
+        self.stats_std    = stats_std
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        traj_21, weather, stats, label_encoded = self.data[idx]
+        traj    = traj_21.astype(np.float32)
+        weather = weather.astype(np.float32)
+        stats   = stats.astype(np.float32)
+
+        if self.traj_mean is not None:
+            traj    = (traj    - self.traj_mean)    / (self.traj_std    + 1e-8)
+        if self.weather_mean is not None:
+            weather = (weather - self.weather_mean) / (self.weather_std + 1e-8)
+        if self.stats_mean is not None:
+            stats   = (stats   - self.stats_mean)   / (self.stats_std   + 1e-8)
+
+        return (torch.FloatTensor(traj),
+                torch.FloatTensor(weather),
+                torch.FloatTensor(stats),
+                torch.LongTensor([label_encoded])[0])
+
 
 def main():
-    MODEL_PATH  = 'checkpoints/exp3_model.pth'
-    CACHE_PATH  = 'cache/processed_features_exp3.pkl'
-    OUTPUT_DIR  = 'evaluation_results'
-    DEVICE      = 'cuda' if torch.cuda.is_available() else 'cpu'
-
     print("\n" + "=" * 60)
-    print("Exp3 模型评估 (轨迹+空间+天气)")
+    print("Exp3 模型评估 (轨迹 + OSM空间 + 天气)")
     print("=" * 60)
     print(f"设备: {DEVICE}")
 
-    # 1. 加载模型
-    print(f"\n[1/5] 正在加载模型: {MODEL_PATH}")
+    # ── 1. 加载模型 ─────────────────────────────────────────────
+    print(f"\n[1/4] 加载模型: {MODEL_PATH}")
     if not os.path.exists(MODEL_PATH):
         print(f"❌ 找不到模型: {MODEL_PATH}")
         return
 
-    checkpoint = torch.load(MODEL_PATH, map_location=DEVICE, weights_only=False)
-    le     = checkpoint['label_encoder']
-    config = checkpoint['model_config']
-    class_names = le.classes_
+    checkpoint    = torch.load(MODEL_PATH, map_location=DEVICE, weights_only=False)
+    label_encoder = checkpoint['label_encoder']
+    config        = checkpoint['model_config']
+    norm_params   = checkpoint.get('norm_params', {})
+    class_names   = label_encoder.classes_
 
-    norm_params  = checkpoint.get('norm_params', {})
-    traj_mean    = norm_params.get('traj_mean', None)
-    traj_std     = norm_params.get('traj_std', None)
+    traj_mean    = norm_params.get('traj_mean',    None)
+    traj_std     = norm_params.get('traj_std',     None)
     weather_mean = norm_params.get('weather_mean', None)
-    weather_std  = norm_params.get('weather_std', None)
-    stats_mean   = norm_params.get('stats_mean', None)
-    stats_std    = norm_params.get('stats_std', None)
+    weather_std  = norm_params.get('weather_std',  None)
+    stats_mean   = norm_params.get('stats_mean',   None)
+    stats_std    = norm_params.get('stats_std',    None)
+
+    if traj_mean is None:
+        print("❌ checkpoint 缺少 norm_params，请重新训练 exp3/train.py")
+        return
 
     print(f"   模型配置:")
     print(f"     - 轨迹维度: {config['trajectory_feature_dim']}")
     print(f"     - 天气维度: {config['weather_feature_dim']}")
-    print(f"     - 类别数:   {config['num_classes']}")
+    print(f"     - stats维度: {config.get('segment_stats_dim', 18)}")
     print(f"     - 类别:     {list(class_names)}")
 
-    model = TransportationModeClassifierWithWeather(
+    model = model_weather.TransportationModeClassifierWithWeather(
         trajectory_feature_dim=config['trajectory_feature_dim'],
         weather_feature_dim=config['weather_feature_dim'],
         segment_stats_dim=config.get('segment_stats_dim', 18),
@@ -80,102 +133,124 @@ def main():
     model.eval()
     print("   ✓ 模型加载完成")
 
-    # 2. 加载共享测试集
-    print(f"\n[2/5] 正在加载共享测试集...")
-    
-    SHARED_TEST_PATH = '../../data/processed/shared_test_indices.pkl'
-    if not os.path.exists(SHARED_TEST_PATH):
-        print(f"❌ 找不到共享测试集: {SHARED_TEST_PATH}")
-        print(f"   请先运行 create_shared_test_set.py 生成共享测试集")
-        return
-    
-    with open(SHARED_TEST_PATH, 'rb') as f:
-        shared_data = pickle.load(f)
-    
-    valid_indices = shared_data['valid_indices']
-    test_indices = shared_data['test_indices']
-    cleaned_data = shared_data['cleaned_data']
-    shared_label_encoder = shared_data['label_encoder']
-    
-    print(f"   ✓ 加载完成: {len(test_indices)} 个测试样本 (使用共享测试集)")
-    
-    # 3. 提取21维融合特征+天气特征
-    print(f"\n[3/5] 正在提取21维融合特征+天气特征...")
-    
-    # 初始化特征提取器
-    spatial_extractor = OsmSpatialExtractor()
-    feature_extractor = FeatureExtractor(spatial_extractor)
-    
-    # 初始化天气处理器
-    weather_processor = WeatherDataProcessor()
-    zero_weather = np.zeros((50, 10), dtype=np.float32)  # 50序列长度，10维天气
-    
-    all_data = []
-    for idx in tqdm(test_indices, desc="提取特征"):
-        cleaned_idx = valid_indices[idx]
-        traj, stats, datetime_series, label = cleaned_data[cleaned_idx]
-        
+    # ── 2. 从缓存加载数据（不实时提取OSM特征）───────────────────
+    print(f"\n[2/4] 加载数据...")
+    for path, name in [(EXP2_FEATURE_CACHE, 'EXP2特征缓存'),
+                       (SHARED_SPLIT_PATH,  '共享划分'),
+                       (CLEANED_DATA_PATH,  '原始数据(时间戳)')]:
+        if not os.path.exists(path):
+            print(f"❌ {name} 不存在: {path}")
+            if name == 'EXP2特征缓存':
+                print("   请先运行 exp2/train.py")
+            elif name == '共享划分':
+                print("   请先运行 exp2/train.py（训练后自动生成）")
+            return
+
+    with open(EXP2_FEATURE_CACHE, 'rb') as f:
+        cache = pickle.load(f)
+    all_exp2_data = cache[0] if isinstance(cache, tuple) else cache
+
+    with open(SHARED_SPLIT_PATH, 'rb') as f:
+        split = pickle.load(f)
+    test_indices = split['test_indices']
+
+    with open(CLEANED_DATA_PATH, 'rb') as f:
+        cleaned_data = pickle.load(f)
+
+    n_exp2    = len(all_exp2_data)
+    n_cleaned = len(cleaned_data)
+    if n_exp2 != n_cleaned:
+        print(f"   ⚠️ 样本数不一致: EXP2缓存={n_exp2}, cleaned_balanced={n_cleaned}")
+        n_use = min(n_exp2, n_cleaned)
+        print(f"   → 取较小值 {n_use} 个样本")
+    else:
+        n_use = n_exp2
+
+    print(f"   ✓ EXP2缓存: {n_exp2} 样本 | cleaned_balanced: {n_cleaned} 样本")
+    print(f"   ✓ 测试集: {len(test_indices)} 个样本")
+
+    # ── 3. 附加天气特征 ──────────────────────────────────────────
+    print(f"\n[3/4] 附加天气特征...")
+    # WeatherDataProcessor 使用绝对路径初始化
+    weather_data_dir = os.path.join(PARENT_DIR, 'data', 'weather')
+    weather_csv_path = os.path.join(weather_data_dir, 'weather_data.csv')
+    if os.path.exists(weather_csv_path):
+        weather_processor = weather_preprocessing.WeatherDataProcessor(weather_csv_path=weather_csv_path)
+    else:
+        print(f"   警告: 天气数据文件不存在: {weather_csv_path}")
+        print(f"   将使用零向量代替天气特征")
+        weather_processor = None
+    print(f"   天气数据目录: {weather_data_dir}")
+
+    SEQ_LEN     = 50   # 固定序列长度
+    WEATHER_DIM = config['weather_feature_dim']  # 通常10
+    zero_weather = np.zeros((SEQ_LEN, WEATHER_DIM), dtype=np.float32)
+
+    test_data = []
+    skipped   = 0
+    for idx in tqdm(test_indices, desc="附加天气特征"):
+        if idx >= n_use:
+            skipped += 1
+            continue
+
+        traj_21, _, stats, label_encoded = all_exp2_data[idx]
+
+        # 从 cleaned_balanced.pkl 取时间戳
+        raw_sample = cleaned_data[idx]
+        datetime_series = raw_sample[2]  # shape=(50,), dtype=datetime64[us]
+
         try:
-            # 提取21维融合特征（9轨迹 + 12空间）
-            traj_21, spatial_features = feature_extractor.extract_features(traj)
-            
-            # 获取天气特征
-            if datetime_series is not None and len(datetime_series) > 0:
-                weather_feat = weather_processor.get_weather_features_for_trajectory(datetime_series)
-                # 确保长度匹配
+            if datetime_series is not None and len(datetime_series) > 0 and weather_processor is not None:
+                weather_feat = weather_processor.get_weather_features_for_trajectory(
+                    datetime_series
+                )
                 T = traj_21.shape[0]
                 if weather_feat.shape[0] != T:
                     if weather_feat.shape[0] > T:
                         weather_feat = weather_feat[:T]
                     else:
-                        pad = np.zeros((T - weather_feat.shape[0], 10), dtype=np.float32)
+                        pad = np.zeros((T - weather_feat.shape[0], WEATHER_DIM),
+                                       dtype=np.float32)
                         weather_feat = np.vstack([weather_feat, pad])
+                # 检查维度是否匹配
+                if weather_feat.shape[1] != WEATHER_DIM:
+                    weather_feat = zero_weather.copy()
             else:
                 weather_feat = zero_weather.copy()
-            
-            weather_feat = np.nan_to_num(weather_feat, nan=0.0, posinf=0.0, neginf=0.0)
-            
-            # 编码标签
-            label_encoded = shared_label_encoder.transform([label])[0]
-            
-            # exp3 最终格式: (traj_21dim, weather_10dim, stats_18dim, label_encoded)
-            all_data.append((traj_21, weather_feat, stats, label_encoded))
-        except Exception as e:
-            print(f"  警告: 样本 {idx} 特征提取失败: {e}")
-            continue
-    
-    print(f"   ✓ 特征提取完成: {len(all_data)} 个样本")
 
-    # 4. 准备测试数据
-    print(f"\n[4/5] 正在准备测试数据...")
-    
+            weather_feat = np.nan_to_num(weather_feat, nan=0.0,
+                                          posinf=0.0, neginf=0.0).astype(np.float32)
+        except Exception as e:
+            weather_feat = zero_weather.copy()
+
+        test_data.append((traj_21.astype(np.float32),
+                          weather_feat,
+                          stats.astype(np.float32),
+                          label_encoded))
+
+    if skipped:
+        print(f"   ⚠️ 跳过 {skipped} 个越界索引")
+    print(f"   ✓ 最终测试样本: {len(test_data)}")
+
+    # ── 4. 推理 ──────────────────────────────────────────────────
+    print(f"\n[4/4] 推理与报告...")
     dataset = TrajectoryDatasetWithWeather(
-        all_data,
+        test_data,
         traj_mean=traj_mean, traj_std=traj_std,
         weather_mean=weather_mean, weather_std=weather_std,
         stats_mean=stats_mean, stats_std=stats_std
     )
-    
-    test_loader = DataLoader(
-        dataset,
-        batch_size=64, shuffle=False, num_workers=0
-    )
-    print(f"   ✓ 测试集大小: {len(all_data)} 个样本")
+    loader = DataLoader(dataset, batch_size=64, shuffle=False, num_workers=0)
 
-    # 5. 推理
-    print(f"\n[5/5] 正在进行模型推理...")
     y_true, y_pred, y_probs = [], [], []
-
     with torch.no_grad():
-        for traj, weather, stats, labels in tqdm(test_loader, desc="Evaluation Progress"):
+        for traj, weather, stats, labels in tqdm(loader, desc="Evaluating"):
             traj    = traj.to(DEVICE)
             weather = weather.to(DEVICE)
             stats   = stats.to(DEVICE)
-
-            logits = model(traj, weather, segment_stats=stats)
-            probs  = torch.softmax(logits, dim=1)
-            preds  = torch.argmax(probs, dim=1)
-
+            logits  = model(traj, weather, segment_stats=stats)
+            probs   = torch.softmax(logits, dim=1)
+            preds   = torch.argmax(logits, dim=1)
             y_true.extend(labels.cpu().numpy())
             y_pred.extend(preds.cpu().numpy())
             y_probs.extend(probs.cpu().numpy())
@@ -184,8 +259,7 @@ def main():
     y_pred  = np.array(y_pred)
     y_probs = np.array(y_probs)
 
-    # 5. 生成报告
-    print(f"\n[5/5] 正在生成评估报告...")
+    # 报告
     print("\n" + "=" * 60)
     print("分类报告")
     print("=" * 60)
@@ -196,23 +270,20 @@ def main():
     report_dict = classification_report(y_true, y_pred, target_names=class_names,
                                          output_dict=True, zero_division=0)
 
-    # JSON
     with open(os.path.join(OUTPUT_DIR, 'evaluation_report.json'), 'w', encoding='utf-8') as f:
         json.dump(report_dict, f, indent=4, ensure_ascii=False)
     print(f"   ✓ 保存: evaluation_results/evaluation_report.json")
 
-    # CSV 预测
     conf_list = [float(y_probs[i, p]) for i, p in enumerate(y_pred)]
-    import pandas as pd
     pd.DataFrame({
         'true_label': [class_names[i] for i in y_true],
         'pred_label': [class_names[i] for i in y_pred],
         'confidence': conf_list,
         'correct':    y_true == y_pred
-    }).to_csv(os.path.join(OUTPUT_DIR, 'predictions_exp3.csv'), index=False, encoding='utf-8-sig')
+    }).to_csv(os.path.join(OUTPUT_DIR, 'predictions_exp3.csv'),
+              index=False, encoding='utf-8-sig')
     print(f"   ✓ 保存: evaluation_results/predictions_exp3.csv")
 
-    # 混淆矩阵
     try:
         plt.figure(figsize=(10, 8))
         cm = confusion_matrix(y_true, y_pred)
@@ -227,7 +298,6 @@ def main():
     except Exception as e:
         print(f"   ⚠️ 混淆矩阵生成失败: {e}")
 
-    # F1图
     try:
         f1_scores = [report_dict[cls]['f1-score'] for cls in class_names]
         plt.figure(figsize=(12, 6))
@@ -244,15 +314,16 @@ def main():
     except Exception as e:
         print(f"   ⚠️ F1图生成失败: {e}")
 
-    # 错误分析
     errors_df = pd.DataFrame({
         'true_label': [class_names[i] for i in y_true],
         'pred_label': [class_names[i] for i in y_pred],
         'confidence': conf_list
     })
-    errors_df = errors_df[errors_df['true_label'] != errors_df['pred_label']]
-    errors_df.to_csv(os.path.join(OUTPUT_DIR, 'error_analysis.csv'), index=False, encoding='utf-8-sig')
-    print(f"   ✓ 保存: evaluation_results/error_analysis.csv ({len(errors_df)} 个错误样本)")
+    errors_df[errors_df['true_label'] != errors_df['pred_label']].to_csv(
+        os.path.join(OUTPUT_DIR, 'error_analysis.csv'),
+        index=False, encoding='utf-8-sig'
+    )
+    print(f"   ✓ 保存: evaluation_results/error_analysis.csv")
 
     print("\n" + "=" * 60)
     print("评估汇总")
@@ -266,5 +337,5 @@ def main():
     print(f"\n✅ 结果保存至: {os.path.abspath(OUTPUT_DIR)}")
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

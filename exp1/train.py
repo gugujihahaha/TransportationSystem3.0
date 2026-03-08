@@ -1,10 +1,18 @@
 """
-训练脚本 - 仅使用GeoLife轨迹数据 (Exp1)
-最终版：加入特征缓存，保证训练 / 评估 / 论文三者一致
-✅ 已集成快速模式支持
+exp1/train.py（修复版）
+======================
+修复内容：
+1. evaluate() 返回值从4个改为5个（增加 accuracy）
+2. 数据划分改为加载共享划分（shared_split.pkl），与EXP2/3/4使用同一批测试集
+3. EXP1的特征从EXP2缓存中提取前9维，确保样本完全对齐
+
+注意：必须先运行 exp2/train.py 生成 EXP2 特征缓存，
+      再运行 python create_shared_split.py，
+      最后才能运行此脚本。
 """
 
 import argparse
+import csv
 import os
 import pickle
 import sys
@@ -14,27 +22,32 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from sklearn.metrics import classification_report
-from sklearn.model_selection import train_test_split
+from sklearn.metrics import confusion_matrix
 from sklearn.preprocessing import LabelEncoder
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 
-# ===== ✅ 修改 1: 文件开头添加导入 =====
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from common import (BaseGeoLifePreprocessor, Exp1DataAdapter,
-                     train_epoch, evaluate, compute_class_weights)
+# 路径设置
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PARENT_DIR = os.path.dirname(SCRIPT_DIR)
+sys.path.insert(0, SCRIPT_DIR)
+sys.path.insert(0, PARENT_DIR)
+os.chdir(SCRIPT_DIR)
 
-from src.data_loader import GeoLifeDataLoader, preprocess_segments
+from common import (BaseGeoLifePreprocessor, train_epoch, evaluate,
+                    compute_class_weights)
 from src.model import TransportationModeClassifier
 
-TRAJECTORY_FEATURE_DIM = 9
+TRAJECTORY_FEATURE_DIM = 9  # EXP1只用前9维
+
+# 路径配置
+EXP2_FEATURE_CACHE = os.path.join(PARENT_DIR, 'exp2', 'cache', 'processed_features.pkl')
+SHARED_SPLIT_PATH  = os.path.join(PARENT_DIR, 'data', 'processed', 'shared_split.pkl')
+EXP1_CACHE_PATH    = os.path.join(SCRIPT_DIR, 'cache', 'exp1_processed_features.pkl')
 
 
 # ============================================================
-# Dataset
+# Dataset（与原版相同）
 # ============================================================
 class TrajectoryDataset(Dataset):
     def __init__(self, segments, label_encoder,
@@ -51,101 +64,71 @@ class TrajectoryDataset(Dataset):
         return len(self.segments)
 
     def __getitem__(self, idx):
-        features, segment_stats, label = self.segments[idx]
-        x     = features.astype(np.float32)
-        stats = segment_stats.astype(np.float32)
+        # 格式: (traj_9, stats_18, label_encoded)
+        traj_9, stats, label_encoded = self.segments[idx]
+        x     = traj_9.astype(np.float32)
+        stats = stats.astype(np.float32)
 
-        # 归一化
         if self.traj_mean is not None:
             x = (x - self.traj_mean) / self.traj_std
         if self.stats_mean is not None:
             stats = (stats - self.stats_mean) / self.stats_std
 
-        y = self.label_encoder.transform([label])[0]
         return (torch.FloatTensor(x),
                 torch.FloatTensor(stats),
-                torch.LongTensor([y]).squeeze())
+                torch.LongTensor([label_encoded]).squeeze())
 
 
 # ============================================================
-# Data loading (✅ 修改 2: 完整替换 load_data 函数)
+# 数据加载：从 EXP2 缓存提取前9维
 # ============================================================
-def load_data(geolife_root: str, max_users: int = None, use_base_data: bool = True, cleaning_mode: str = 'balanced'):
+def load_data_from_exp2_cache():
     """
-    加载数据（支持使用基础数据）
-
-    Args:
-        geolife_root: GeoLife数据根目录
-        max_users: 最大用户数
-        use_base_data: 是否使用预处理的基础数据（推荐）
-        cleaning_mode: 数据清洗模式 ('strict', 'balanced', 'gentle')
-
-    Returns:
-        processed_segments: List of (features, label)
+    从 EXP2 特征缓存提取 EXP1 所需的9维轨迹特征。
+    EXP2 缓存格式：(all_features, label_encoder, cleaning_stats)
+    每个样本：(traj_21, spatial_placeholder, stats_18, label_encoded)
+    EXP1 只取 traj_21 的前9维作为轨迹特征。
     """
-    BASE_DATA_PATH = os.path.join(
-        os.path.dirname(geolife_root),
-        'processed/base_segments.pkl'
-    )
+    if not os.path.exists(EXP2_FEATURE_CACHE):
+        raise FileNotFoundError(
+            f"EXP2 特征缓存不存在: {EXP2_FEATURE_CACHE}\n"
+            "请先运行 exp2/train.py"
+        )
 
-    # ========== 快速模式：使用基础数据 ==========
-    if use_base_data and os.path.exists(BASE_DATA_PATH):
-        print("\n" + "=" * 80)
-        print("使用预处理的基础数据（快速模式）")
-        print("=" * 80)
+    print(f"\n[数据加载] 从 EXP2 缓存提取9维轨迹特征...")
+    with open(EXP2_FEATURE_CACHE, 'rb') as f:
+        exp2_features, label_encoder, cleaning_stats = pickle.load(f)
 
-        # 1. 加载基础数据
-        base_segments = BaseGeoLifePreprocessor.load_from_cache(BASE_DATA_PATH)
+    print(f"   EXP2 缓存样本数: {len(exp2_features)}")
 
-        # 2. Exp1特定适配（序列长度 50，两阶段清洗）
-        adapter = Exp1DataAdapter(enable_cleaning=True, cleaning_mode=cleaning_mode)
-        processed = adapter.process_segments(base_segments)
-        cleaning_stats = adapter.get_cleaning_stats()
-        return processed, cleaning_stats
+    # 转换格式：取前9维，格式改为 (traj_9, stats_18, label_encoded)
+    exp1_data = []
+    for traj_21, _, stats_18, label_encoded in exp2_features:
+        traj_9 = traj_21[:, :9].copy()  # 前9维是原始轨迹特征
+        exp1_data.append((traj_9, stats_18, label_encoded))
 
-    # ========== 传统模式：从头处理 ==========
-    else:
-        if use_base_data:
-            print(f"\n⚠️  警告: 基础数据文件不存在: {BASE_DATA_PATH}")
-            print("    将使用传统方式处理数据（较慢）")
-            print("    建议先运行: python scripts/generate_base_data.py\n")
+    print(f"   EXP1 数据样本数: {len(exp1_data)}")
+    print(f"   特征维度: traj={exp1_data[0][0].shape}, stats={exp1_data[0][1].shape}")
 
-        print("=" * 80)
-        print("加载 GeoLife 数据（传统模式）")
-        print("=" * 80)
+    # 保存 EXP1 缓存
+    os.makedirs(os.path.join(SCRIPT_DIR, 'cache'), exist_ok=True)
+    with open(EXP1_CACHE_PATH, 'wb') as f:
+        pickle.dump((exp1_data, label_encoder, cleaning_stats), f,
+                    protocol=pickle.HIGHEST_PROTOCOL)
+    print(f"   ✓ 保存 EXP1 缓存: {EXP1_CACHE_PATH}")
 
-        loader = GeoLifeDataLoader(geolife_root)
-        users_path = os.path.join(geolife_root, "Data")
-        users = sorted([u for u in os.listdir(users_path) if u.isdigit()])
+    return exp1_data, label_encoder, cleaning_stats
 
-        if max_users:
-            users = users[:max_users]
 
-        all_segments = []
-        for user_id in tqdm(users, desc="读取用户轨迹"):
-            labels = loader.load_labels(user_id)
-            if labels.empty:
-                continue
-
-            traj_dir = os.path.join(users_path, user_id, "Trajectory")
-            for f in os.listdir(traj_dir):
-                if not f.endswith(".plt"):
-                    continue
-                try:
-                    traj = loader.load_trajectory(os.path.join(traj_dir, f))
-                    segments = loader.segment_trajectory(traj, labels)
-                    all_segments.extend(segments)
-                except Exception:
-                    continue
-
-        print(f"原始轨迹段数: {len(all_segments)}")
-
-        print("预处理轨迹段...")
-        processed = preprocess_segments(all_segments, min_length=10)
-        print(f"预处理后轨迹段数: {len(processed)}")
-
-        cleaning_stats = {}
-        return processed, cleaning_stats
+def load_shared_split():
+    """加载共享划分索引"""
+    if not os.path.exists(SHARED_SPLIT_PATH):
+        raise FileNotFoundError(
+            f"共享划分不存在: {SHARED_SPLIT_PATH}\n"
+            "请先运行 python create_shared_split.py"
+        )
+    with open(SHARED_SPLIT_PATH, 'rb') as f:
+        return pickle.load(f)
 
 
 # ============================================================
@@ -153,158 +136,83 @@ def load_data(geolife_root: str, max_users: int = None, use_base_data: bool = Tr
 # ============================================================
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--geolife_root", default="../data/Geolife Trajectories 1.3")
-
-    # ===== ✅ 修改 3: main 函数添加参数 =====
-    parser.add_argument("--use_base_data", action="store_true", default=True,
-                       help="使用预处理的基础数据（推荐，大幅加速）")
-    parser.add_argument("--cleaning_mode", type=str, default='balanced',
-                       choices=['strict', 'balanced', 'gentle'],
-                       help="数据清洗模式: strict(严格), balanced(平衡), gentle(温和)")
-    # ===== 修改结束 =====
-
-    parser.add_argument("--epochs", type=int, default=150)
-    parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--hidden_dim", type=int, default=128)
-    parser.add_argument("--num_layers", type=int, default=2)
-    parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--dropout", type=float, default=0.3)
-    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--epochs",     type=int,   default=150)
+    parser.add_argument("--batch_size", type=int,   default=32)
+    parser.add_argument("--hidden_dim", type=int,   default=128)
+    parser.add_argument("--num_layers", type=int,   default=2)
+    parser.add_argument("--lr",         type=float, default=1e-4)
+    parser.add_argument("--dropout",    type=float, default=0.3)
+    parser.add_argument("--patience",   type=int,   default=25)
+    parser.add_argument("--device",     default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
 
-    # ✅ 传递新参数
-    segments, cleaning_stats = load_data(
-        args.geolife_root,
-        use_base_data=args.use_base_data,
-        cleaning_mode=args.cleaning_mode
+    # 1. 加载数据
+    all_data, label_encoder, cleaning_stats = load_data_from_exp2_cache()
+
+    # 2. 加载共享划分
+    print(f"\n[共享划分] 加载...")
+    split = load_shared_split()
+    train_indices = split['train_indices']
+    val_indices   = split['val_indices']
+    test_indices  = split['test_indices']
+    print(f"   Train: {len(train_indices)} | Val: {len(val_indices)} | Test: {len(test_indices)}")
+
+    # 验证索引范围
+    n = len(all_data)
+    assert max(train_indices + val_indices + test_indices) < n, \
+        f"索引越界：最大索引={max(train_indices+val_indices+test_indices)}, 数据量={n}"
+
+    # 3. 提取各集合样本
+    train_raw = [all_data[i] for i in train_indices]
+    val_data  = [all_data[i] for i in val_indices]
+    test_data = [all_data[i] for i in test_indices]
+
+    # 4. 仅对训练集做过采样（避免数据泄露）
+    # oversample 格式：(traj, stats, label_str)
+    train_str = [(t, s, label_encoder.inverse_transform([l])[0])
+                 for t, s, l in train_raw]
+    train_oversampled_str = BaseGeoLifePreprocessor.oversample_minority_classes(
+        train_str, target_ratio=0.3, minority_classes=['Subway', 'Train']
     )
+    # 转回 encoded 格式
+    train_data = [(t, s, label_encoder.transform([l])[0])
+                  for t, s, l in train_oversampled_str]
 
-    # 最终 6 类（任务定义统一）
-    TARGET_MODES_FINAL = ['Walk', 'Bike', 'Car & taxi', 'Bus', 'Train', 'Subway']
-    segments = [s for s in segments if s[2] in TARGET_MODES_FINAL]
+    print(f"\n✅ 训练集过采样: {len(train_raw)} → {len(train_data)}")
 
-    labels = [s[2] for s in segments]
-    label_encoder = LabelEncoder()
-    label_encoder.fit(labels)
+    # 5. 归一化统计量（仅基于训练集）
+    traj_all  = np.vstack([s[0] for s in train_data])
+    stats_all = np.vstack([s[1] for s in train_data])
 
-    print("\n类别分布:")
-    for k, v in Counter(labels).items():
-        print(f"{k}: {v}")
+    traj_mean  = traj_all.mean(0).astype(np.float32)
+    traj_std   = np.where(traj_all.std(0) < 1e-6, 1.0, traj_all.std(0)).astype(np.float32)
+    stats_mean = stats_all.mean(0).astype(np.float32)
+    stats_std  = np.where(stats_all.std(0) < 1e-6, 1.0, stats_all.std(0)).astype(np.float32)
 
-    # ========================================================
-    # 🔥 保存特征缓存（评估 & 论文复现关键）
-    # ========================================================
-    os.makedirs("cache", exist_ok=True)
-    with open("cache/exp1_processed_features.pkl", "wb") as f:
-        pickle.dump(
-            {"segments": segments, "label_encoder": label_encoder, "cleaning_stats": cleaning_stats},
-            f
-        )
-    print("✓ 已保存特征缓存: cache/exp1_processed_features.pkl")
+    norm_params = dict(traj_mean=traj_mean, traj_std=traj_std,
+                       stats_mean=stats_mean, stats_std=stats_std)
 
-    # 第一步：先划分索引（不需要 dataset）
-    all_indices = np.arange(len(segments))
-    labels_stratify = [s[2] for s in segments]
+    # 6. Dataset & DataLoader
+    def make_loader(data, shuffle):
+        ds = TrajectoryDataset(data, label_encoder,
+                               traj_mean=traj_mean, traj_std=traj_std,
+                               stats_mean=stats_mean, stats_std=stats_std)
+        return DataLoader(ds, batch_size=args.batch_size, shuffle=shuffle, num_workers=0)
 
-    train_indices, temp_indices = train_test_split(
-        all_indices, test_size=0.3, random_state=42,
-        stratify=labels_stratify
-    )
-    temp_labels = [labels_stratify[i] for i in temp_indices]
-    val_indices, test_indices = train_test_split(
-        temp_indices, test_size=0.6667, random_state=42,
-        stratify=temp_labels
-    )
+    train_loader = make_loader(train_data, shuffle=True)
+    val_loader   = make_loader(val_data,   shuffle=False)
+    test_loader  = make_loader(test_data,  shuffle=False)
 
-    # 第二步：对训练集进行数据增强（避免数据泄露）
-    train_segments = [segments[i] for i in train_indices]
-    train_segments = BaseGeoLifePreprocessor.oversample_minority_classes(
-        train_segments,
-        target_ratio=0.3,
-        minority_classes=['Subway', 'Train']
-    )
-    print(f"\n✅ 训练集增强完成: {len(train_indices)} -> {len(train_segments)}")
+    print(f"\n数据集大小: Train={len(train_data)}, Val={len(val_data)}, Test={len(test_data)}")
 
-    # 第三步：用训练集计算归一化统计量
-    from common.train_utils import compute_feature_stats
-    traj_mean, traj_std, stats_mean, stats_std = compute_feature_stats(train_segments)
-    norm_params = {
-        'traj_mean': traj_mean, 'traj_std': traj_std,
-        'stats_mean': stats_mean, 'stats_std': stats_std
-    }
-    print(f"\n✅ 归一化统计量计算完成（基于 {len(train_segments)} 个训练样本）")
-
-    # 第四步：创建包含所有数据的 dataset（验证集和测试集使用原始数据）
-    all_segments = train_segments + [segments[i] for i in val_indices] + [segments[i] for i in test_indices]
-    dataset = TrajectoryDataset(
-        all_segments, label_encoder,
-        traj_mean=traj_mean, traj_std=traj_std,
-        stats_mean=stats_mean, stats_std=stats_std
-    )
-
-    # 更新索引：训练集在前，验证集在中间，测试集在后
-    new_train_indices = list(range(len(train_segments)))
-    new_val_indices = list(range(len(train_segments), len(train_segments) + len(val_indices)))
-    new_test_indices = list(range(len(train_segments) + len(val_indices), len(all_segments)))
-
-    print(f"\n✅ 数据集大小:")
-    print(f"  总样本数: {len(dataset)}")
-    print(f"  训练样本数: {len(new_train_indices)}")
-    print(f"  验证样本数: {len(new_val_indices)}")
-    print(f"  测试样本数: {len(new_test_indices)}")
-
-    train_loader = DataLoader(
-        torch.utils.data.Subset(dataset, new_train_indices),
-        batch_size=args.batch_size,
-        shuffle=True
-    )
-    val_loader = DataLoader(
-        torch.utils.data.Subset(dataset, new_val_indices),
-        batch_size=args.batch_size,
-        shuffle=False
-    )
-    test_loader = DataLoader(
-        torch.utils.data.Subset(dataset, new_test_indices),
-        batch_size=args.batch_size,
-        shuffle=False
-    )
-
-    print(f"\n✅ 数据加载完成:")
-    print(f"  Train: {len(new_train_indices)} 样本")
-    print(f"  Val:   {len(new_val_indices)} 样本")
-    print(f"  Test:  {len(new_test_indices)} 样本")
-    print(f"  训练批次总数: {len(train_loader)}")
-    print(f"  验证批次总数: {len(val_loader)}")
-    print(f"  测试批次总数: {len(test_loader)}")
-
-    # 检查数据中是否有 NaN 或 Inf 值
-    print("\n检查数据质量:")
-    has_nan = False
-    has_inf = False
-    for i in range(min(100, len(segments))):
-        features, segment_stats, label = segments[i]
-        if np.isnan(features).any():
-            print(f"  ❌ 样本 {i}: features 包含 NaN")
-            has_nan = True
-        if np.isinf(features).any():
-            print(f"  ❌ 样本 {i}: features 包含 Inf")
-            has_inf = True
-        if np.isnan(segment_stats).any():
-            print(f"  ❌ 样本 {i}: segment_stats 包含 NaN")
-            has_nan = True
-        if np.isinf(segment_stats).any():
-            print(f"  ❌ 样本 {i}: segment_stats 包含 Inf")
-            has_inf = True
-    if not has_nan and not has_inf:
-        print("  ✅ 前 100 个样本数据质量正常")
-
-    print(f"\n类别分布:")
+    # 类别分布
+    print("\n类别分布（原始测试集）:")
     for cls in label_encoder.classes_:
-        train_count = sum(1 for i in train_indices if segments[i][2] == cls)
-        val_count = sum(1 for i in val_indices if segments[i][2] == cls)
-        test_count = sum(1 for i in test_indices if segments[i][2] == cls)
-        print(f"  {cls:15s}: Train={train_count}, Val={val_count}, Test={test_count}")
+        enc = label_encoder.transform([cls])[0]
+        cnt = sum(1 for _, _, l in test_data if l == enc)
+        print(f"  {cls:15s}: {cnt}")
 
+    # 7. 模型
     model = TransportationModeClassifier(
         trajectory_feature_dim=TRAJECTORY_FEATURE_DIM,
         segment_stats_dim=18,
@@ -317,208 +225,131 @@ def main():
         global_hidden=128,
     ).to(args.device)
 
-    all_features_and_labels = segments
+    # 8. 损失函数
     class_weights = compute_class_weights(
-        label_encoder,
-        all_features_and_labels,
-        label_index=2,
-        mode='sqrt_inverse'
+        label_encoder, train_data, label_index=2, mode='sqrt_inverse'
     ).to(args.device)
     criterion = nn.CrossEntropyLoss(weight=class_weights)
+
+    # 9. 优化器 & 调度器
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
-    # Warmup scheduler：前10轮线性升温
-    def warmup_lambda(epoch):
-        warmup_epochs = 10
-        if epoch < warmup_epochs:
-            return (epoch + 1) / warmup_epochs
-        return 1.0
-
     warmup_scheduler = torch.optim.lr_scheduler.LambdaLR(
-        optimizer, lr_lambda=warmup_lambda
+        optimizer, lr_lambda=lambda ep: (ep+1)/10 if ep < 10 else 1.0
     )
-
-    # ReduceLROnPlateau：验证准确率不改善时降低学习率
     plateau_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='max', factor=0.5, patience=8,
-        min_lr=1e-5
+        optimizer, mode='max', factor=0.5, patience=8, min_lr=1e-5
     )
 
-    # ========================================================
-    # ✅ Early Stopping 配置
-    # ========================================================
+    # 10. 训练
     CHECKPOINT_PATH = "checkpoints/exp1_model.pth"
-
-    # 加载历史最佳 val_acc 作为初始基准
-    best_val_acc = 0.0
-    start_epoch = 0
-
-    if os.path.exists(CHECKPOINT_PATH):
-        try:
-            prev = torch.load(CHECKPOINT_PATH, map_location=args.device, weights_only=False)
-            if 'val_acc' in prev:
-                best_val_acc = prev['val_acc']
-            if prev.get('model_config', {}).get('num_classes') == len(label_encoder.classes_):
-                model.load_state_dict(prev['model_state_dict'])
-                print(f"✅ 加载历史最佳权重，val_acc={best_val_acc:.4f}，从 epoch 0 重新训练")
-            else:
-                print(f"⚠️ 模型类别数不匹配，从零开始")
-        except Exception as e:
-            print(f"⚠️ 历史模型加载失败（{e}），从零开始")
-
-    epochs_no_improve = 0
-    patience = 25
     os.makedirs("checkpoints", exist_ok=True)
-
-    # 连续 NaN 检测计数器
-    consecutive_nan_count = 0
-    MAX_CONSECUTIVE_NAN = 3  # 连续3次NaN则停止训练
-
-    # ========================================================
-    # ✅ 训练曲线保存到 CSV
-    # ========================================================
-    import csv
     os.makedirs("logs", exist_ok=True)
+
+    best_val_acc = 0.0
+    epochs_no_improve = 0
+    consecutive_nan = 0
+
     csv_path = "logs/exp1_training_log.csv"
     with open(csv_path, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(['epoch', 'train_loss', 'train_acc', 'val_loss', 'val_acc', 'lr'])
+        csv.writer(f).writerow(['epoch', 'train_loss', 'train_acc',
+                                 'val_loss', 'val_acc', 'lr'])
 
-    for epoch in range(start_epoch, args.epochs):
+    for epoch in range(args.epochs):
         print(f"\nEpoch {epoch+1}/{args.epochs}")
 
         train_loss, train_acc = train_epoch(
             model, train_loader, criterion, optimizer, args.device
         )
 
-        # NaN 检测
         if np.isnan(train_loss) or np.isinf(train_loss):
-            consecutive_nan_count += 1
-            print(f"⚠️ 检测到训练损失异常（{train_loss}），连续NaN次数: {consecutive_nan_count}/{MAX_CONSECUTIVE_NAN}")
-            
-            if consecutive_nan_count >= MAX_CONSECUTIVE_NAN:
-                print(f"🛑 连续{MAX_CONSECUTIVE_NAN}次NaN，停止训练")
+            consecutive_nan += 1
+            if consecutive_nan >= 3:
+                print("🛑 连续NaN，停止训练")
                 break
-            
             if os.path.exists(CHECKPOINT_PATH):
-                try:
-                    prev = torch.load(CHECKPOINT_PATH, map_location=args.device, weights_only=False)
-                    model.load_state_dict(prev['model_state_dict'])
-                    print(f"✅ 已恢复到最佳模型")
-                except Exception as e:
-                    print(f"⚠️ 模型恢复失败（{e}），从零开始")
-            continue  # 跳过本轮，不降lr
+                prev = torch.load(CHECKPOINT_PATH, map_location=args.device, weights_only=False)
+                model.load_state_dict(prev['model_state_dict'])
+            continue
         else:
-            consecutive_nan_count = 0  # 正常训练，重置计数器
+            consecutive_nan = 0
 
-        # 在验证集上评估
-        val_loss, val_report, _, _ = evaluate(
+        # ✅ 修复：evaluate 返回5个值
+        val_loss, val_acc, val_report, _, _ = evaluate(
             model, val_loader, criterion, args.device, label_encoder.classes_
         )
-        val_acc = val_report['accuracy']
 
-        # NaN 检测
         if np.isnan(val_loss) or np.isinf(val_loss):
-            consecutive_nan_count += 1
-            print(f"⚠️ 检测到验证损失异常（{val_loss}），连续NaN次数: {consecutive_nan_count}/{MAX_CONSECUTIVE_NAN}")
-            
-            if consecutive_nan_count >= MAX_CONSECUTIVE_NAN:
-                print(f"🛑 连续{MAX_CONSECUTIVE_NAN}次NaN，停止训练")
+            consecutive_nan += 1
+            if consecutive_nan >= 3:
                 break
-            
-            if os.path.exists(CHECKPOINT_PATH):
-                try:
-                    prev = torch.load(CHECKPOINT_PATH, map_location=args.device, weights_only=False)
-                    model.load_state_dict(prev['model_state_dict'])
-                    print(f"✅ 已恢复到最佳模型")
-                except Exception as e:
-                    print(f"⚠️ 模型恢复失败（{e}），从零开始")
-            continue  # 跳过本轮，不降lr
+            continue
+        else:
+            consecutive_nan = 0
 
-        # 在训练循环结束后再打印上一轮指标汇总
         print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f}")
         print(f"Val   Loss: {val_loss:.4f} | Val   Acc: {val_acc:.4f}")
 
-        # 学习率调度
         if epoch < 10:
             warmup_scheduler.step()
         else:
-            # warmup 结束后，重置 plateau_scheduler 的内部状态
             if epoch == 10:
                 plateau_scheduler.num_bad_epochs = 0
-                print("🔄 Warmup 结束，重置 ReduceLROnPlateau 状态")
             plateau_scheduler.step(val_acc)
 
         current_lr = optimizer.param_groups[0]['lr']
-        print(f"当前学习率: {current_lr:.6f}")
+        print(f"学习率: {current_lr:.6f}")
 
-        # 写入训练日志
         with open(csv_path, 'a', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow([epoch+1, f"{train_loss:.4f}", f"{train_acc:.4f}",
-                           f"{val_loss:.4f}", f"{val_acc:.4f}",
-                           f"{optimizer.param_groups[0]['lr']:.6f}"])
+            csv.writer(f).writerow([epoch+1, f"{train_loss:.4f}", f"{train_acc:.4f}",
+                                     f"{val_loss:.4f}", f"{val_acc:.4f}", f"{current_lr:.6f}"])
 
-        # Early Stopping 检查
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             epochs_no_improve = 0
-
             torch.save({
-                "epoch": epoch,
-                "resume": True,
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "label_encoder": label_encoder,
-                "val_acc": val_acc,
-                "norm_params": norm_params,
-                "model_config": {
-                    "trajectory_feature_dim": TRAJECTORY_FEATURE_DIM,
-                    "segment_stats_dim": 18,
-                    "hidden_dim": args.hidden_dim,
-                    "num_layers": args.num_layers,
-                    "num_classes": len(label_encoder.classes_),
-                    "dropout": args.dropout
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'label_encoder': label_encoder,
+                'val_acc': val_acc,
+                'norm_params': norm_params,
+                'model_config': {
+                    'trajectory_feature_dim': TRAJECTORY_FEATURE_DIM,
+                    'segment_stats_dim': 18,
+                    'hidden_dim': args.hidden_dim,
+                    'num_layers': args.num_layers,
+                    'num_classes': len(label_encoder.classes_),
+                    'dropout': args.dropout,
                 }
-            }, "checkpoints/exp1_model.pth")
-            print("✓ 保存最佳模型（基于验证集）")
+            }, CHECKPOINT_PATH)
+            print(f"✓ 保存最佳模型 val_acc={val_acc:.4f}")
         else:
             epochs_no_improve += 1
-            print(f"⏳ 验证准确率未改善: {epochs_no_improve}/{patience}")
-
-            if epochs_no_improve >= patience:
-                print(f"\n🛑 Early stopping 触发（patience={patience}）")
+            print(f"⏳ 未改善: {epochs_no_improve}/{args.patience}")
+            if epochs_no_improve >= args.patience:
+                print(f"🛑 Early stopping")
                 break
 
-    # ========================================================
-    # ✅ 在测试集上进行最终评估
-    # ========================================================
-    print("\n" + "=" * 80)
+    # 11. 最终测试集评估
+    print("\n" + "=" * 60)
     print("最终测试集评估")
-    print("=" * 80)
-
-    # 加载最佳checkpoint进行最终评估
-    best_ckpt = torch.load(
-        'checkpoints/exp1_model.pth',
-        map_location=args.device, weights_only=False
-    )
+    print("=" * 60)
+    best_ckpt = torch.load(CHECKPOINT_PATH, map_location=args.device, weights_only=False)
     model.load_state_dict(best_ckpt['model_state_dict'])
-    print("✅ 已加载最佳checkpoint进行最终评估")
 
-    test_loss, test_report, all_preds, all_labels = evaluate(
+    # ✅ 修复：evaluate 返回5个值
+    test_loss, test_acc, test_report, all_preds, all_labels = evaluate(
         model, test_loader, criterion, args.device, label_encoder.classes_
     )
-    test_acc = test_report['accuracy']
 
-    print(f"\nTest Loss: {test_loss:.4f} | Test Acc: {test_acc:.4f}")
+    print(f"Test Loss: {test_loss:.4f} | Test Acc: {test_acc:.4f}")
     print("\n各类别详细指标:")
     for cls in label_encoder.classes_:
         if cls in test_report:
-            metrics = test_report[cls]
-            print(f"  {cls:15s}: P={metrics['precision']:.4f}, R={metrics['recall']:.4f}, F1={metrics['f1-score']:.4f}")
+            m = test_report[cls]
+            print(f"  {cls:15s}: P={m['precision']:.4f}, R={m['recall']:.4f}, F1={m['f1-score']:.4f}")
 
-    # 混淆矩阵
-    from sklearn.metrics import confusion_matrix
     cm = confusion_matrix(all_labels, all_preds)
     print("\n混淆矩阵（行=真实，列=预测）:")
     classes = label_encoder.classes_
