@@ -1,11 +1,8 @@
 """
-exp4/evaluate.py（修复版）
+exp4/evaluate.py
 ======================
-修复内容：
-1. 去掉 placeholder，模型是单编码器不需要
-2. Dataset 格式改为 (traj_21, stats_18, label_encoded)
-3. 推理时调用 model(traj, segment_stats=stats)
-4. 从 EXP4 缓存加载数据，使用共享测试集索引
+基于exp3，使用LabelSmoothingFocalLoss
+直接读取exp3/cache/processed_features.pkl
 """
 import os
 import sys
@@ -23,29 +20,35 @@ from tqdm import tqdm
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PARENT_DIR = os.path.dirname(SCRIPT_DIR)
+EXP3_DIR = os.path.join(PARENT_DIR, 'exp3')
 sys.path.insert(0, SCRIPT_DIR)
 sys.path.insert(0, PARENT_DIR)
+sys.path.insert(0, EXP3_DIR)
 os.chdir(SCRIPT_DIR)
 
-from exp2.src.model import TransportationModeClassifier
-from src.focal_loss import LabelSmoothingFocalLoss
+from exp3.src.model_weather import TransportationModeClassifierWithWeather
+from common.focal_loss import LabelSmoothingFocalLoss
 
 plt.rcParams['font.sans-serif'] = ['SimHei', 'DejaVu Sans', 'Arial Unicode MS']
 plt.rcParams['axes.unicode_minus'] = False
 
-EXP4_FEATURE_CACHE = os.path.join(SCRIPT_DIR, 'cache', 'processed_features_exp4.pkl')
-SHARED_TEST_PATH  = os.path.join(PARENT_DIR, 'data', 'processed', 'shared_test_indices.pkl')
+TRAJECTORY_FEATURE_DIM = 21
+WEATHER_FEATURE_DIM    = 10
+
+EXP3_CACHE_PATH = os.path.join(EXP3_DIR, 'cache', 'processed_features.pkl')
 OUTPUT_DIR         = 'evaluation_results'
 
 
-# ✅ 修复：去掉 placeholder
-class TrajectoryDatasetExp4(Dataset):
+class TrajectoryDataset(Dataset):
     def __init__(self, all_features,
                  traj_mean=None, traj_std=None,
+                 weather_mean=None, weather_std=None,
                  stats_mean=None, stats_std=None):
         self.data = all_features
         self.traj_mean  = traj_mean
         self.traj_std   = traj_std
+        self.weather_mean = weather_mean
+        self.weather_std  = weather_std
         self.stats_mean = stats_mean
         self.stats_std  = stats_std
 
@@ -53,23 +56,29 @@ class TrajectoryDatasetExp4(Dataset):
         return len(self.data)
 
     def __getitem__(self, idx):
-        traj_21, stats, label = self.data[idx]
-        traj  = traj_21.astype(np.float32)
-        stats = stats.astype(np.float32)
+        traj, stats, label, weather = self.data[idx]
+        traj    = traj.astype(np.float32)
+        stats   = stats.astype(np.float32)
+        weather = weather.astype(np.float32)
+
         if self.traj_mean is not None:
-            traj = (traj - self.traj_mean) / self.traj_std
+            traj    = (traj    - self.traj_mean)    / (self.traj_std    + 1e-8)
+        if self.weather_mean is not None:
+            weather = (weather - self.weather_mean) / (self.weather_std + 1e-8)
         if self.stats_mean is not None:
-            stats = (stats - self.stats_mean) / self.stats_std
+            stats   = (stats   - self.stats_mean)   / (self.stats_std   + 1e-8)
+
         return (torch.FloatTensor(traj),
+                torch.FloatTensor(weather),
                 torch.FloatTensor(stats),
-                torch.LongTensor([label])[0])
+                torch.LongTensor([label]).squeeze())
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--checkpoint', default='checkpoints/exp4_model.pth')
     parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--device',     default='cpu')
+    parser.add_argument('--device', default='cpu')
     args = parser.parse_args()
 
     DEVICE = torch.device(args.device if torch.cuda.is_available() else 'cpu')
@@ -85,95 +94,78 @@ def main():
 
     checkpoint = torch.load(args.checkpoint, map_location=DEVICE, weights_only=False)
     label_encoder = checkpoint['label_encoder']
-    config = checkpoint['model_config']
+    config = checkpoint.get('model_config', {})
     norm_params = checkpoint.get('norm_params', {})
 
-    traj_mean  = norm_params.get('traj_mean', None)
-    traj_std   = norm_params.get('traj_std', None)
-    stats_mean = norm_params.get('stats_mean', None)
-    stats_std  = norm_params.get('stats_std', None)
+    traj_mean    = norm_params.get('traj_mean', None)
+    traj_std     = norm_params.get('traj_std', None)
+    weather_mean = norm_params.get('weather_mean', None)
+    weather_std  = norm_params.get('weather_std', None)
+    stats_mean   = norm_params.get('stats_mean', None)
+    stats_std    = norm_params.get('stats_std', None)
 
-    model = TransportationModeClassifier(
-        trajectory_feature_dim=config.get('input_dim', 21),
-        segment_stats_dim=config.get('segment_stats_dim', 18),
-        hidden_dim=config.get('hidden_dim', 128),
-        num_layers=config.get('num_layers', 2),
-        num_classes=config.get('num_classes', len(label_encoder.classes_)),
-        dropout=config.get('dropout', 0.3)
+    if traj_mean is None:
+        print("❌ checkpoint 缺少 norm_params，请重新训练 exp4/train.py")
+        return
+
+    model = TransportationModeClassifierWithWeather(
+        TRAJECTORY_FEATURE_DIM, WEATHER_FEATURE_DIM, 18,
+        config.get('hidden_dim', 128), config.get('num_layers', 2),
+        len(label_encoder.classes_), config.get('dropout', 0.3),
+        num_segments=5, local_hidden=64, global_hidden=128,
     ).to(DEVICE)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
-    print(f"   ✓ 模型加载完成，类别: {list(label_encoder.classes_)}")
+    print(f"   ✓ 模型加载完成")
 
     # 2. 加载测试数据
     print(f"\n[2/4] 加载测试数据...")
-    if not os.path.exists(SHARED_TEST_PATH):
-        raise FileNotFoundError(f"共享测试集不存在: {SHARED_TEST_PATH}\n请先运行 create_shared_test_set.py")
+    if not os.path.exists(EXP3_CACHE_PATH):
+        raise FileNotFoundError(f"EXP3 缓存不存在: {EXP3_CACHE_PATH}\n请先运行 exp3/train.py")
 
-    with open(SHARED_TEST_PATH, 'rb') as f:
-        shared_data = pickle.load(f)
-    
-    valid_indices = shared_data['valid_indices']
-    test_indices = shared_data['test_indices']
-    cleaned_data = shared_data['cleaned_data']
-    # 使用模型checkpoint中的label_encoder，而不是共享测试集中的
-    # shared_label_encoder = shared_data['label_encoder']
-    
-    # 从共享测试集提取21维特征
-    from exp2.src.feature_extraction import FeatureExtractor
-    from exp2.src.osm_feature_extractor import OsmSpatialExtractor
-    
-    spatial_extractor = OsmSpatialExtractor()
-    feature_extractor = FeatureExtractor(spatial_extractor)
-    
-    test_data = []
-    for idx in test_indices:
-        cleaned_idx = valid_indices[idx]
-        traj, stats, datetime_series, label = cleaned_data[cleaned_idx]
-        
-        try:
-            # 提取21维融合特征（9轨迹 + 12空间）
-            traj_21, spatial_features = feature_extractor.extract_features(traj)
-            # 使用模型checkpoint中的label_encoder进行编码
-            if label in label_encoder.classes_:
-                label_encoded = label_encoder.transform([label])[0]
-                # EXP4格式: (traj_21, stats_18, label_encoded)
-                test_data.append((traj_21, stats, label_encoded))
-        except Exception as e:
-            print(f"  警告: 样本 {idx} 特征提取失败: {e}")
-            continue
-    
-    print(f"   ✓ 测试样本: {len(test_data)}（共享测试集，random_state=42）")
+    with open(EXP3_CACHE_PATH, 'rb') as f:
+        cache = pickle.load(f)
+    all_data = cache[0]
 
-    # 3. 推理
-    print(f"\n[3/4] 推理...")
-    dataset = TrajectoryDatasetExp4(
+    # 使用与train.py相同的划分逻辑（70/10/20，random_state=42）
+    from sklearn.model_selection import train_test_split
+    all_indices = np.arange(len(all_data))
+    labels_encoded = [item[2] for item in all_data]
+
+    train_indices, temp_indices = train_test_split(
+        all_indices, test_size=0.3, random_state=42, stratify=labels_encoded
+    )
+    temp_labels = [labels_encoded[i] for i in temp_indices]
+    val_indices, test_indices = train_test_split(
+        temp_indices, test_size=0.6667, random_state=42, stratify=temp_labels
+    )
+
+    test_data = [all_data[i] for i in test_indices]
+    print(f"   ✓ 测试集: {len(test_data)} 个样本")
+
+    # 3. 构建测试集
+    print(f"\n[3/4] 构建测试集...")
+    dataset = TrajectoryDataset(
         test_data,
         traj_mean=traj_mean, traj_std=traj_std,
+        weather_mean=weather_mean, weather_std=weather_std,
         stats_mean=stats_mean, stats_std=stats_std
     )
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=0)
+    print(f"   ✓ 最终测试样本: {len(test_data)}")
 
-    class_names = label_encoder.classes_
-    class_weights = checkpoint.get('class_weights', None)
-    if class_weights is not None:
-        class_weights = torch.FloatTensor(class_weights).to(DEVICE)
-    criterion = LabelSmoothingFocalLoss(
-        num_classes=len(class_names), gamma=2.0, smoothing=0.1, weight=class_weights
-    )
-
+    # 4. 推理与报告
+    print(f"\n[4/4] 推理与报告...")
+    class_names_str = [str(name) for name in label_encoder.classes_]
     y_true, y_pred, y_probs = [], [], []
     with torch.no_grad():
-        for traj, stats, labels in tqdm(loader, desc="Evaluating"):
-            traj   = traj.to(DEVICE)
-            stats  = stats.to(DEVICE)
-            labels = labels.to(DEVICE)
-
-            # ✅ 修复：单编码器，不传 placeholder
-            logits = model(traj, segment_stats=stats)
-            probs  = torch.softmax(logits, dim=1)
-            preds  = torch.argmax(logits, dim=1)
-
+        for traj, weather, stats, labels in tqdm(loader, desc="Evaluating"):
+            traj    = traj.to(DEVICE)
+            weather = weather.to(DEVICE)
+            stats   = stats.to(DEVICE)
+            logits  = model(traj, weather, segment_stats=stats)
+            probs   = torch.softmax(logits, dim=1)
+            preds   = torch.argmax(logits, dim=1)
             y_true.extend(labels.cpu().numpy())
             y_pred.extend(preds.cpu().numpy())
             y_probs.extend(probs.cpu().numpy())
@@ -182,60 +174,83 @@ def main():
     y_pred  = np.array(y_pred)
     y_probs = np.array(y_probs)
 
-    # 4. 报告
-    print(f"\n[4/4] 生成报告...")
+    # 报告
     print("\n" + "=" * 60)
     print("分类报告")
     print("=" * 60)
-    print(classification_report(y_true, y_pred, target_names=class_names,
+    print(classification_report(y_true, y_pred, target_names=class_names_str,
                                  zero_division=0, digits=4))
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    report_dict = classification_report(y_true, y_pred, target_names=class_names,
+    report_dict = classification_report(y_true, y_pred, target_names=class_names_str,
                                          output_dict=True, zero_division=0)
 
-    with open(os.path.join(OUTPUT_DIR, 'evaluation_report.json'), 'w', encoding='utf-8') as f:
+    with open(os.path.join(OUTPUT_DIR, 'evaluation_report.json'), 'w', encoding='utf-8-sig') as f:
         json.dump(report_dict, f, indent=4, ensure_ascii=False)
+    print(f"   ✓ 保存: evaluation_results/evaluation_report.json")
 
     conf_list = [float(y_probs[i, p]) for i, p in enumerate(y_pred)]
     pd.DataFrame({
-        'true_label': [class_names[i] for i in y_true],
-        'pred_label': [class_names[i] for i in y_pred],
+        'true_label': [class_names_str[i] for i in y_true],
+        'pred_label': [class_names_str[i] for i in y_pred],
         'confidence': conf_list,
-        'correct': y_true == y_pred
-    }).to_csv(os.path.join(OUTPUT_DIR, 'predictions_exp4.csv'), index=False, encoding='utf-8-sig')
+        'correct':    y_true == y_pred
+    }).to_csv(os.path.join(OUTPUT_DIR, 'predictions_exp4.csv'),
+              index=False, encoding='utf-8-sig')
+    print(f"   ✓ 保存: evaluation_results/predictions_exp4.csv")
 
     try:
         plt.figure(figsize=(10, 8))
         cm = confusion_matrix(y_true, y_pred)
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-                    xticklabels=class_names, yticklabels=class_names)
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Oranges',
+                    xticklabels=class_names_str, yticklabels=class_names_str)
         plt.title('Exp4 Confusion Matrix (LabelSmoothing + Focal Loss)', fontsize=14)
         plt.xlabel('Predicted'); plt.ylabel('True')
         plt.tight_layout()
         plt.savefig(os.path.join(OUTPUT_DIR, 'confusion_matrix.png'), dpi=300)
         plt.close()
+        print(f"   ✓ 保存: evaluation_results/confusion_matrix.png")
     except Exception as e:
-        print(f"⚠️ 混淆矩阵生成失败: {e}")
+        print(f"   ⚠️ 混淆矩阵生成失败: {e}")
+
+    try:
+        f1_scores = [report_dict[cls]['f1-score'] for cls in class_names_str]
+        plt.figure(figsize=(12, 6))
+        sns.barplot(x=list(class_names_str), y=f1_scores, color='darkorange')
+        plt.title('Exp4 F1-Score by Transportation Mode', fontsize=14)
+        plt.xlabel('Transportation Mode'); plt.ylabel('F1-Score')
+        plt.ylim(0, 1.0)
+        for i, v in enumerate(f1_scores):
+            plt.text(i, v + 0.02, f"{v:.3f}", ha='center', fontsize=10)
+        plt.xticks(rotation=45); plt.tight_layout()
+        plt.savefig(os.path.join(OUTPUT_DIR, 'per_class_f1_scores.png'), dpi=300)
+        plt.close()
+        print(f"   ✓ 保存: evaluation_results/per_class_f1_scores.png")
+    except Exception as e:
+        print(f"   ⚠️ F1图生成失败: {e}")
 
     errors_df = pd.DataFrame({
-        'true_label': [class_names[i] for i in y_true],
-        'pred_label': [class_names[i] for i in y_pred],
+        'true_label': [class_names_str[i] for i in y_true],
+        'pred_label': [class_names_str[i] for i in y_pred],
         'confidence': conf_list
     })
     errors_df[errors_df['true_label'] != errors_df['pred_label']].to_csv(
-        os.path.join(OUTPUT_DIR, 'error_analysis.csv'), index=False, encoding='utf-8-sig'
+        os.path.join(OUTPUT_DIR, 'error_analysis.csv'),
+        index=False, encoding='utf-8-sig'
     )
+    print(f"   ✓ 保存: evaluation_results/error_analysis.csv")
 
     print("\n" + "=" * 60)
     print("评估汇总")
     print("=" * 60)
     print(f"总样本数: {len(y_true)}")
+    print(f"正确预测: {(y_true == y_pred).sum()}")
+    print(f"错误预测: {(y_true != y_pred).sum()}")
     print(f"准确率:   {report_dict['accuracy']:.4f}")
     print(f"加权 F1:  {report_dict['weighted avg']['f1-score']:.4f}")
     print(f"宏平均 F1:{report_dict['macro avg']['f1-score']:.4f}")
     print(f"\n✅ 结果保存至: {os.path.abspath(OUTPUT_DIR)}")
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

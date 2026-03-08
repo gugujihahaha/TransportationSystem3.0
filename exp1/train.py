@@ -183,22 +183,28 @@ def main():
     # 6. 训练
     # 加载历史最佳模型（如果存在）
     model_path = os.path.join(args.save_dir, 'exp1_model.pth')
-    best_val_acc = 0.0
+    best_val_loss = float('inf')
+    start_epoch = 0
     if os.path.exists(model_path):
         try:
             checkpoint = torch.load(model_path, map_location=args.device, weights_only=False)
-            best_val_acc = checkpoint.get('val_acc', 0.0)
-            print(f"\n[加载历史最佳模型] 历史最佳验证准确率: {best_val_acc:.4f}")
+            model.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            best_val_loss = checkpoint.get('val_loss', float('inf'))
+            start_epoch = checkpoint.get('epoch', 0) + 1
+            print(f"\n[加载历史最佳模型] 历史最佳验证损失: {best_val_loss:.4f}")
+            print(f"[继续训练] 从第 {start_epoch} 轮开始")
         except Exception as e:
             print(f"\n[警告] 无法加载历史最佳模型: {e}")
-            best_val_acc = 0.0
+            best_val_loss = float('inf')
+            start_epoch = 0
     else:
         print(f"\n[训练] 未找到历史最佳模型，从头开始训练")
 
     epochs_no_improve = 0
     patience = args.patience
 
-    for epoch in range(args.epochs):
+    for epoch in range(start_epoch, args.epochs):
         train_loss, train_acc = train_epoch(
             model, train_loader, criterion, optimizer, args.device
         )
@@ -206,14 +212,16 @@ def main():
             model, val_loader, criterion, args.device, label_encoder.classes_
         )
 
-        if val_acc > best_val_acc:
-            old_best = best_val_acc
-            best_val_acc = val_acc
+        if val_loss < best_val_loss:
+            old_best = best_val_loss
+            best_val_loss = val_loss
             epochs_no_improve = 0
             torch.save({
+                'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'label_encoder': label_encoder,
+                'val_loss': val_loss,
                 'val_acc': val_acc,
                 'norm_params': norm_params,
                 'model_config': {
@@ -228,13 +236,13 @@ def main():
             print(f"Epoch {epoch+1}/{args.epochs}: "
                   f"Train Loss={train_loss:.4f}, Train Acc={train_acc:.4f}, "
                   f"Val Loss={val_loss:.4f}, Val Acc={val_acc:.4f} "
-                  f"[✅ 保存最佳模型: {val_acc:.4f} > {old_best:.4f}]")
+                  f"[✅ 保存最佳模型: {val_loss:.4f} < {old_best:.4f}]")
         else:
             epochs_no_improve += 1
             print(f"Epoch {epoch+1}/{args.epochs}: "
                   f"Train Loss={train_loss:.4f}, Train Acc={train_acc:.4f}, "
                   f"Val Loss={val_loss:.4f}, Val Acc={val_acc:.4f} "
-                  f"[❌ 未超最佳: {val_acc:.4f} <= {best_val_acc:.4f}]")
+                  f"[❌ 未超最佳: {val_loss:.4f} >= {best_val_loss:.4f}]")
 
         if epochs_no_improve >= patience:
             print(f"Early stopping at epoch {epoch+1}")

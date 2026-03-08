@@ -39,7 +39,6 @@ plt.rcParams['axes.unicode_minus'] = False
 
 MODEL_PATH         = 'checkpoints/exp3_model.pth'
 EXP2_FEATURE_CACHE = os.path.join(EXP2_DIR, 'cache', 'processed_features.pkl')
-SHARED_SPLIT_PATH  = os.path.join(PARENT_DIR, 'data', 'processed', 'shared_split.pkl')
 # 原始数据（含时间戳），用于提取天气
 CLEANED_DATA_PATH  = os.path.join(PARENT_DIR, 'data', 'processed', 'cleaned_balanced.pkl')
 OUTPUT_DIR         = 'evaluation_results'
@@ -133,26 +132,19 @@ def main():
     model.eval()
     print("   ✓ 模型加载完成")
 
-    # ── 2. 从缓存加载数据（不实时提取OSM特征）───────────────────
+    # ── 2. 从缓存加载数据（自行划分）───────────────────────
     print(f"\n[2/4] 加载数据...")
     for path, name in [(EXP2_FEATURE_CACHE, 'EXP2特征缓存'),
-                       (SHARED_SPLIT_PATH,  '共享划分'),
                        (CLEANED_DATA_PATH,  '原始数据(时间戳)')]:
         if not os.path.exists(path):
             print(f"❌ {name} 不存在: {path}")
             if name == 'EXP2特征缓存':
                 print("   请先运行 exp2/train.py")
-            elif name == '共享划分':
-                print("   请先运行 exp2/train.py（训练后自动生成）")
             return
 
     with open(EXP2_FEATURE_CACHE, 'rb') as f:
         cache = pickle.load(f)
     all_exp2_data = cache[0] if isinstance(cache, tuple) else cache
-
-    with open(SHARED_SPLIT_PATH, 'rb') as f:
-        split = pickle.load(f)
-    test_indices = split['test_indices']
 
     with open(CLEANED_DATA_PATH, 'rb') as f:
         cleaned_data = pickle.load(f)
@@ -167,20 +159,34 @@ def main():
         n_use = n_exp2
 
     print(f"   ✓ EXP2缓存: {n_exp2} 样本 | cleaned_balanced: {n_cleaned} 样本")
+
+    # 使用与train.py相同的划分逻辑（70/10/20，random_state=42）
+    from sklearn.model_selection import train_test_split
+    all_indices = np.arange(n_use)
+    labels_encoded = [item[2] for item in all_exp2_data[:n_use]]
+
+    train_indices, temp_indices = train_test_split(
+        all_indices, test_size=0.3, random_state=42, stratify=labels_encoded
+    )
+    temp_labels = [labels_encoded[i] for i in temp_indices]
+    val_indices, test_indices = train_test_split(
+        temp_indices, test_size=0.6667, random_state=42, stratify=temp_labels
+    )
+
     print(f"   ✓ 测试集: {len(test_indices)} 个样本")
 
     # ── 3. 附加天气特征 ──────────────────────────────────────────
     print(f"\n[3/4] 附加天气特征...")
     # WeatherDataProcessor 使用绝对路径初始化
-    weather_data_dir = os.path.join(PARENT_DIR, 'data', 'weather')
-    weather_csv_path = os.path.join(weather_data_dir, 'weather_data.csv')
+    weather_csv_path = os.path.join(PARENT_DIR, 'data', 'beijing_weather_daily_2007_2012.csv')
     if os.path.exists(weather_csv_path):
         weather_processor = weather_preprocessing.WeatherDataProcessor(weather_csv_path=weather_csv_path)
+        weather_processor.load_and_process()  # 加载天气数据
     else:
         print(f"   警告: 天气数据文件不存在: {weather_csv_path}")
         print(f"   将使用零向量代替天气特征")
         weather_processor = None
-    print(f"   天气数据目录: {weather_data_dir}")
+    print(f"   天气数据文件: {weather_csv_path}")
 
     SEQ_LEN     = 50   # 固定序列长度
     WEATHER_DIM = config['weather_feature_dim']  # 通常10
@@ -189,11 +195,7 @@ def main():
     test_data = []
     skipped   = 0
     for idx in tqdm(test_indices, desc="附加天气特征"):
-        if idx >= n_use:
-            skipped += 1
-            continue
-
-        traj_21, _, stats, label_encoded = all_exp2_data[idx]
+        traj_21, stats, label_encoded = all_exp2_data[idx]
 
         # 从 cleaned_balanced.pkl 取时间戳
         raw_sample = cleaned_data[idx]
@@ -263,11 +265,12 @@ def main():
     print("\n" + "=" * 60)
     print("分类报告")
     print("=" * 60)
-    print(classification_report(y_true, y_pred, target_names=class_names,
+    class_names_str = [str(name) for name in class_names]
+    print(classification_report(y_true, y_pred, target_names=class_names_str,
                                  zero_division=0, digits=4))
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    report_dict = classification_report(y_true, y_pred, target_names=class_names,
+    report_dict = classification_report(y_true, y_pred, target_names=class_names_str,
                                          output_dict=True, zero_division=0)
 
     with open(os.path.join(OUTPUT_DIR, 'evaluation_report.json'), 'w', encoding='utf-8') as f:
@@ -276,8 +279,8 @@ def main():
 
     conf_list = [float(y_probs[i, p]) for i, p in enumerate(y_pred)]
     pd.DataFrame({
-        'true_label': [class_names[i] for i in y_true],
-        'pred_label': [class_names[i] for i in y_pred],
+        'true_label': [class_names_str[i] for i in y_true],
+        'pred_label': [class_names_str[i] for i in y_pred],
         'confidence': conf_list,
         'correct':    y_true == y_pred
     }).to_csv(os.path.join(OUTPUT_DIR, 'predictions_exp3.csv'),
@@ -288,7 +291,7 @@ def main():
         plt.figure(figsize=(10, 8))
         cm = confusion_matrix(y_true, y_pred)
         sns.heatmap(cm, annot=True, fmt='d', cmap='Oranges',
-                    xticklabels=class_names, yticklabels=class_names)
+                    xticklabels=class_names_str, yticklabels=class_names_str)
         plt.title('Exp3 Confusion Matrix (Trajectory + Spatial + Weather)', fontsize=14)
         plt.xlabel('Predicted'); plt.ylabel('True')
         plt.tight_layout()
@@ -299,9 +302,9 @@ def main():
         print(f"   ⚠️ 混淆矩阵生成失败: {e}")
 
     try:
-        f1_scores = [report_dict[cls]['f1-score'] for cls in class_names]
+        f1_scores = [report_dict[cls]['f1-score'] for cls in class_names_str]
         plt.figure(figsize=(12, 6))
-        sns.barplot(x=list(class_names), y=f1_scores, color='darkorange')
+        sns.barplot(x=list(class_names_str), y=f1_scores, color='darkorange')
         plt.title('Exp3 F1-Score by Transportation Mode', fontsize=14)
         plt.xlabel('Transportation Mode'); plt.ylabel('F1-Score')
         plt.ylim(0, 1.0)
@@ -315,8 +318,8 @@ def main():
         print(f"   ⚠️ F1图生成失败: {e}")
 
     errors_df = pd.DataFrame({
-        'true_label': [class_names[i] for i in y_true],
-        'pred_label': [class_names[i] for i in y_pred],
+        'true_label': [class_names_str[i] for i in y_true],
+        'pred_label': [class_names_str[i] for i in y_pred],
         'confidence': conf_list
     })
     errors_df[errors_df['true_label'] != errors_df['pred_label']].to_csv(
