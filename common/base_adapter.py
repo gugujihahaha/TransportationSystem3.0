@@ -19,10 +19,10 @@ class BaseDataAdapter(ABC):
     - 各实验只做格式转换
     """
 
-    # 所有实验共用的7类标签
+    # 所有实验共用的6类标签（不含Airplane）
     VALID_LABELS = {
         'Walk', 'Bike', 'Bus', 'Car & taxi',
-        'Train', 'Subway', 'Airplane'
+        'Train', 'Subway'
     }
 
     # 统一目标长度
