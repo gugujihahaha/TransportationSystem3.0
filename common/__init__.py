@@ -3,7 +3,7 @@
 提供所有实验共用的基础数据预处理、模型基类和训练工具
 """
 
-from .base_preprocessor import BaseGeoLifePreprocessor, BaseGeoLifeDataLoader
+from .base_preprocessor import BaseGeoLifePreprocessor
 from .base_adapter import BaseDataAdapter
 from .adapters import (
     Exp1DataAdapter,
@@ -17,7 +17,6 @@ from .train_utils import train_epoch, evaluate, compute_class_weights
 
 __all__ = [
     'BaseGeoLifePreprocessor',
-    'BaseGeoLifeDataLoader',
     'BaseDataAdapter',
     'Exp1DataAdapter',
     'Exp2DataAdapter',
