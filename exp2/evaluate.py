@@ -32,7 +32,6 @@ plt.rcParams['axes.unicode_minus'] = False
 
 MODEL_PATH         = 'checkpoints/exp2_model.pth'
 EXP2_FEATURE_CACHE = os.path.join(SCRIPT_DIR, 'cache', 'processed_features.pkl')
-SHARED_TEST_PATH  = os.path.join(PARENT_DIR, 'data', 'processed', 'shared_test_indices.pkl')
 OUTPUT_DIR         = 'evaluation_results'
 DEVICE             = 'cuda' if torch.cuda.is_available() else 'cpu'
 
