@@ -33,7 +33,6 @@ plt.rcParams['axes.unicode_minus'] = False
 
 MODEL_PATH         = 'checkpoints/exp1_model.pth'
 EXP1_CACHE_PATH    = os.path.join(SCRIPT_DIR, 'cache', 'exp1_processed_features.pkl')
-SHARED_SPLIT_PATH  = os.path.join(PARENT_DIR, 'data', 'processed', 'shared_split.pkl')
 OUTPUT_DIR         = 'evaluation_results'
 DEVICE             = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -78,15 +77,23 @@ def main():
     print(f"\n[2/4] 加载测试数据...")
     if not os.path.exists(EXP1_CACHE_PATH):
         raise FileNotFoundError(f"EXP1 缓存不存在: {EXP1_CACHE_PATH}\n请先运行 exp1/train.py")
-    if not os.path.exists(SHARED_SPLIT_PATH):
-        raise FileNotFoundError(f"共享划分不存在: {SHARED_SPLIT_PATH}")
 
     with open(EXP1_CACHE_PATH, 'rb') as f:
-        all_data, _, _ = pickle.load(f)
-    with open(SHARED_SPLIT_PATH, 'rb') as f:
-        split = pickle.load(f)
+        all_data, label_encoder, _ = pickle.load(f)
 
-    test_indices = split['test_indices']
+    # 使用与train.py相同的划分逻辑（70/10/20，random_state=42）
+    from sklearn.model_selection import train_test_split
+    all_indices = np.arange(len(all_data))
+    labels_encoded = [item[2] for item in all_data]
+
+    train_indices, temp_indices = train_test_split(
+        all_indices, test_size=0.3, random_state=42, stratify=labels_encoded
+    )
+    temp_labels = [labels_encoded[i] for i in temp_indices]
+    val_indices, test_indices = train_test_split(
+        temp_indices, test_size=0.6667, random_state=42, stratify=temp_labels
+    )
+
     test_data = [all_data[i] for i in test_indices]
     print(f"   ✓ 测试样本: {len(test_data)}")
 

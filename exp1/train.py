@@ -93,6 +93,12 @@ def load_data():
     print(f"   类别数: {len(label_encoder.classes_)}")
     print(f"   类别: {list(label_encoder.classes_)}")
 
+    # 保存缓存
+    os.makedirs(os.path.dirname(EXP1_CACHE_PATH), exist_ok=True)
+    with open(EXP1_CACHE_PATH, 'wb') as f:
+        pickle.dump((all_data, label_encoder, {}), f, protocol=pickle.HIGHEST_PROTOCOL)
+    print(f"   缓存已保存: {EXP1_CACHE_PATH}")
+
     return all_data, label_encoder
 
 
@@ -175,7 +181,20 @@ def main():
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     # 6. 训练
+    # 加载历史最佳模型（如果存在）
+    model_path = os.path.join(args.save_dir, 'exp1_model.pth')
     best_val_acc = 0.0
+    if os.path.exists(model_path):
+        try:
+            checkpoint = torch.load(model_path, map_location=args.device, weights_only=False)
+            best_val_acc = checkpoint.get('val_acc', 0.0)
+            print(f"\n[加载历史最佳模型] 历史最佳验证准确率: {best_val_acc:.4f}")
+        except Exception as e:
+            print(f"\n[警告] 无法加载历史最佳模型: {e}")
+            best_val_acc = 0.0
+    else:
+        print(f"\n[训练] 未找到历史最佳模型，从头开始训练")
+
     epochs_no_improve = 0
     patience = args.patience
 
@@ -188,6 +207,7 @@ def main():
         )
 
         if val_acc > best_val_acc:
+            old_best = best_val_acc
             best_val_acc = val_acc
             epochs_no_improve = 0
             torch.save({
@@ -205,12 +225,16 @@ def main():
                     'dropout': args.dropout,
                 }
             }, os.path.join(args.save_dir, 'exp1_model.pth'))
+            print(f"Epoch {epoch+1}/{args.epochs}: "
+                  f"Train Loss={train_loss:.4f}, Train Acc={train_acc:.4f}, "
+                  f"Val Loss={val_loss:.4f}, Val Acc={val_acc:.4f} "
+                  f"[✅ 保存最佳模型: {val_acc:.4f} > {old_best:.4f}]")
         else:
             epochs_no_improve += 1
-
-        print(f"Epoch {epoch+1}/{args.epochs}: "
-              f"Train Loss={train_loss:.4f}, Train Acc={train_acc:.4f}, "
-              f"Val Loss={val_loss:.4f}, Val Acc={val_acc:.4f}")
+            print(f"Epoch {epoch+1}/{args.epochs}: "
+                  f"Train Loss={train_loss:.4f}, Train Acc={train_acc:.4f}, "
+                  f"Val Loss={val_loss:.4f}, Val Acc={val_acc:.4f} "
+                  f"[❌ 未超最佳: {val_acc:.4f} <= {best_val_acc:.4f}]")
 
         if epochs_no_improve >= patience:
             print(f"Early stopping at epoch {epoch+1}")
