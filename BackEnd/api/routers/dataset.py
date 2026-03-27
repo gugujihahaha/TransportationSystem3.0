@@ -12,6 +12,7 @@ router = APIRouter()
 BASE_DIR = Path(__file__).parent.parent.parent
 PROCESSED_DIR = BASE_DIR / "data" / "processed"
 CLEANED_DATA_PATH = PROCESSED_DIR / "cleaned_balanced.pkl"
+BASE_SEGMENTS_PATH = PROCESSED_DIR / "base_segments.pkl"
 
 
 @router.get("/stats", response_model=DatasetStats)
@@ -32,13 +33,17 @@ async def get_dataset_stats():
         trajectory_lengths = [len(seg[0]) for seg in segments]
         avg_trajectory_length = float(np.mean(trajectory_lengths))
         
-        users = set()
-        for seg in segments:
-            if len(seg) >= 4:
-                user_id = seg[3].split('_')[0] if isinstance(seg[3], str) else "unknown"
-                users.add(user_id)
-        
-        total_users = len(users)
+        if BASE_SEGMENTS_PATH.exists():
+            with open(BASE_SEGMENTS_PATH, 'rb') as f:
+                base_segments = pickle.load(f)
+            users = set()
+            for seg in base_segments:
+                user_id = seg.get('user_id')
+                if user_id:
+                    users.add(user_id)
+            total_users = len(users)
+        else:
+            total_users = 182
         
         date_range = {
             "start": "2007-04-12",

@@ -48,7 +48,11 @@
       </div>
 
       <div class="page-content">
-        <router-view />
+        <router-view v-slot="{ Component }">
+          <keep-alive include="DataOverview,ModelComparison">
+            <component :is="Component" />
+          </keep-alive>
+        </router-view>
       </div>
     </div>
   </div>
