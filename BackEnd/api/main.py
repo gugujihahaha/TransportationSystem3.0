@@ -1,0 +1,50 @@
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+import os
+from pathlib import Path
+
+from api.routers import trajectory, experiment, dataset, training
+
+app = FastAPI(
+    title="交通方式识别 API",
+    description="基于深度学习的城市出行方式识别系统",
+    version="1.0.0"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(trajectory.router, prefix="/api/trajectory", tags=["轨迹"])
+app.include_router(experiment.router, prefix="/api/experiments", tags=["实验"])
+app.include_router(dataset.router, prefix="/api/dataset", tags=["数据集"])
+app.include_router(training.router, prefix="/api/training", tags=["训练"])
+
+
+@app.get("/")
+async def root():
+    return {
+        "message": "交通方式识别 API",
+        "version": "1.0.0",
+        "docs": "/docs"
+    }
+
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "api.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True
+    )
