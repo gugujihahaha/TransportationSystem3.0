@@ -24,7 +24,7 @@ wheels/
 venv/
 env/
 ENV/
-.venv
+.venv/
 
 # IDE
 .vscode/
@@ -34,31 +34,50 @@ ENV/
 *~
 
 # Jupyter Notebook
-.ipynb_checkpoints
+.ipynb_checkpoints/
 
-# Model checkpoints
-exp2/checkpoints/
+# PyTorch / TensorFlow
 *.pth
 *.pt
+*.pkl
+*.h5
+*.hdf5
 *.ckpt
+*.checkpoint
 
-# Results
-results/
+# Data files
+data/
+*.geojson
+
+# Model checkpoints
+**/checkpoints/
+**/models/
+
+# Evaluation results (optional - if you want to keep them, remove these lines)
+**/evaluation_results/*.png
+**/evaluation_results/*.csv
+!**/evaluation_results/evaluation_report.json
+
+# Logs
+*.log
 logs/
 
-# Data (large files)
-# Uncomment if you don't want to track data files
-# data/
+# Node.js / Frontend
+FrontEnd/node_modules/
+FrontEnd/dist/
+FrontEnd/.vite/
 
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
+
+# Environment variables
+.env
+.env.local
+.env.*.local
 
 # Temporary files
 *.tmp
-*.log
-
-
-
-
-
+*.temp
+*.bak
