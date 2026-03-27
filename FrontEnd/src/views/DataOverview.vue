@@ -48,23 +48,23 @@
       <div class="info-card">
         <h3>数据清洗流程</h3>
         <div class="process-flow">
-          <div v-for="(step, index) in cleaningStats.steps" :key="index" class="process-step">
-            <div class="step-icon">
-              <el-icon>
-                <component :is="stepIcons[index]" />
-              </el-icon>
+          <template v-for="(step, index) in cleaningStats.steps" :key="index">
+            <div class="process-step">
+              <div class="step-icon">
+                <el-icon>
+                  <component :is="stepIcons[index]" />
+                </el-icon>
+              </div>
+              <div class="step-content">
+                <h4>{{ step.name }}</h4>
+                <p>{{ stepDescriptions[index] }}</p>
+                <div class="step-count">{{ step.name }}: {{ step.count.toLocaleString() }}</div>
+              </div>
             </div>
-            <div class="step-content">
-              <h4>{{ step.name }}</h4>
-              <p>{{ stepDescriptions[index] }}</p>
-              <div class="step-count">{{ step.name }}: {{ step.count.toLocaleString() }}</div>
-            </div>
-          </div>
-          <div v-if="cleaningStats.steps.length > 0" class="process-arrows">
-            <div v-for="i in cleaningStats.steps.length - 1" :key="i" class="process-arrow">
+            <div v-if="index < cleaningStats.steps.length - 1" class="process-arrow">
               <el-icon><ArrowRight /></el-icon>
             </div>
-          </div>
+          </template>
         </div>
       </div>
 
@@ -104,15 +104,23 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+defineOptions({
+  name: 'DataOverview'
+})
+
+import { ref, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
 import { datasetApi } from '@/api/dataset'
 import StatCard from '@/components/StatCard.vue'
 import * as echarts from 'echarts'
 import type { ECharts } from 'echarts'
 import { Document, Filter, Brush, ScaleToOriginal, ArrowRight } from '@element-plus/icons-vue'
-import type { DataCleaningStats } from '@/types'
+import type { DataCleaningStats, DatasetStats } from '@/types'
 
-const datasetStats = ref({
+let cachedDatasetStats: DatasetStats | null = null
+let cachedCleaningStats: DataCleaningStats | null = null
+let isDataLoaded = false
+
+const datasetStats = ref<DatasetStats>({
   total_trajectories: 0,
   total_users: 0,
   avg_trajectory_length: 0,
@@ -138,35 +146,65 @@ const pieChartRef = ref<HTMLElement>()
 let barChart: ECharts | null = null
 let pieChart: ECharts | null = null
 
-onMounted(async () => {
+async function loadData() {
+  if (isDataLoaded && cachedDatasetStats && cachedCleaningStats) {
+    datasetStats.value = cachedDatasetStats
+    cleaningStats.value = cachedCleaningStats
+    return
+  }
+
   await Promise.all([
     loadDatasetStats(),
     loadCleaningStats()
   ])
-  initBarChart()
-  initPieChart()
-})
+  
+  cachedDatasetStats = datasetStats.value
+  cachedCleaningStats = cleaningStats.value
+  isDataLoaded = true
+}
 
 async function loadDatasetStats() {
+  if (cachedDatasetStats) {
+    datasetStats.value = cachedDatasetStats
+    return
+  }
+  
   try {
     const stats = await datasetApi.getStats()
     datasetStats.value = stats
+    cachedDatasetStats = stats
   } catch (error) {
     console.error('加载数据集统计失败:', error)
   }
 }
 
 async function loadCleaningStats() {
+  if (cachedCleaningStats) {
+    cleaningStats.value = cachedCleaningStats
+    return
+  }
+  
   try {
     const stats = await datasetApi.getCleaningStats()
     cleaningStats.value = stats
+    cachedCleaningStats = stats
   } catch (error) {
     console.error('加载数据清洗统计失败:', error)
   }
 }
 
+function initCharts() {
+  initBarChart()
+  initPieChart()
+}
+
 function initBarChart() {
   if (!barChartRef.value) return
+  
+  if (barChart) {
+    barChart.resize()
+    return
+  }
 
   barChart = echarts.init(barChartRef.value)
 
@@ -228,6 +266,11 @@ function initBarChart() {
 
 function initPieChart() {
   if (!pieChartRef.value) return
+  
+  if (pieChart) {
+    pieChart.resize()
+    return
+  }
 
   pieChart = echarts.init(pieChartRef.value)
 
@@ -283,6 +326,29 @@ function initPieChart() {
 
   pieChart.setOption(option)
 }
+
+function handleResize() {
+  barChart?.resize()
+  pieChart?.resize()
+}
+
+onMounted(async () => {
+  await loadData()
+  initCharts()
+  window.addEventListener('resize', handleResize)
+})
+
+onActivated(() => {
+  handleResize()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', handleResize)
+  barChart?.dispose()
+  pieChart?.dispose()
+  barChart = null
+  pieChart = null
+})
 </script>
 
 <style scoped>
@@ -368,31 +434,21 @@ function initPieChart() {
 
 .process-flow {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  align-items: flex-start;
+  justify-content: center;
   margin-bottom: 24px;
   padding: 20px 0;
-  position: relative;
-}
-
-.process-arrows {
-  position: absolute;
-  top: 50%;
-  left: 0;
-  right: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-around;
-  transform: translateY(-50%);
-  pointer-events: none;
+  gap: 8px;
 }
 
 .process-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: #909399;
   font-size: 20px;
-  background: #1a1f2e;
-  padding: 4px;
-  z-index: 1;
+  padding: 28px 8px 0;
+  flex-shrink: 0;
 }
 
 .process-step {
@@ -401,6 +457,7 @@ function initPieChart() {
   flex-direction: column;
   align-items: center;
   text-align: center;
+  min-width: 0;
 }
 
 .step-icon {
@@ -414,6 +471,12 @@ function initPieChart() {
   color: #fff;
   font-size: 24px;
   margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.step-content {
+  width: 100%;
+  min-width: 0;
 }
 
 .step-content h4 {
@@ -421,25 +484,26 @@ function initPieChart() {
   font-size: 14px;
   font-weight: 600;
   color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .step-content p {
   margin: 0 0 8px 0;
-  font-size: 12px;
+  font-size: 11px;
   color: #909399;
   line-height: 1.4;
+  word-break: break-word;
 }
 
 .step-count {
   font-size: 12px;
   color: #4A90E2;
   font-weight: 600;
-}
-
-.process-arrow {
-  padding: 0 16px;
-  color: #909399;
-  font-size: 20px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .cleaning-stats {

@@ -25,6 +25,9 @@
         <div class="upload-text">
           <p>拖拽文件到此处或点击上传</p>
           <p class="upload-hint">支持 CSV、JSON 或 PLT 格式</p>
+          <el-button type="primary" link @click.stop="showFormatDialog = true">
+            查看格式模板
+          </el-button>
         </div>
       </div>
     </el-upload>
@@ -34,15 +37,13 @@
         <h4>PLT 格式（Geolife）：</h4>
         <pre class="code-block">
 Geolife trajectory
-WGS84
+WGS 84
 Altitude is in Feet
-Reserved
-3
-1
+Reserved 3
+0,2,255,My Track,0,0,2,8421376
 0
-10
-39.9042,116.4074,0,100,39245.3333,2024-01-01,08:00:00
-39.9050,116.4080,0,100,39245.3334,2024-01-01,08:00:05
+39.8626216,116.3859383,0,1000.7,39761.082037037,2008-11-09,01:58:08
+39.86264,116.3859466,0,1000.7,39761.0828472222,2008-11-09,01:59:18
         </pre>
 
         <h4>CSV 格式：</h4>
@@ -91,10 +92,10 @@ const showFormatDialog = ref(false)
 const selectedModel = ref('exp1')
 
 const models = [
-  { id: 'exp1', name: 'exp1 (9维轨迹特征)' },
-  { id: 'exp2', name: 'exp2 (9维轨迹特征 + OSM)' },
-  { id: 'exp3', name: 'exp3 (9维轨迹特征 + 天气)' },
-  { id: 'exp4', name: 'exp4 (9维轨迹特征 + OSM + 天气)' },
+  { id: 'exp1', name: 'exp1 (基线)' },
+  { id: 'exp2', name: 'exp2 (+OSM)' },
+  { id: 'exp3', name: 'exp3 (+天气)' },
+  { id: 'exp4', name: 'exp4 (方法对比)' },
 ]
 
 function handleFileChange(file: any) {
@@ -146,7 +147,7 @@ function handleFileChange(file: any) {
 }
 
 .upload-content {
-  padding: 40px 0;
+  padding: 20px 0;
   text-align: center;
 }
 

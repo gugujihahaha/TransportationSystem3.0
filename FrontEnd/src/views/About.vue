@@ -119,6 +119,53 @@
       </div>
 
       <div class="section-card">
+        <h3>数据集说明</h3>
+        <div class="dataset-info">
+          <h4>数据来源</h4>
+          <p>
+            本项目使用 <strong>GeoLife Trajectories 1.3</strong> 数据集，该数据集由微软亚洲研究院于2007年4月至2012年8月收集，包含了182个用户的GPS轨迹数据。
+          </p>
+          
+          <h4>数据筛选</h4>
+          <p>
+            原始数据集包含17,621条带标签的轨迹段，但并非所有数据都适合用于模型训练。经过数据筛选和清洗后：
+          </p>
+          <ul class="dataset-stats">
+            <li><strong>原始用户数</strong>：182个用户</li>
+            <li><strong>当前用户数</strong>：61个用户（拥有足够标注数据的用户）</li>
+            <li><strong>原始轨迹段</strong>：17,621段</li>
+            <li><strong>清洗后轨迹段</strong>：9,531段（基础清洗）</li>
+            <li><strong>均衡采样后</strong>：8,841段（用于模型训练）</li>
+          </ul>
+          
+          <h4>筛选原因</h4>
+          <p>
+            1. <strong>数据质量过滤</strong>：移除GPS点数少于10个的轨迹段，确保轨迹具有足够的特征信息
+          </p>
+          <p>
+            2. <strong>异常值处理</strong>：检测和移除物理异常点（如速度过快、位置跳跃等）
+          </p>
+          <p>
+            3. <strong>用户筛选</strong>：只保留拥有足够标注数据的用户，确保每个用户有足够的样本
+          </p>
+          <p>
+            4. <strong>类别均衡</strong>：为避免模型偏向样本多的类别，对各类别进行了均衡采样
+          </p>
+          
+          <h4>清洗后的7种交通方式</h4>
+          <ul class="mode-list">
+            <li>步行 (Walk)</li>
+            <li>自行车 (Bike)</li>
+            <li>公交 (Bus)</li>
+            <li>汽车/出租 (Car &amp; taxi)</li>
+            <li>火车 (Train)</li>
+            <li>地铁 (Subway)</li>
+            <li>飞机 (Airplane)</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="section-card">
         <h3>技术栈</h3>
         <div class="tech-cloud">
           <el-tag v-for="tech in techStack" :key="tech" size="large" class="tech-tag">
@@ -154,7 +201,7 @@
 
         <div class="github-link">
           <el-button type="primary" :icon="Link" size="large">
-            GitHub 仓库（占位）
+            https://github.com/muxiao0613-hub/TransportationModeRecognition.git
           </el-button>
         </div>
       </div>
@@ -308,6 +355,67 @@ const techStack = [
   font-size: 13px;
   color: #909399;
   line-height: 1.5;
+}
+
+.dataset-info {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.dataset-info h4 {
+  margin: 0 0 12px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #4A90E2;
+}
+
+.dataset-info p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.8;
+  color: #e5e8eb;
+}
+
+.dataset-stats {
+  margin: 0;
+  padding: 16px 24px;
+  background: rgba(74, 144, 226, 0.1);
+  border-radius: 8px;
+  border: 1px solid rgba(74, 144, 226, 0.3);
+}
+
+.dataset-stats li {
+  padding: 8px 0;
+  font-size: 14px;
+  color: #e5e8eb;
+  list-style: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.dataset-stats li:last-child {
+  border-bottom: none;
+}
+
+.mode-list {
+  margin: 0;
+  padding: 16px 24px;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  background: rgba(82, 196, 26, 0.1);
+  border-radius: 8px;
+  border: 1px solid rgba(82, 196, 26, 0.3);
+}
+
+.mode-list li {
+  padding: 10px 16px;
+  font-size: 14px;
+  color: #e5e8eb;
+  list-style: none;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 4px;
+  border-left: 3px solid #52C41A;
 }
 
 .tech-cloud {

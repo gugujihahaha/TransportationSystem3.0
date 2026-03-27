@@ -23,30 +23,30 @@ def get_evaluation_dir(exp_id: str) -> Path:
 EXPERIMENTS = [
     {
         "id": "exp1",
-        "name": "实验1: 纯轨迹特征",
-        "description": "仅使用GPS轨迹的9维特征进行交通方式识别",
-        "features": ["轨迹特征 (9维)", "段级统计特征 (18维)"],
+        "name": "实验1: 基线",
+        "description": "traj_9 + stats_18，层次化Bi-LSTM，带类别权重的CrossEntropyLoss",
+        "features": ["traj_9", "stats_18", "层次化Bi-LSTM", "带类别权重的CrossEntropyLoss"],
         "status": "completed"
     },
     {
         "id": "exp2",
-        "name": "实验2: 轨迹 + OSM空间特征",
-        "description": "结合GPS轨迹和OpenStreetMap地理空间特征",
-        "features": ["轨迹特征 (9维)", "段级统计特征 (18维)", "OSM空间特征 (11维)"],
+        "name": "实验2: +OSM",
+        "description": "在exp1基础上：traj_9→traj_21，引入OSM空间特征，模型结构不变",
+        "features": ["traj_21", "stats_18", "OSM空间特征", "层次化Bi-LSTM", "带类别权重的CrossEntropyLoss"],
         "status": "completed"
     },
     {
         "id": "exp3",
-        "name": "实验3: 轨迹 + 空间 + 天气特征",
-        "description": "结合GPS轨迹、OSM空间特征和气象数据",
-        "features": ["轨迹特征 (9维)", "段级统计特征 (18维)", "OSM空间特征 (15维)", "天气特征 (12维)"],
+        "name": "实验3: +天气",
+        "description": "在exp2基础上：加入天气特征，双路编码器（轨迹hidden=128 + 天气hidden=32），AttentionPooling后拼接stats_18",
+        "features": ["traj_21", "stats_18", "OSM空间特征", "天气特征", "双路编码器 + AttentionPooling", "带类别权重的CrossEntropyLoss"],
         "status": "completed"
     },
     {
         "id": "exp4",
-        "name": "实验4: 对比学习",
-        "description": "使用Focal Loss和对比学习改进模型",
-        "features": ["轨迹特征 (9维)", "段级统计特征 (18维)", "OSM空间特征 (15维)", "天气特征 (12维)", "对比学习"],
+        "name": "实验4: 方法对比",
+        "description": "与exp3使用相同数据和模型结构，损失函数改为LabelSmoothingFocalLoss（γ=2.0，smoothing=0.1）",
+        "features": ["traj_21", "stats_18", "OSM空间特征", "天气特征", "双路编码器 + AttentionPooling", "LabelSmoothingFocalLoss"],
         "status": "completed"
     },
 ]
