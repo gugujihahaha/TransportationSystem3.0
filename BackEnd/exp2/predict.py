@@ -5,7 +5,9 @@ Exp2 预测器 (独立版)
 import torch
 import numpy as np
 import os
-from src.model import TransportationModeClassifier
+import sys
+
+from exp2.src.model import TransportationModeClassifier
 
 
 class TransportationPredictorExp2:
@@ -28,7 +30,7 @@ class TransportationPredictorExp2:
         config = ckpt['model_config']
 
         # 初始化模型架构 (Exp2: 轨迹 21 维)
-        input_dim = config.get('trajectory_feature_dim', 21)
+        input_dim = config.get('combined_dim', config.get('input_dim', 21))
         self.model = TransportationModeClassifier(
             trajectory_feature_dim=input_dim,
             segment_stats_dim=18,
