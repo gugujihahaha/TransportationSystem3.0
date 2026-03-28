@@ -26,6 +26,29 @@ app.include_router(dataset.router, prefix="/api/dataset", tags=["数据集"])
 app.include_router(training.router, prefix="/api/training", tags=["训练"])
 
 
+@app.on_event("startup")
+async def startup_event():
+    """应用启动时加载模型和天气数据"""
+    print("=" * 60)
+    print("正在启动服务...")
+    print("=" * 60)
+    
+    from api.routers.trajectory import load_predictors, load_weather_data, load_osm_data
+    
+    print("\n📋 加载OSM数据...")
+    load_osm_data()
+    
+    print("\n📋 加载天气数据...")
+    load_weather_data()
+    
+    print("\n📋 加载预测模型...")
+    load_predictors()
+    
+    print("\n" + "=" * 60)
+    print("服务启动完成！")
+    print("=" * 60)
+
+
 @app.get("/")
 async def root():
     return {

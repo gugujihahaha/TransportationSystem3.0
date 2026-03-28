@@ -30,20 +30,142 @@ TRANSPORT_MODES = [
 ]
 
 predictors = {}
+weather_processor = None
+osm_extractor = None
+
+def load_osm_data():
+    """加载真实OSM数据（优先使用缓存）"""
+    global osm_extractor
+    try:
+        import pickle
+        import sys
+        from pathlib import Path
+        
+        exp2_path = str(Path(__file__).parent.parent.parent / "exp2")
+        if exp2_path not in sys.path:
+            sys.path.insert(0, exp2_path)
+        
+        from exp2.src.osm_feature_extractor import OsmSpatialExtractor
+        
+        spatial_cache_path = Path(__file__).parent.parent.parent / "exp2" / "cache" / "spatial_data.pkl"
+        if spatial_cache_path.exists():
+            print(f"📋 正在从缓存加载OSM数据: {spatial_cache_path}")
+            with open(spatial_cache_path, 'rb') as f:
+                osm_extractor = pickle.load(f)
+            
+            grid_cache_path = Path(__file__).parent.parent.parent / "exp2" / "cache" / "spatial_grid_cache.pkl"
+            if grid_cache_path.exists():
+                osm_extractor.load_cache(str(grid_cache_path))
+            
+            print(f"✅ OSM数据从缓存加载成功")
+            print(f"   - 道路节点: {len(osm_extractor.road_coords) if osm_extractor.road_coords is not None else 0}")
+            print(f"   - POI节点: {len(osm_extractor.poi_coords) if osm_extractor.poi_coords is not None else 0}")
+            return
+        
+        osm_geojson_path = Path(__file__).parent.parent.parent / "data" / "exp2.geojson"
+        if osm_geojson_path.exists():
+            print(f"📋 正在加载OSM数据: {osm_geojson_path}")
+            
+            from exp2.src.data_preprocessing import OSMDataLoader
+            osm_loader = OSMDataLoader(str(osm_geojson_path))
+            osm_data = osm_loader.load_osm_data()
+            
+            road_network = osm_loader.extract_road_network(osm_data)
+            pois = osm_loader.extract_pois(osm_data)
+            
+            print(f"   -> 加载了 {len(road_network)} 条道路, {len(pois)} 个POI")
+            
+            osm_extractor = OsmSpatialExtractor()
+            osm_extractor.build_from_osm(road_network, pois)
+            
+            print(f"✅ OSM数据加载成功")
+        else:
+            print(f"⚠️ OSM数据文件不存在: {osm_geojson_path}")
+    except Exception as e:
+        print(f"⚠️ 加载OSM数据失败: {e}")
+        import traceback
+        traceback.print_exc()
+
+def load_weather_data():
+    """加载真实天气数据"""
+    global weather_processor
+    try:
+        from exp3.src.weather_preprocessing import WeatherDataProcessor
+        weather_csv_path = Path(__file__).parent.parent.parent / "data" / "beijing_weather_daily_2007_2012.csv"
+        if weather_csv_path.exists():
+            weather_processor = WeatherDataProcessor(str(weather_csv_path))
+            weather_processor.load_and_process()
+            print(f"✅ 天气数据加载成功")
+        else:
+            print(f"⚠️ 天气数据文件不存在: {weather_csv_path}")
+    except Exception as e:
+        print(f"⚠️ 加载天气数据失败: {e}")
 
 def load_predictors():
     """加载所有预测器"""
+    import sys
+    from pathlib import Path
+    
+    base_dir = Path(__file__).parent.parent.parent
+    
+    exp1_path = str(base_dir / "exp1")
+    exp2_path = str(base_dir / "exp2")
+    exp3_path = str(base_dir / "exp3")
+    exp4_path = str(base_dir / "exp4")
+    
+    for path in [exp1_path, exp2_path, exp3_path, exp4_path]:
+        if path not in sys.path:
+            sys.path.insert(0, path)
+    
     try:
         from exp1.predict import TrajectoryPredictor
-        exp1_path = Path(__file__).parent.parent.parent / "exp1" / "checkpoints" / "exp1_model.pth"
-        if exp1_path.exists():
-            predictors['exp1'] = TrajectoryPredictor(str(exp1_path))
+        model_path = base_dir / "exp1" / "checkpoints" / "exp1_model.pth"
+        if model_path.exists():
+            predictors['exp1'] = TrajectoryPredictor(str(model_path))
         else:
-            print(f"⚠️ exp1 模型文件不存在: {exp1_path}")
+            print(f"⚠️ exp1 模型文件不存在: {model_path}")
     except Exception as e:
         print(f"⚠️ 加载 exp1 预测器失败: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    try:
+        from exp2.predict import TransportationPredictorExp2
+        model_path = base_dir / "exp2" / "checkpoints" / "exp2_model.pth"
+        if model_path.exists():
+            predictors['exp2'] = TransportationPredictorExp2(str(model_path))
+        else:
+            print(f"⚠️ exp2 模型文件不存在: {model_path}")
+    except Exception as e:
+        print(f"⚠️ 加载 exp2 预测器失败: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    try:
+        from exp3.predict import TransportationPredictorExp3
+        model_path = base_dir / "exp3" / "checkpoints" / "exp3_model.pth"
+        if model_path.exists():
+            predictors['exp3'] = TransportationPredictorExp3(str(model_path))
+        else:
+            print(f"⚠️ exp3 模型文件不存在: {model_path}")
+    except Exception as e:
+        print(f"⚠️ 加载 exp3 预测器失败: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    try:
+        from exp4.predict import TransportationPredictorExp4
+        model_path = base_dir / "exp4" / "checkpoints" / "exp4_model.pth"
+        if model_path.exists():
+            predictors['exp4'] = TransportationPredictorExp4(str(model_path))
+        else:
+            print(f"⚠️ exp4 模型文件不存在: {model_path}")
+    except Exception as e:
+        print(f"⚠️ 加载 exp4 预测器失败: {e}")
+        import traceback
+        traceback.print_exc()
 
-load_predictors()
+# load_predictors()  # 在 main.py 的 startup 事件中调用
 
 def load_plt_file(content: bytes) -> pd.DataFrame:
     """加载 PLT 格式文件（Geolife 格式）"""
@@ -138,6 +260,85 @@ def compute_trajectory_features(df: pd.DataFrame) -> tuple:
     segment_stats = compute_segment_stats(features)
     
     return features, df, segment_stats
+
+def compute_trajectory_features_21d(df: pd.DataFrame) -> np.ndarray:
+    """计算21维轨迹特征（包含真实OSM空间特征）"""
+    features_9d, df_with_stats, _ = compute_trajectory_features(df)
+    
+    if osm_extractor is not None and osm_extractor.road_kdtree is not None:
+        try:
+            osm_features = osm_extractor.extract_spatial_features(features_9d)
+            features_21d = np.hstack([features_9d, osm_features])
+            return features_21d
+        except Exception as e:
+            print(f"⚠️ OSM特征提取失败: {e}，使用备用特征")
+    
+    N = len(features_9d)
+    
+    lat = df_with_stats['latitude'].values
+    lon = df_with_stats['longitude'].values
+    speed = df_with_stats['speed'].values
+    acceleration = df_with_stats['acceleration'].values
+    
+    hour_of_day = df_with_stats['timestamp'].dt.hour.values / 24.0
+    day_of_week = df_with_stats['timestamp'].dt.dayofweek.values / 6.0
+    
+    osm_features = np.zeros((N, 12), dtype=np.float32)
+    
+    for i in range(N):
+        osm_features[i, 0] = lat[i]
+        osm_features[i, 1] = lon[i]
+        osm_features[i, 2] = speed[i]
+        osm_features[i, 3] = acceleration[i]
+        osm_features[i, 4] = hour_of_day[i]
+        osm_features[i, 5] = day_of_week[i]
+        osm_features[i, 6] = np.sin(2 * np.pi * hour_of_day[i])
+        osm_features[i, 7] = np.cos(2 * np.pi * hour_of_day[i])
+        osm_features[i, 8] = np.sin(2 * np.pi * day_of_week[i])
+        osm_features[i, 9] = np.cos(2 * np.pi * day_of_week[i])
+        osm_features[i, 10] = speed[i] / (speed.max() + 1e-6)
+        osm_features[i, 11] = min(1.0, speed[i] / 15.0)
+    
+    features_21d = np.hstack([features_9d, osm_features])
+    
+    return features_21d
+
+def compute_weather_features(df: pd.DataFrame) -> np.ndarray:
+    """计算10维天气特征（使用真实天气数据）"""
+    if weather_processor is not None and weather_processor._load_successful:
+        return weather_processor.get_weather_features_for_trajectory(df['timestamp'])
+    
+    N = len(df)
+    weather_features = np.zeros((N, 10), dtype=np.float32)
+    
+    hour = df['timestamp'].dt.hour.values
+    minute = df['timestamp'].dt.minute.values
+    day_of_week = df['timestamp'].dt.dayofweek.values
+    
+    for i in range(N):
+        h = hour[i]
+        m = minute[i]
+        dow = day_of_week[i]
+        
+        time_of_day = h + m / 60.0
+        
+        if 6 <= h < 18:
+            weather_features[i, 0] = 1.0
+            weather_features[i, 1] = 18.0 + 7.0 * np.sin((time_of_day - 6) * np.pi / 12)
+        else:
+            weather_features[i, 0] = 0.0
+            weather_features[i, 1] = 12.0 + 5.0 * np.sin((time_of_day - 18) * np.pi / 12)
+        
+        weather_features[i, 2] = 0.4 + 0.4 * np.sin(time_of_day * np.pi / 12)
+        weather_features[i, 3] = 1013.25 + 4.0 * np.sin(time_of_day * np.pi / 6)
+        weather_features[i, 4] = 3.0 + 4.0 * np.sin(time_of_day * np.pi / 8)
+        weather_features[i, 5] = 0.2 + 0.5 * np.sin(time_of_day * np.pi / 10)
+        weather_features[i, 6] = 0.0
+        weather_features[i, 7] = 1.0 if (7 <= h < 9) or (17 <= h < 19) else 0.0
+        weather_features[i, 8] = np.sin(2 * np.pi * time_of_day / 24)
+        weather_features[i, 9] = np.cos(2 * np.pi * time_of_day / 24)
+    
+    return weather_features
 
 def compute_segment_stats(features: np.ndarray) -> np.ndarray:
     """计算18维统计特征"""
@@ -235,19 +436,37 @@ def normalize_sequence_length(features: np.ndarray, target_length: int = 50) -> 
         indices = np.linspace(0, len(features) - 1, target_length, dtype=int)
         return features[indices]
     else:
-        padding = np.zeros((target_length - len(features), 9), dtype=np.float32)
+        feature_dim = features.shape[1] if features.ndim > 1 else 1
+        padding = np.zeros((target_length - len(features), feature_dim), dtype=np.float32)
         return np.vstack([features, padding])
 
-def predict_with_model(traj_features: np.ndarray, segment_stats: np.ndarray, model_id: str) -> tuple:
+def predict_with_model(traj_features: np.ndarray, segment_stats: np.ndarray, 
+                      traj_features_21d: np.ndarray, weather_features: np.ndarray,
+                      model_id: str) -> tuple:
     """使用指定模型进行预测"""
+    print(f"🔍 使用模型: {model_id}")
+    print(f"📊 可用的模型: {list(predictors.keys())}")
+    
     if model_id not in predictors:
         raise HTTPException(status_code=400, detail=f"模型 {model_id} 未加载或不存在")
     
     predictor = predictors[model_id]
     
     if model_id == 'exp1':
+        print(f"🧪 Exp1: 使用9维特征")
         pred_labels, confidences = predictor.predict(traj_features, segment_stats)
+        print(f"✅ Exp1 预测结果: {pred_labels[0]}, 置信度: {confidences[0]}")
         return pred_labels[0], float(confidences[0])
+    elif model_id == 'exp2':
+        print(f"🧪 Exp2: 使用21维特征")
+        pred_label, confidence = predictor.predict(traj_features_21d, segment_stats)
+        print(f"✅ Exp2 预测结果: {pred_label}, 置信度: {confidence}")
+        return pred_label, float(confidence)
+    elif model_id in ['exp3', 'exp4']:
+        print(f"🧪 {model_id}: 使用21维轨迹 + 10维天气特征")
+        pred_label, confidence = predictor.predict(traj_features_21d, weather_features, segment_stats)
+        print(f"✅ {model_id} 预测结果: {pred_label}, 置信度: {confidence}")
+        return pred_label, float(confidence)
     
     return None, None
 
@@ -281,8 +500,18 @@ async def predict_trajectory(file: UploadFile = File(...), model: str = Form('ex
         
         features_normalized = normalize_sequence_length(features, 50)
         
-        if model in predictors and model == 'exp1':
-            predicted_mode, confidence = predict_with_model(features_normalized, segment_stats, model)
+        features_21d = compute_trajectory_features_21d(df)
+        features_21d_normalized = normalize_sequence_length(features_21d, 50)
+        
+        weather_features = compute_weather_features(df)
+        weather_features_normalized = normalize_sequence_length(weather_features, 50)
+        
+        if model in predictors:
+            predicted_mode, confidence = predict_with_model(
+                features_normalized, segment_stats,
+                features_21d_normalized, weather_features_normalized,
+                model
+            )
         else:
             speed = features_normalized[:, 2].mean()
             max_speed = features_normalized[:, 2].max()
