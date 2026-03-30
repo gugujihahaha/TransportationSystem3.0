@@ -24,13 +24,13 @@ def main():
     parser.add_argument(
         '--geolife_root',
         type=str,
-        default='../data/Geolife Trajectories 1.3',
+        default='./data/Geolife Trajectories 1.3',
         help='GeoLife数据根目录'
     )
     parser.add_argument(
         '--output',
         type=str,
-        default='../data/processed/base_segments.pkl',
+        default='./data/processed/base_segments.pkl',
         help='输出缓存路径'
     )
     parser.add_argument(

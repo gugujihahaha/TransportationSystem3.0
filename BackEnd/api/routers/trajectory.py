@@ -473,6 +473,9 @@ def predict_with_model(traj_features: np.ndarray, segment_stats: np.ndarray,
 @router.post("/predict", response_model=TrajectoryPrediction)
 async def predict_trajectory(file: UploadFile = File(...), model: str = Form('exp1')):
     """上传GPS文件并预测交通方式"""
+    if not predictors:
+        print("⚠️ 正在紧急唤醒 PyTorch 真实模型...")
+        load_predictors()
     try:
         content = await file.read()
         
@@ -532,9 +535,9 @@ async def predict_trajectory(file: UploadFile = File(...), model: str = Form('ex
             else:
                 predicted_mode, confidence = "walk", 0.78
             
-            if model != 'exp1':
-                predicted_mode = f"{predicted_mode} (规则预测)"
-        
+            # if model != 'exp1':
+            #  # predicted_mode = f"{predicted_mode} (规则预测)"
+
         mode_mapping = {
             'Walk': 'walk',
             'Bike': 'bike',

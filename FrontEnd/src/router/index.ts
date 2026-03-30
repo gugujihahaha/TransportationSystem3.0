@@ -10,23 +10,33 @@ const router = createRouter({
       children: [
         {
           path: '',
-          name: 'map-analysis',
-          component: () => import('../views/MapAnalysis.vue'),
+          name: 'home',
+          component: () => import('../views/HomeView.vue'),
+          meta: { title: '首页总览' }
         },
         {
-          path: 'model-comparison',
-          name: 'model-comparison',
-          component: () => import('../views/ModelComparison.vue'),
+          path: 'dashboard',
+          name: 'dashboard',
+          component: () => import('../views/DataDashboard.vue'),
+          meta: { title: '数据与实验驾驶舱' }
         },
         {
-          path: 'data-overview',
-          name: 'data-overview',
-          component: () => import('../views/DataOverview.vue'),
+          path: 'congestion-analysis',
+          name: 'congestion',
+          component: () => import('../views/CongestionAnalysis.vue'),
+          meta: { title: '应用验证A：拥堵溯源解析' }
         },
         {
-          path: 'about',
-          name: 'about',
-          component: () => import('../views/About.vue'),
+          path: 'green-travel',
+          name: 'green',
+          component: () => import('../views/GreenTravel.vue'),
+          meta: { title: '应用验证B：绿色出行与碳普惠' }
+        },
+        {
+          path: 'tech-support',
+          name: 'tech',
+          component: () => import('../views/TechSupport.vue'),
+          meta: { title: '技术支撑与系统架构' }
         },
       ],
     },
