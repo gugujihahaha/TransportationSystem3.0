@@ -6,7 +6,6 @@ import torch
 import numpy as np
 import os
 import sys
-
 from exp3.src.model_weather import TransportationModeClassifierWithWeather
 
 
@@ -16,6 +15,9 @@ class TransportationPredictorExp4:
         初始化实验四预测器
         :param checkpoint_path: 训练好的模型权重路径（包含 label_encoder）
         """
+        if checkpoint_path is None:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            checkpoint_path = os.path.join(base_dir, "checkpoints", "exp4_model.pth")
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
         # 加载模型 Checkpoint（包含 label_encoder）
