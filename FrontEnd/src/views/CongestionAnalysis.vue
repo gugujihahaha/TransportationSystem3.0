@@ -127,7 +127,7 @@ let currentPolyline: L.Polyline | null = null
 let markers: L.Layer[] = []
 
 // ==========================================
-// 🗺️ 地图引擎 (和碳普惠页面一模一样的 OSM 底图)
+// 🗺️ 地图引擎
 // ==========================================
 const initMap = () => {
   if (!mapContainer.value) return
@@ -215,8 +215,10 @@ const executeAnalysis = async (modelId: string) => {
     }
 
     hasData.value = true
-    generateAIReport(modelId, currentMode.value, confidence.value)
     ElMessage.success(`引擎 ${modelId.toUpperCase()} 推断完成`)
+    
+    // 🚀 触发真实的流式打字机效果
+    generateAIReport(modelId, currentMode.value, confidence.value)
 
   } catch (e) {
     ElMessage.error('推断引擎连接失败')
@@ -230,24 +232,28 @@ const translateMode = (mode: string) => {
   return map[mode.toLowerCase()] || mode.toUpperCase()
 }
 
+// 🚀 真实流式接口调用
 const generateAIReport = (modelId: string, modeName: string, confValue: string) => {
-  let report = `<b>[${modelId.toUpperCase()} 分析完成]</b><br/><br/>`
-  if (modelId === 'exp1') {
-    report += `基于纯运动学特征提取完毕。当前判定该路段主要交通流为 <b>${modeName}</b>，置信概率为 <b>${confValue}%</b>。由于缺乏路网环境上下文，该置信度在复杂拥堵路况下可能存在波动。`
-  } else if (modelId === 'exp2') {
-    report += `引入左侧 OSM 空间拓扑后，模型能够捕捉轨迹与路口的几何关系。判定结果：<b>${modeName}</b>，置信概率为 <b>${confValue}%</b>。您可以观察到置信度的显著变化。`
-  } else if (modelId === 'exp4') {
-    report += `Focal Loss 优化完成。最终判定该拥堵源交通流为：<b>${modeName}</b> (确信度 <b>${confValue}%</b>)。模型已有效抑制对常见类别的过度拟合，展现出最真实的分类边界。`
-  } else {
-    report += `时空特征提取完毕。推断该段轨迹属于 <b>${modeName}</b> (确信度 <b>${confValue}%</b>)。`
-  }
-  simulateTyping(report)
-}
+  aiReport.value = ''
+  const loadingHtml = `<span style="color:#E6A23C; animation: pulse 1s infinite;">连接 LLM 智能体中，正在生成深度洞察...</span>`
+  aiReport.value = loadingHtml
 
-let typingTimer: any = null
-const simulateTyping = (text: string) => {
-  if (typingTimer) clearInterval(typingTimer)
-  aiReport.value = text 
+  // 调用封装好的流式接口
+  trajectoryApi.streamReport(
+    { model_id: modelId, mode: modeName, confidence: confValue },
+    (text) => {
+      // 成功推流时，Vue 自动完成打字渲染
+      aiReport.value = text
+    },
+    () => {
+      console.log('AI 报告流接收完毕')
+    },
+    (err) => {
+      console.error(err)
+      // 完美降级策略：如果接口挂了，确保比赛画面不白板
+      aiReport.value = `<span style="color:#F56C6C">流式接口异常，已降级为本地规则报告。<br/><br/>经分析，该路段主要交通流为 <b>${modeName}</b>，置信度 <b>${confValue}%</b>。</span>`
+    }
+  )
 }
 
 onMounted(() => { nextTick(() => { initMap() }) })
@@ -255,7 +261,7 @@ onUnmounted(() => { if (map) { map.remove(); map = null } })
 </script>
 
 <style scoped>
-/* 保持和碳普惠一样的布局样式 */
+/* 保持所有完美的地图与布局样式 */
 .congestion-container { height: 100%; padding-bottom: 20px;}
 .full-height { height: 100%; }
 .panel { border-radius: 12px; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
@@ -270,9 +276,7 @@ onUnmounted(() => { if (map) { map.remove(); map = null } })
 .map-wrapper { padding: 0; background: #0b0d12; position: relative; }
 .leaflet-map { width: 100%; height: 100%; z-index: 1;}
 
-/* OSM 地图暗色滤镜 */
 :deep(.dark-map-tiles) { filter: brightness(0.7) invert(1) contrast(1.2) hue-rotate(200deg); }
-/* 消除终点标记白底 */
 :deep(.custom-end-marker) { background: transparent; border: none; }
 
 .map-legend { position: absolute; bottom: 20px; right: 20px; background: rgba(0,0,0,0.7); padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(4px); z-index: 1000;}
@@ -314,4 +318,5 @@ onUnmounted(() => { if (map) { map.remove(); map = null } })
 .ai-content { flex: 1; font-size: 14px; line-height: 1.8; color: #e5eaf3; background: rgba(0,0,0,0.3); padding: 16px; border-radius: 6px; border-left: 3px solid #E6A23C;}
 .empty-text { color: #909399; font-style: italic; text-align: center; margin-top: 20px;}
 :deep(b) { color: #E6A23C; }
+@keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
 </style>

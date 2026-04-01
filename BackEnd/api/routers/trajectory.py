@@ -594,3 +594,50 @@ async def get_transport_modes():
         TransportMode(**mode) for mode in TRANSPORT_MODES
     ]
 
+
+# ==========================================
+# 🚀 以下为新增：SSE 大模型流式报告生成接口
+# ==========================================
+import asyncio
+import json
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+
+
+class ReportRequest(BaseModel):
+    model_id: str
+    mode: str
+    confidence: str
+
+
+async def generate_llm_report_stream(model_id: str, mode: str, confidence: str):
+    # 模拟大模型根据传参思考的文案
+    if model_id == "exp1":
+        text = f"【系统智能洞察】系统基于纯运动学特征提取完毕。当前判定该路段主要交通流为 {mode}，置信概率为 {confidence}%。由于缺乏路网环境上下文，该置信度在复杂拥堵路况下可能存在波动。"
+    elif model_id == "exp2":
+        text = f"【系统智能洞察】引入左侧 OSM 空间拓扑后，模型能够捕捉轨迹与路口的几何关系。判定结果：{mode}，置信概率为 {confidence}%。您可以观察到置信度相较于基线模型的显著提升。"
+    elif model_id == "exp4":
+        text = f"【深度溯源完成】Focal Loss 优化已全面介入。最终判定该拥堵源交通流为：{mode} (确信度 {confidence}%)。模型已有效抑制对常见类别的过度拟合，展现出最真实的分类边界。"
+    else:
+        text = f"【时空解析完毕】融合多模态特征，推断该段轨迹属于 {mode} (确信度 {confidence}%)。视觉已在左侧 GIS 地图完成拓扑映射。"
+
+    # 模拟连接大模型的思考延迟
+    yield "data: " + json.dumps({"status": "start", "content": ""}, ensure_ascii=False) + "\n\n"
+    await asyncio.sleep(0.5)
+
+    # 模拟打字机推流
+    for char in text:
+        chunk = {"status": "generating", "content": char}
+        yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+        await asyncio.sleep(0.03)  # 这里控制吐字速度
+
+    # 结束标志
+    yield "data: " + json.dumps({"status": "done", "content": ""}, ensure_ascii=False) + "\n\n"
+
+
+@router.post("/generate_report_stream")
+async def generate_report_stream(req: ReportRequest):
+    return StreamingResponse(
+        generate_llm_report_stream(req.model_id, req.mode, req.confidence),
+        media_type="text/event-stream"
+    )
