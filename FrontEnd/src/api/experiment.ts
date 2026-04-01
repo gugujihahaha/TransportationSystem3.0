@@ -1,49 +1,48 @@
 import axios from 'axios'
 import type { ExperimentInfo, EvaluationReport, PredictionSummary } from '@/types'
+import { useAuthStore } from '@/stores/auth'
 
-const API_BASE_URL = 'http://localhost:8000/api'
+const API_BASE_URL = '/api'
+
+// 🚀 创建专属的 axios 实例
+const apiClient = axios.create({
+  baseURL: API_BASE_URL
+})
+
+// 🚀 添加请求拦截器
+apiClient.interceptors.request.use((config) => {
+  const authStore = useAuthStore()
+  if (authStore.token) {
+    config.headers.Authorization = `Bearer ${authStore.token}`
+  }
+  return config
+})
 
 export const experimentApi = {
   async getExperiments(): Promise<ExperimentInfo[]> {
-    const response = await axios.get<ExperimentInfo[]>(
-      `${API_BASE_URL}/experiments`
-    )
-
+    const response = await apiClient.get<ExperimentInfo[]>('/experiments')
     return response.data
   },
 
   async getExperimentReport(expId: string): Promise<EvaluationReport> {
-    const response = await axios.get<EvaluationReport>(
-      `${API_BASE_URL}/experiments/${expId}/report`
-    )
-
+    const response = await apiClient.get<EvaluationReport>(`/experiments/${expId}/report`)
     return response.data
   },
 
   async getExperimentConfusionMatrix(expId: string): Promise<Blob> {
-    const response = await axios.get(
-      `${API_BASE_URL}/experiments/${expId}/confusion-matrix`,
-      {
-        responseType: 'blob',
-      }
-    )
-
+    const response = await apiClient.get(`/experiments/${expId}/confusion-matrix`, {
+      responseType: 'blob',
+    })
     return response.data
   },
 
   async getExperimentPredictions(expId: string): Promise<PredictionSummary> {
-    const response = await axios.get<PredictionSummary>(
-      `${API_BASE_URL}/experiments/${expId}/predictions`
-    )
-
+    const response = await apiClient.get<PredictionSummary>(`/experiments/${expId}/predictions`)
     return response.data
   },
 
   async getExperimentErrorAnalysis(expId: string): Promise<any[]> {
-    const response = await axios.get(
-      `${API_BASE_URL}/experiments/${expId}/error-analysis`
-    )
-
+    const response = await apiClient.get(`/experiments/${expId}/error-analysis`)
     return response.data
-  },
+  }
 }

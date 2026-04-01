@@ -5,9 +5,11 @@ import numpy as np
 import io
 import sys
 import os
+from api.security import get_current_user
+from api.models import User
 from pathlib import Path
 from typing import List
-
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from api.schemas import (
@@ -471,7 +473,7 @@ def predict_with_model(traj_features: np.ndarray, segment_stats: np.ndarray,
     return None, None
 
 @router.post("/predict", response_model=TrajectoryPrediction)
-async def predict_trajectory(file: UploadFile = File(...), model: str = Form('exp1')):
+async def predict_trajectory(file: UploadFile = File(...), model: str = Form('exp1'),current_user: User = Depends(get_current_user)):
     """上传GPS文件并预测交通方式"""
     if not predictors:
         print("⚠️ 正在紧急唤醒 PyTorch 真实模型...")
