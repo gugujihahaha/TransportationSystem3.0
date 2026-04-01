@@ -2,7 +2,7 @@
   <div class="screen-wrapper">
     <div class="tech-bg"></div>
 
-<header class="screen-header">
+    <header class="screen-header">
       <div class="header-left">
         <div class="nav-item" :class="{ active: currentPath === '/congestion-analysis' }" @click="$router.push('/congestion-analysis')">
           <el-icon><Location /></el-icon> 拥堵时空溯源
@@ -25,22 +25,26 @@
         <div class="nav-item" :class="{ active: currentPath === '/dashboard' }" @click="$router.push('/dashboard')">
           <el-icon><DataBoard /></el-icon> 数据态势感知
         </div>
+        
+        <div class="user-control-area" v-if="authStore.isAuthenticated()">
+          <div class="nav-item user-link" @click="$router.push('/user-center')" :class="{ active: currentPath === '/user-center' }">
+            <el-icon><User /></el-icon> {{ authStore.username }}
+          </div>
+          <div class="time-box logout-trigger" @click="handleLogout">
+            EXIT
+          </div>
+        </div>
+        
         <div class="time-box">
           {{ currentTime }}
-        </div>
-        <div class="user-box">
-          <div class="avatar-glow"><el-icon><UserFilled /></el-icon></div>
-          <span class="username">专家评委</span>
         </div>
       </div>
     </header>
 
-    <main class="screen-main">
+    <main class="main-content">
       <router-view v-slot="{ Component }">
-        <transition name="fade" mode="out-in">
-          <keep-alive include="DataOverview,ModelComparison">
-            <component :is="Component" :key="$route.path" />
-          </keep-alive>
+        <transition name="fade-slide" mode="out-in">
+          <component :is="Component" />
         </transition>
       </router-view>
     </main>
@@ -48,85 +52,71 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Location, DataAnalysis, DataBoard, UserFilled } from '@element-plus/icons-vue'
+import { useAuthStore } from '@/stores/auth'
+import { Location, DataAnalysis, DataBoard, User } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()
-const currentPath = computed(() => route.path)
+const authStore = useAuthStore()
 
-// 动态时间显示
+const currentPath = computed(() => route.path)
 const currentTime = ref('')
-let timer: any = null
+
+// 更新时间逻辑
 const updateTime = () => {
   const now = new Date()
-  currentTime.value = now.toLocaleString('zh-CN', { hour12: false })
+  currentTime.value = now.toLocaleTimeString('zh-CN', { hour12: false })
 }
 
+let timer: number
 onMounted(() => {
   updateTime()
-  timer = setInterval(updateTime, 1000)
+  timer = window.setInterval(updateTime, 1000)
 })
+onUnmounted(() => clearInterval(timer))
 
-onUnmounted(() => {
-  clearInterval(timer)
-})
+const handleLogout = () => {
+  if (confirm('确定要断开系统连接并退出吗？')) {
+    authStore.logout()
+    router.push('/login')
+  }
+}
 </script>
 
 <style scoped>
-/* 全屏暗黑科技基底 */
+/* 融合 2.0 风格的 CSS */
 .screen-wrapper {
-  width: 100vw;
-  height: 100vh;
+  min-height: 100vh;
   background-color: #030816;
-  overflow: hidden;
+  color: #fff;
   position: relative;
-  display: flex;
-  flex-direction: column;
-  font-family: "DingTalk JinBuTi", "Microsoft YaHei", sans-serif;
+  overflow-x: hidden;
 }
 
-/* 动态网格背景 (模拟数据空间) */
-.tech-bg {
-  position: absolute;
-  top: 0; left: 0; width: 100%; height: 100%;
-  background-image: 
-    linear-gradient(rgba(26, 61, 128, 0.15) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(26, 61, 128, 0.15) 1px, transparent 1px);
-  background-size: 30px 30px;
-  z-index: 0;
-  opacity: 0.6;
-}
-.tech-bg::after {
-  content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-  background: radial-gradient(circle at center, transparent 0%, #030816 80%);
-}
-
-/* 头部大屏样式 */
 .screen-header {
-  position: relative;
-  z-index: 10;
-  height: 80px;
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  background: url('data:image/svg+xml;utf8,<svg viewBox="0 0 1920 80" xmlns="http://www.w3.org/2000/svg"><path d="M0,0 L1920,0 L1920,50 L1300,50 L1250,80 L670,80 L620,50 L0,50 Z" fill="rgba(11,25,56,0.8)" stroke="%231E488F" stroke-width="2"/></svg>') no-repeat top center;
-  background-size: 100% 100%;
   padding: 0 20px;
+  height: 80px;
+  background: linear-gradient(to bottom, rgba(0, 20, 50, 0.8), transparent);
+  position: relative;
+  z-index: 10;
 }
 
 .header-left, .header-right {
   display: flex;
-  align-items: center;
-  height: 50px;
   gap: 20px;
-  width: 30%;
+  padding-top: 20px;
+  flex: 1;
 }
+
 .header-right { justify-content: flex-end; }
 
 .header-center {
-  width: 40%;
+  flex: 1.5;
   text-align: center;
   padding-top: 15px;
 }
@@ -137,10 +127,9 @@ onUnmounted(() => {
   font-weight: bold;
   color: #fff;
   letter-spacing: 2px;
-  text-shadow: 0 0 10px #4A90E2, 0 0 20px #4A90E2;
+  text-shadow: 0 0 10px #4A90E2, 0 0 20px #00f0ff;
 }
 
-/* 导航按钮特效 */
 .nav-item {
   color: #84a2d4;
   font-size: 16px;
@@ -152,42 +141,58 @@ onUnmounted(() => {
   transition: all 0.3s;
   position: relative;
 }
+
 .nav-item:hover, .nav-item.active {
   color: #00e5ff;
   text-shadow: 0 0 8px rgba(0, 229, 255, 0.8);
 }
+
 .nav-item.active::after {
   content: ''; position: absolute; bottom: -5px; left: 0; width: 100%; height: 2px;
   background: #00e5ff; box-shadow: 0 0 10px #00e5ff;
 }
 
+.user-control-area {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logout-trigger {
+  color: #ff4d4f !important;
+  cursor: pointer;
+  border: 1px solid rgba(255, 77, 79, 0.3);
+}
+
+.logout-trigger:hover {
+  background: rgba(255, 77, 79, 0.1);
+  border-color: #ff4d4f;
+}
+
 .time-box {
+  background: rgba(0, 110, 255, 0.1);
+  border: 1px solid rgba(0, 110, 255, 0.3);
+  padding: 5px 15px;
+  border-radius: 4px;
+  font-family: 'Courier New', Courier, monospace;
   color: #00e5ff;
-  font-family: monospace;
-  font-size: 16px;
-  letter-spacing: 1px;
+  min-width: 80px;
+  text-align: center;
 }
 
-.user-box { display: flex; align-items: center; gap: 8px; cursor: pointer;}
-.avatar-glow {
-  width: 30px; height: 30px; border-radius: 50%;
-  background: rgba(0, 229, 255, 0.1); border: 1px solid #00e5ff;
-  display: flex; align-items: center; justify-content: center; color: #00e5ff;
-  box-shadow: 0 0 10px rgba(0, 229, 255, 0.4);
+/* 原有装饰线 */
+.header-decoration {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 5px;
 }
-.username { color: #fff; font-size: 14px;}
+.dec-line { width: 100px; height: 1px; background: linear-gradient(to right, transparent, #4A90E2, transparent); }
+.dec-point { width: 4px; height: 4px; background: #4A90E2; border-radius: 50%; margin: 0 10px; box-shadow: 0 0 5px #4A90E2; }
 
-/* 路由主容器 */
-.screen-main {
-  position: relative;
-  z-index: 10;
-  flex: 1;
-  width: 100%;
-  height: calc(100vh - 80px);
-  overflow: hidden;
-}
+.main-content { padding: 20px; position: relative; z-index: 1; }
 
-/* 过渡动画 */
-.fade-enter-active, .fade-leave-active { transition: opacity 0.3s ease; }
-.fade-enter-from, .fade-leave-to { opacity: 0; }
+.fade-slide-enter-active, .fade-slide-leave-active { transition: all 0.3s; }
+.fade-slide-enter-from { opacity: 0; transform: translateY(20px); }
+.fade-slide-leave-to { opacity: 0; transform: translateY(-20px); }
 </style>
