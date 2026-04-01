@@ -3,8 +3,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
 from pathlib import Path
-
+from api.database import engine, Base
 from api.routers import trajectory, experiment, dataset, training
+from api.routers.auth import router as auth_router
+from api.models import User
+Base.metadata.create_all(bind=engine)
+
+app = FastAPI(
+    title="交通方式识别 API",
+    description="基于深度学习的城市出行方式识别系统",
+    version="1.0.0"
+)
 
 app = FastAPI(
     title="交通方式识别 API",
@@ -24,7 +33,7 @@ app.include_router(trajectory.router, prefix="/api/trajectory", tags=["轨迹"])
 app.include_router(experiment.router, prefix="/api/experiments", tags=["实验"])
 app.include_router(dataset.router, prefix="/api/dataset", tags=["数据集"])
 app.include_router(training.router, prefix="/api/training", tags=["训练"])
-
+app.include_router(auth_router, prefix="/api/auth", tags=["认证"])
 
 @app.on_event("startup")
 async def startup_event():

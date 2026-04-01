@@ -1,10 +1,11 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import FileResponse, JSONResponse
 import json
 import pandas as pd
 from pathlib import Path
 from typing import List, Dict, Any
-
+from api.security import get_current_user
+from api.models import User
 from api.schemas import ExperimentInfo, EvaluationReport, PredictionSummary
 
 router = APIRouter()
@@ -53,7 +54,9 @@ EXPERIMENTS = [
 
 
 @router.get("", response_model=List[ExperimentInfo])
-async def get_experiments():
+async def get_experiments(
+current_user: User = Depends(get_current_user)
+):
     """获取所有实验的基本信息和状态"""
     return [
         ExperimentInfo(**exp) for exp in EXPERIMENTS
