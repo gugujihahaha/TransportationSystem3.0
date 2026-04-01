@@ -85,7 +85,7 @@ const handleLogout = () => {
 /* 全局深色大屏主题 */
 .app-container {
   min-height: 100vh;
-  background-color: #0b0f19; /* 深邃蓝黑底色 */
+  background-color: #0b0f19;
   color: #e2e8f0;
   display: flex;
   flex-direction: column;
@@ -151,7 +151,6 @@ const handleLogout = () => {
   background: linear-gradient(to top, rgba(56, 189, 248, 0.1), transparent);
 }
 
-/* 下拉菜单样式 */
 .dropdown {
   position: relative;
 }
@@ -234,10 +233,17 @@ const handleLogout = () => {
   color: white;
 }
 
-.main-content {
-  flex: 1;
-  position: relative;
-  overflow: hidden;
+.main-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.main-content::-webkit-scrollbar-thumb {
+  background: rgba(56, 189, 248, 0.3); 
+  border-radius: 10px;
+}
+
+.main-content::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.5);
 }
 
 .fade-enter-active,
