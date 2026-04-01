@@ -2,17 +2,17 @@
   <div class="screen-wrapper">
     <div class="tech-bg"></div>
 
-    <header class="screen-header">
+<header class="screen-header">
       <div class="header-left">
-        <div class="nav-item" :class="{ active: currentPath === '../views/CongestionAnalysis.vue' }" @click="$router.push('/')">
+        <div class="nav-item" :class="{ active: currentPath === '/congestion-analysis' }" @click="$router.push('/congestion-analysis')">
           <el-icon><Location /></el-icon> 拥堵时空溯源
         </div>
-        <div class="nav-item" :class="{ active: currentPath === '../views/GreenTravel.vue' }" @click="$router.push('../views/GreenTravel.vue')">
+        <div class="nav-item" :class="{ active: currentPath === '/green-travel' }" @click="$router.push('/green-travel')">
           <el-icon><DataAnalysis /></el-icon> 绿色碳普惠
         </div>
       </div>
 
-      <div class="header-center">
+      <div class="header-center" style="cursor: pointer;" @click="$router.push('/')" title="返回首页总览">
         <h1 class="glow-title">TrafficRec 多模态出行感知引擎</h1>
         <div class="header-decoration">
           <span class="dec-line left"></span>
@@ -22,7 +22,7 @@
       </div>
 
       <div class="header-right">
-        <div class="nav-item" :class="{ active: currentPath === '/data-overview' }" @click="$router.push('/data-overview')">
+        <div class="nav-item" :class="{ active: currentPath === '/dashboard' }" @click="$router.push('/dashboard')">
           <el-icon><DataBoard /></el-icon> 数据态势感知
         </div>
         <div class="time-box">
