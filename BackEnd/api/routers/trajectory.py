@@ -473,7 +473,8 @@ def predict_with_model(traj_features: np.ndarray, segment_stats: np.ndarray,
     return None, None
 
 @router.post("/predict", response_model=TrajectoryPrediction)
-async def predict_trajectory(file: UploadFile = File(...), model: str = Form('exp1'),current_user: User = Depends(get_current_user)):
+async def predict_trajectory(file: UploadFile = File(...), modelId: str = Form('exp1')):
+    model = modelId  # 将接收到的 modelId 赋值给内部逻辑使用的 model 变量
     """上传GPS文件并预测交通方式"""
     if not predictors:
         print("⚠️ 正在紧急唤醒 PyTorch 真实模型...")
@@ -597,9 +598,6 @@ async def get_transport_modes():
     ]
 
 
-# ==========================================
-# 🚀 以下为新增：SSE 大模型流式报告生成接口
-# ==========================================
 import asyncio
 import json
 from fastapi.responses import StreamingResponse
@@ -638,7 +636,10 @@ async def generate_llm_report_stream(model_id: str, mode: str, confidence: str):
 
 
 @router.post("/generate_report_stream")
-async def generate_report_stream(req: ReportRequest):
+async def generate_report_stream(
+    req: ReportRequest,
+    current_user: User = Depends(get_current_user)
+):
     return StreamingResponse(
         generate_llm_report_stream(req.model_id, req.mode, req.confidence),
         media_type="text/event-stream"
