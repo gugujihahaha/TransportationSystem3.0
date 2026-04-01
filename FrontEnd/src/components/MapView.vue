@@ -25,15 +25,15 @@ const emit = defineEmits<{
 const mapContainer = ref<HTMLElement>()
 let map: L.Map | null = null
 let trajectoryLayers: L.Polyline[] = []
-let markers: L.Marker[] = []
+let markers: L.Layer[] = [] // 必须是 Layer，解决 CircleMarker 报错
 
 onMounted(() => {
   if (!mapContainer.value) return
 
   map = L.map(mapContainer.value).setView([39.9042, 116.4074], 12)
 
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors',
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© OpenStreetMap contributors, © CARTO',
     maxZoom: 19,
   }).addTo(map)
 })
@@ -51,8 +51,16 @@ function updateMap(trajectories: TrajectoryPrediction[]) {
 
   clearMap()
 
+  const allLatLngs: [number, number][] = [] // 用于计算全局视野
+
   trajectories.forEach((traj) => {
-    const points = traj.points.map(p => [p.lat, p.lng])
+    // 终极修复 1：彻底提取纯净的 [number, number] 元组，剔除 TrajectoryPoint 的多余属性
+    const points: [number, number][] = traj.points.map(p => {
+      const pt: [number, number] = [p.lat, p.lng]
+      allLatLngs.push(pt)
+      return pt
+    })
+
     const color = getModeColor(traj.predicted_mode)
 
     const polyline = L.polyline(points, {
@@ -65,18 +73,18 @@ function updateMap(trajectories: TrajectoryPrediction[]) {
       emit('select', traj)
     })
 
-    polyline.on('mouseover', (e) => {
+    polyline.on('mouseover', (e: L.LeafletMouseEvent) => {
       const point = e.latlng
       const nearestPoint = findNearestPoint(traj, point)
       
       if (nearestPoint) {
-        const popup = L.popup()
+        L.popup()
           .setLatLng(point)
           .setContent(`
-            <div>
-              <strong>${getModeName(traj.predicted_mode)}</strong><br>
-              速度: ${nearestPoint.speed?.toFixed(2) || 'N/A'} m/s<br>
-              置信度: ${(traj.confidence * 100).toFixed(1)}%
+            <div class="cyber-popup">
+              <strong class="mode-title" style="color: ${color}">${getModeName(traj.predicted_mode)}</strong><br>
+              <span class="info-label">速度:</span> ${nearestPoint.speed?.toFixed(2) || 'N/A'} m/s<br>
+              <span class="info-label">置信度:</span> ${(traj.confidence * 100).toFixed(1)}%
             </div>
           `)
           .openOn(map!)
@@ -89,32 +97,38 @@ function updateMap(trajectories: TrajectoryPrediction[]) {
 
     trajectoryLayers.push(polyline)
 
+    // 终极修复 2：严格判空，消除 undefined 报错
     if (traj.points.length > 0) {
-      const startMarker = L.circleMarker(traj.points[0], {
-        radius: 8,
-        fillColor: '#52C41A',
-        color: '#fff',
-        weight: 2,
-      }).addTo(map!)
+      const startPoint = traj.points[0]
+      const endPoint = traj.points[traj.points.length - 1]
 
-      const endMarker = L.rectangle(
-        [traj.points[traj.points.length - 1], traj.points[traj.points.length - 1]],
-        {
+      if (startPoint && endPoint) {
+        // 提取纯净坐标
+        const startCoord: [number, number] = [startPoint.lat, startPoint.lng]
+        const endCoord: [number, number] = [endPoint.lat, endPoint.lng]
+
+        const startMarker = L.circleMarker(startCoord, {
+          radius: 8,
+          fillColor: '#52C41A',
+          color: '#fff',
+          weight: 2,
+        }).addTo(map!)
+
+        // 终极修复 3：严格声明二维元组类型，符合 Rectangle 期望的 Bounds
+        const endBounds: [[number, number], [number, number]] = [endCoord, endCoord]
+        const endMarker = L.rectangle(endBounds, {
           color: '#F5222D',
           weight: 2,
-        }
-      ).addTo(map!)
+        }).addTo(map!)
 
-      markers.push(startMarker, endMarker)
+        markers.push(startMarker, endMarker)
+      }
     }
   })
 
-  if (trajectories.length > 0) {
-    const allPoints = trajectories.flatMap(t => t.points.map(p => [p.lat, p.lng]))
-    const bounds = L.latLngBounds(
-      allPoints.filter((_, i) => i % 2 === 0).map((_, i) => [allPoints[i * 2], allPoints[i * 2 + 1]])
-    )
-    map.fitBounds(bounds, { padding: [50, 50] })
+  // 终极修复 4：直接使用纯净的 [number, number][] 计算包围盒
+  if (allLatLngs.length > 0) {
+    map.fitBounds(allLatLngs, { padding: [50, 50] })
   }
 }
 
@@ -136,7 +150,7 @@ function highlightTrajectory(selected: TrajectoryPrediction | null) {
 }
 
 function findNearestPoint(trajectory: TrajectoryPrediction, point: L.LatLng): TrajectoryPoint | null {
-  let nearest = null
+  let nearest: TrajectoryPoint | null = null
   let minDist = Infinity
 
   trajectory.points.forEach(p => {
@@ -162,7 +176,7 @@ function getModeColor(mode: string): string {
     train: '#13C2C2',
     airplane: '#EB2F96',
   }
-  return colors[mode] || '#666'
+  return colors[mode] || '#00f0ff'
 }
 
 function getModeName(mode: string): string {
@@ -184,5 +198,58 @@ function getModeName(mode: string): string {
   width: 100%;
   height: 100%;
   min-height: 600px;
+  background-color: transparent;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+:deep(.leaflet-popup-content-wrapper) {
+  background: rgba(10, 16, 29, 0.85); 
+  border: 1px solid rgba(0, 240, 255, 0.5); 
+  box-shadow: 0 0 15px rgba(0, 240, 255, 0.3); 
+  border-radius: 4px;
+  color: #fff;
+  backdrop-filter: blur(4px);
+}
+
+:deep(.leaflet-popup-tip) {
+  background: rgba(10, 16, 29, 0.85);
+  border: 1px solid rgba(0, 240, 255, 0.5);
+  border-top: none;
+  border-left: none;
+  box-shadow: 2px 2px 5px rgba(0, 240, 255, 0.2);
+}
+
+:deep(.leaflet-popup-content) {
+  margin: 12px 16px;
+  line-height: 1.6;
+}
+
+.cyber-popup {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 13px;
+  letter-spacing: 0.5px;
+}
+
+.cyber-popup .mode-title {
+  font-size: 15px;
+  font-weight: bold;
+  text-shadow: 0 0 5px currentColor; 
+  display: inline-block;
+  margin-bottom: 4px;
+  border-bottom: 1px solid rgba(255,255,255,0.2);
+  padding-bottom: 2px;
+}
+
+.cyber-popup .info-label {
+  color: #a0aabf;
+}
+
+:deep(.leaflet-control-attribution) {
+  background: rgba(0, 0, 0, 0.5) !important;
+  color: #888 !important;
+}
+:deep(.leaflet-control-attribution a) {
+  color: #00f0ff !important;
 }
 </style>

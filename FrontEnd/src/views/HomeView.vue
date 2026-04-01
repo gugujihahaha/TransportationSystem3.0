@@ -134,9 +134,15 @@ import { MapLocation, Bicycle, DataBoard } from '@element-plus/icons-vue'
 @keyframes floating { 0% { transform: translateY(0px); } 50% { transform: translateY(-4px); } 100% { transform: translateY(0px); } }
 
 .gradient-text { 
-  font-size: 34px; font-weight: 700; margin: 0 0 12px 0; letter-spacing: 1px;
-  background: linear-gradient(90deg, #fff, #00f0ff, #4A90E2); -webkit-background-clip: text; color: transparent; 
-  text-shadow: 0 0 15px rgba(0, 240, 255, 0.3);
+  font-size: 36px; 
+  font-weight: 800; 
+  margin: 0 0 12px 0; 
+  letter-spacing: 2px;
+  background: linear-gradient(90deg, #fff, #00f0ff, #4A90E2); 
+  -webkit-background-clip: text; 
+  background-clip: text; 
+  color: transparent; 
+  text-shadow: 0 0 20px rgba(0, 240, 255, 0.3);
 }
 .subtitle { color: #00f0ff; font-size: 16px; margin: 0 0 16px 0; font-weight: 500;}
 .description { color: #a0aabf; font-size: 13px; line-height: 1.6; margin: 0 0 24px 0; max-width: 90%;}
