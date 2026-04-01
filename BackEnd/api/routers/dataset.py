@@ -1,11 +1,16 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from typing import List, Dict, Any
+import json
+import os
+import glob
 from pathlib import Path
 import pickle
 import numpy as np
 from collections import Counter
-from typing import Dict, List
 
 from api.schemas import DatasetStats, DataCleaningStats, DataCleaningStep
+from api.security import get_current_user
+from api.models import User
 
 router = APIRouter()
 
@@ -13,10 +18,13 @@ BASE_DIR = Path(__file__).parent.parent.parent
 PROCESSED_DIR = BASE_DIR / "data" / "processed"
 CLEANED_DATA_PATH = PROCESSED_DIR / "cleaned_balanced.pkl"
 BASE_SEGMENTS_PATH = PROCESSED_DIR / "base_segments.pkl"
-
+# 获取数据的通用路径配置
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data")
 
 @router.get("/stats", response_model=DatasetStats)
-async def get_dataset_stats():
+async def get_dataset_stats(
+current_user: User = Depends(get_current_user)
+):
     """获取数据集统计信息"""
     if not CLEANED_DATA_PATH.exists():
         raise HTTPException(status_code=404, detail="清洗后的数据文件不存在，请先运行数据准备脚本")
@@ -64,7 +72,9 @@ async def get_dataset_stats():
 
 
 @router.get("/mode-distribution")
-async def get_mode_distribution():
+async def get_mode_distribution(
+current_user: User = Depends(get_current_user)
+):
     """获取交通方式分布详情"""
     if not CLEANED_DATA_PATH.exists():
         raise HTTPException(status_code=404, detail="清洗后的数据文件不存在")
@@ -97,7 +107,9 @@ async def get_mode_distribution():
 
 
 @router.get("/cleaning-stats", response_model=DataCleaningStats)
-async def get_cleaning_stats():
+async def get_cleaning_stats(
+current_user: User = Depends(get_current_user)
+):
     """获取数据清洗流程统计"""
     return DataCleaningStats(
         steps=[
