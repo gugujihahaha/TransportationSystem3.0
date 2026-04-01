@@ -15,12 +15,6 @@ app = FastAPI(
     version="1.0.0"
 )
 
-app = FastAPI(
-    title="交通方式识别 API",
-    description="基于深度学习的城市出行方式识别系统",
-    version="1.0.0"
-)
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:3000"],
