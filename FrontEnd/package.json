@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
+    "@kjgl77/datav-vue3": "^1.7.4",
     "@types/leaflet": "^1.9.21",
     "axios": "^1.14.0",
     "echarts": "^6.0.0",
