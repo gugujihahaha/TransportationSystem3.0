@@ -30,69 +30,58 @@ export const trajectoryApi = {
   },
 
   // LLM 流式报告接口 (SSE 新增功能)
-  async streamReport(
-    params: { model_id: string; mode: string; confidence: string },
+async streamReport(
+    params: { 
+      model_id: string; 
+      mode: string; 
+      confidence: string; 
+      scene: string; 
+      distance?: string; 
+      co2?: string; 
+    },
     onMessage: (text: string) => void,
     onDone: () => void,
     onError: (err: any) => void
   ) {
-    const authStore = useAuthStore(); // 👈 第一步：同样，把钥匙拿出来
-
+    const authStore = useAuthStore();
     try {
-      // 必须使用 /api 前缀以匹配 vite.config.ts 的代理配置，避免跨域报错
       const response = await fetch('/api/trajectory/generate_report_stream', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'text/event-stream',
-          // 👈 第二步：流式接口也要带上钥匙
           'Authorization': `Bearer ${authStore.token}`
         },
         body: JSON.stringify(params)
       });
 
-      if (!response.ok) {
-        if (response.status === 401) throw new Error('登录已过期，请重新登录');
-        throw new Error('网络请求失败');
-      }
-
-      if (!response.body) throw new Error('ReadableStream not supported in this browser.');
+      if (!response.ok) throw new Error('网络请求失败');
+      if (!response.body) throw new Error('浏览器不支持流式传输');
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder('utf-8');
-      let done = false;
       let fullText = '';
 
-      while (!done) {
-        const { value, done: readerDone } = await reader.read();
-        done = readerDone;
-        if (value) {
-          // 解码二进制 chunk
-          const chunkStr = decoder.decode(value, { stream: true });
-          const lines = chunkStr.split('\n\n');
-          
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const dataStr = line.substring(6);
-              if (dataStr.trim() === '') continue;
-              
-              try {
-                const parsed = JSON.parse(dataStr);
-                if (parsed.status === 'generating') {
-                  fullText += parsed.content;
-                  onMessage(fullText); // 把拼接好的最新文本传给 Vue 组件
-                } else if (parsed.status === 'done') {
-                  onDone();
-                }
-              } catch (e) {
-                console.warn('解析流式 JSON 失败:', dataStr);
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        
+        const chunkStr = decoder.decode(value, { stream: true });
+        const lines = chunkStr.split('\n\n');
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const parsed = JSON.parse(line.substring(6));
+              if (parsed.status === 'generating') {
+                fullText += parsed.content;
+                onMessage(fullText);
+              } else if (parsed.status === 'done') {
+                onDone();
               }
-            }
+            } catch (e) { continue; }
           }
         }
       }
-    } catch (error) {
-      onError(error);
-    }
+    } catch (error) { onError(error); }
   }
 }

@@ -77,12 +77,21 @@
             </div>
 
             <div class="section-box report-box flex-1" :class="{ 'blur-mask': !hasData }">
-              <div class="box-title ai-title">
-                <el-icon><Tickets /></el-icon> AI 绿色出行摘要
+              <div class="box-title ai-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                <div><el-icon><Tickets /></el-icon> 星火 AI 绿色出行摘要</div>
+                <el-button type="success" size="small" @click="exportToPDF" :disabled="!aiReport || isGeneratingReport" style="background: #10b981; border: none;">
+                  📄 导出PDF
+                </el-button>
               </div>
-              <div class="ai-content">
-                <div v-if="!aiReport" class="empty-text">等待模型分析完成...</div>
-                <div v-else class="typing-text" v-html="aiReport"></div>
+              <div class="ai-content" id="green-pdf-content" ref="scrollBox">
+                <div v-if="!aiReport && !isGeneratingReport" class="empty-text">等待模型分析完成...</div>
+                <div v-if="isGeneratingReport && !aiReport" class="empty-text" style="color: #4A90E2; animation: pulse 1s infinite;">
+                  连接星火大模型中，正在生成绿色出行摘要...
+                </div>
+                <div v-else-if="aiReport" class="typing-text">
+                  <span v-html="formattedReport"></span>
+                  <span v-if="isGeneratingReport" class="typing-cursor">|</span>
+                </div>
               </div>
             </div>
 
@@ -95,19 +104,21 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, nextTick, computed } from 'vue'
 import { Compass, Bicycle, UploadFilled, Guide, WindPower, Sunny, Tickets } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { trajectoryApi } from '../api/trajectory'
+import html2pdf from 'html2pdf.js'
 
-// 引入 Leaflet 核心库与样式 (吸收 的 GIS 基因)
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
 // --- 状态与变量 ---
 const hasData = ref(false)
 const isAnalyzing = ref(false)
+const isGeneratingReport = ref(false)
 const aiReport = ref('')
+const scrollBox = ref<HTMLElement | null>(null)
 
 // Leaflet 地图变量
 const mapContainer = ref<HTMLElement | null>(null)
@@ -152,19 +163,18 @@ const handleFileUpload = async (uploadFile: any) => {
 
     hasData.value = true;
     
-    // 将真实经纬度交给 Leaflet 渲染
     if (result.points && result.points.length > 0) {
       renderLeafletTrajectory(result.points, isGreen);
     } else {
       ElMessage.warning('未能解析出坐标数据，无法在地图上绘制');
     }
 
+    // 触发打字机
     generateAIReport(calcGreenDist, calcCo2, calcTrees, translateMode(mode));
     ElMessage.success(`模型解析完毕！真实判定为：${translateMode(mode)}`);
 
   } catch (error) {
     ElMessage.error('模型推理失败，请检查服务状态');
-    console.error('Prediction Error:', error);
   } finally {
     isAnalyzing.value = false;
   }
@@ -175,35 +185,116 @@ const translateMode = (mode: string) => {
   return map[mode.toLowerCase()] || mode;
 }
 
-const generateAIReport = (dist: string, co2: string, trees: string, modeName: string) => {
+// 格式化 Markdown
+const formattedReport = computed(() => {
+  if (!aiReport.value) return ''
+  return aiReport.value
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\n/g, '<br/>')
+})
+
+// 🚀 原生 Fetch 对接【讯飞星火】流式打字机
+const generateAIReport = async (dist: string, co2: string, trees: string, modeName: string) => {
+  isGeneratingReport.value = true
   aiReport.value = ''
-  let reportText = `<b>[解析完成]</b><br/>系统已成功使用 Exp1 纯轨迹泛化模型进行特征提取。模型判定本次真实出行为：<b>${modeName}</b>。<br/><br/>`
+  
+  let prompt = ''
   if (Number(dist) > 0) {
-    reportText += `这是一次完美的低碳出行！您的绿色出行里程达到 <b>${dist}km</b>。<br/>累计减少了 <b>${co2}kg</b> 碳排放，相当于种下了 <b>${trees}棵树</b>。`
+    prompt = `你是一个低碳出行专家。系统最新判定本次出行为：${modeName}。\n绿色里程：${dist}km\n累计减少碳排放：${co2}kg\n相当于种树：${trees}棵\n请写一段富有鼓舞性的个人绿色出行摘要，包含数据评价和环保建议，使用Markdown格式，字数150字左右。`
   } else {
-    reportText += `经识别，本次出行为高碳排交通方式。期待您下次选择公共交通或慢行系统，减少城市碳足迹！`
+    prompt = `你是一个低碳出行专家。系统最新判定本次出行为高碳排交通方式：${modeName}。\n请给出鼓励其下次选择公共交通或慢行系统以减少城市碳足迹的委婉建议，使用Markdown格式，字数150字左右。`
   }
-  simulateTyping(reportText)
+
+  try {
+    // 星火兼容 OpenAI 的 API 地址
+    const response = await fetch('/spark-api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ZOawgFgAMWrgzoramwRS:BkjUHBXpuOrXCpVQfFtJ` 
+      },
+      body: JSON.stringify({
+        model: 'lite', // 星火免费模型
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.7,
+        stream: true
+      })
+    })
+
+    if (!response.body) throw new Error('流式响应不可用')
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder('utf-8')
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      const chunk = decoder.decode(value, { stream: true })
+      const lines = chunk.split('\n')
+
+      for (const line of lines) {
+        if (line.startsWith('data: ') && !line.includes('[DONE]')) {
+          try {
+            const data = JSON.parse(line.substring(6))
+            const text = data.choices[0].delta.content || ''
+            aiReport.value += text
+            
+            // 自动滚动到底部
+            nextTick(() => {
+              if (scrollBox.value) {
+                scrollBox.value.scrollTop = scrollBox.value.scrollHeight
+              }
+            })
+          } catch (e) {}
+        }
+      }
+    }
+  } catch (error) {
+    console.error(error)
+    aiReport.value = `**生成报告失败**\n请检查网络连接或 API Key 是否有效。`
+  } finally {
+    isGeneratingReport.value = false
+  }
 }
 
-let typingTimer: any = null
-const simulateTyping = (text: string) => {
-  if (typingTimer) clearInterval(typingTimer)
-  aiReport.value = text 
+// 📄 一键导出 PDF（处理深色模式适配）
+const exportToPDF = () => {
+  const element = document.getElementById('green-pdf-content')
+  if (!element) return
+
+  const opt = {
+    margin:       10,
+    filename:     `绿色出行洞察报告_${new Date().getTime()}.pdf`,
+    image:        { type: 'jpeg' as const, quality: 0.98 },
+    html2canvas:  { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+    jsPDF:        { unit: 'mm' as const, format: 'a4' as const, orientation: 'portrait' as const }
+  }
+
+  const clone = element.cloneNode(true) as HTMLElement
+  
+  clone.style.backgroundColor = 'white'
+  clone.style.color = 'black'
+  clone.style.padding = '20px'
+  clone.style.height = 'auto'
+  clone.style.overflow = 'visible'
+  
+  clone.querySelectorAll('*').forEach((child: any) => {
+    child.style.color = 'black'
+  })
+
+  const cursor = clone.querySelector('.typing-cursor')
+  if (cursor) cursor.remove()
+  
+  html2pdf().set(opt).from(clone).save()
 }
 
 // ==========================================
-// 🗺️ Leaflet 真实 GIS 地图渲染引擎 (移植自 代码)
+// 🗺️ Leaflet 真实 GIS 地图渲染引擎
 // ==========================================
-
 const initLeafletMap = () => {
   if (!mapContainer.value) return
-  
-  // 初始化地图，默认中心设置在北京天安门附近
   map = L.map(mapContainer.value).setView([39.9042, 116.4074], 12)
-
-  // 挂载 OpenStreetMap 真实街道瓦片
-  // 为了搭配你的暗色 UI，这里加上了一层滤镜让地图显得高级一点，你也可以删掉 className
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '© OpenStreetMap contributors',
     maxZoom: 19,
@@ -214,12 +305,10 @@ const initLeafletMap = () => {
 const renderLeafletTrajectory = (points: any[], isGreen: boolean) => {
   if (!map) return
 
-  // 1. 清理上一条轨迹和标记
   if (currentPolyline) map.removeLayer(currentPolyline)
   markers.forEach(m => map!.removeLayer(m))
   markers = []
 
-  // 2. 提取并清洗坐标点 (注意 Leaflet 需要 [纬度lat, 经度lng] 的顺序)
   const latLngs = points.map(p => {
     const lat = p.lat || p.latitude || p.y || (Array.isArray(p) ? p[1] : undefined);
     const lng = p.lng || p.lon || p.longitude || p.x || (Array.isArray(p) ? p[0] : undefined);
@@ -228,7 +317,6 @@ const renderLeafletTrajectory = (points: any[], isGreen: boolean) => {
 
   if (latLngs.length === 0) return;
 
-  // 3. 画轨迹线：绿色代表低碳，红色代表高碳
   const lineColor = isGreen ? '#67C23A' : '#F56C6C';
   
   currentPolyline = L.polyline(latLngs, {
@@ -239,33 +327,24 @@ const renderLeafletTrajectory = (points: any[], isGreen: boolean) => {
     lineJoin: 'round'
   }).addTo(map);
 
-  // 4. 起终点标记
   const startPoint = latLngs[0] as [number, number];
   const endPoint = latLngs[latLngs.length - 1] as [number, number];
-  // 起点：绿色小圆点
+  
   const startMarker = L.circleMarker(startPoint, {
-    radius: 7,
-    fillColor: '#52C41A',
-    color: '#fff',
-    weight: 2,
-    fillOpacity: 1,
+    radius: 7, fillColor: '#52C41A', color: '#fff', weight: 2, fillOpacity: 1,
   }).addTo(map);
   startMarker.bindTooltip('起点', { permanent: false, direction: 'top' });
 
-  // 终点：红色小方块
-const endMarker = L.marker(endPoint, {
+  const endMarker = L.marker(endPoint, {
     icon: L.divIcon({
       className: 'custom-end-marker',
       html: '<div style="width: 14px; height: 14px; background: #F5222D; border: 2px solid #fff; border-radius: 2px; box-shadow: 0 0 5px rgba(0,0,0,0.5);"></div>',
-      iconSize: [14, 14],
-      iconAnchor: [7, 7],
+      iconSize: [14, 14], iconAnchor: [7, 7],
     }),
   }).addTo(map);
   endMarker.bindTooltip('终点', { permanent: false, direction: 'top' });
 
   markers.push(startMarker, endMarker);
-
-  // 5. 灵魂魔法：地图视角自动平滑缩放至恰好容纳整条轨迹！
   map.fitBounds(currentPolyline.getBounds(), { padding: [50, 50], animate: true, duration: 1 });
 }
 
@@ -275,15 +354,11 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  if (map) {
-    map.remove()
-    map = null
-  }
+  if (map) { map.remove(); map = null }
 })
 </script>
 
 <style scoped>
-/* 保持原有 UI 样式 */
 .green-container { 
   height: calc(100vh - 70px); 
   padding: 20px; 
@@ -300,19 +375,9 @@ onUnmounted(() => {
 .flex-1 { flex: 1; }
 
 .map-wrapper { padding: 0; background: #0b0d12; position: relative; }
-/* Leaflet 容器必须指定宽和高 */
-.leaflet-map { 
-  position: absolute; 
-  top: 0; 
-  left: 0; 
-  width: 100%; 
-  height: 100%; 
-  z-index: 1;
-}
+.leaflet-map { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
 
-/* 可选：给地图加一点点暗色滤镜，适应整体的科技感风格 */
 :deep(.dark-map-tiles) { filter: brightness(0.7) invert(1) contrast(1.2) hue-rotate(200deg); }
-/* 消除 终点标记自带的背景 */
 :deep(.custom-end-marker) { background: transparent; border: none; }
 
 .map-legend { position: absolute; bottom: 20px; right: 20px; background: rgba(0,0,0,0.7); padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(4px); z-index: 1000;}
@@ -343,7 +408,23 @@ onUnmounted(() => {
 
 .report-box { border-color: rgba(74, 144, 226, 0.3); background: rgba(74, 144, 226, 0.05); display: flex; flex-direction: column;}
 .ai-title { color: #4A90E2; }
-.ai-content { flex: 1; font-size: 14px; line-height: 1.8; color: #e5eaf3; background: rgba(0,0,0,0.3); padding: 16px; border-radius: 6px; border-left: 3px solid #4A90E2;}
+.ai-content { 
+  flex: 1; font-size: 14px; line-height: 1.8; color: #e5eaf3; background: rgba(0,0,0,0.3); 
+  padding: 16px; border-radius: 6px; border-left: 3px solid #4A90E2;
+  overflow-y: auto; scrollbar-width: thin;
+}
 .empty-text { color: #909399; font-style: italic; text-align: center; margin-top: 20px;}
-:deep(b) { color: #67C23A; }
+:deep(strong) { color: #67C23A; }
+
+.typing-cursor {
+  display: inline-block;
+  width: 8px;
+  height: 14px;
+  background-color: #4A90E2;
+  vertical-align: middle;
+  margin-left: 4px;
+  animation: blink 1s step-end infinite;
+}
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+@keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
 </style>

@@ -1,15 +1,19 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
-from fastapi.responses import JSONResponse
+import httpx
 import pandas as pd
-import numpy as np
 import io
 import sys
-import os
-from api.security import get_current_user
-from api.models import User
 from pathlib import Path
 from typing import List
+
+import yaml
+from pydantic import BaseModel
+import numpy as np
+import pandas as pd
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
+from fastapi.responses import JSONResponse, StreamingResponse
+from api.models import User
+from api.security import get_current_user
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from api.schemas import (
@@ -20,6 +24,11 @@ from api.schemas import (
 )
 
 router = APIRouter()
+
+# 加载 DeepSeek 配置
+CONFIG_PATH = Path(__file__).parent.parent.parent / "config.yaml"
+with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+    config = yaml.safe_load(f)
 
 TRANSPORT_MODES = [
     {"id": "walk", "name": "步行", "color": "#4A90E2", "icon": "walking"},
@@ -608,39 +617,55 @@ class ReportRequest(BaseModel):
     model_id: str
     mode: str
     confidence: str
+    scene: str = "congestion"
+    distance: str = "0"
+    co2: str = "0"
 
 
-async def generate_llm_report_stream(model_id: str, mode: str, confidence: str):
-    # 模拟大模型根据传参思考的文案
-    if model_id == "exp1":
-        text = f"【系统智能洞察】系统基于纯运动学特征提取完毕。当前判定该路段主要交通流为 {mode}，置信概率为 {confidence}%。由于缺乏路网环境上下文，该置信度在复杂拥堵路况下可能存在波动。"
-    elif model_id == "exp2":
-        text = f"【系统智能洞察】引入左侧 OSM 空间拓扑后，模型能够捕捉轨迹与路口的几何关系。判定结果：{mode}，置信概率为 {confidence}%。您可以观察到置信度相较于基线模型的显著提升。"
-    elif model_id == "exp4":
-        text = f"【深度溯源完成】Focal Loss 优化已全面介入。最终判定该拥堵源交通流为：{mode} (确信度 {confidence}%)。模型已有效抑制对常见类别的过度拟合，展现出最真实的分类边界。"
+async def generate_deepseek_stream(req: ReportRequest):
+    """真正接入 DeepSeek 的流式生成器"""
+    # 针对 TrafficRec 项目场景定制 Prompt
+    if req.scene == "green":
+        prompt = f"""你是一个低碳出行专家。系统利用多模态深度学习识别了用户的出行轨迹：
+        - 判定模态：{req.mode} (置信度 {req.confidence}%)
+        - 绿色里程：{req.distance} km
+        - 累计减排：{req.co2} kg
+        请基于以上数据生成一份个性化报告。要求包含：1.对本次识别结果的专业确认；2.对环保贡献的量化赞赏；3.一条关于该路段后续绿色出行的建议。字数150字左右。"""
     else:
-        text = f"【时空解析完毕】融合多模态特征，推断该段轨迹属于 {mode} (确信度 {confidence}%)。视觉已在左侧 GIS 地图完成拓扑映射。"
+        prompt = f"""你是一个城市交通研判专家。在北京市路网分析中，系统利用 {req.model_id} 模型得出以下结果：
+        - 识别出的主要交通流：{req.mode}
+        - 引擎置信度：{req.confidence}%
+        请从“时空特征分析”和“路段拥堵治理方案”两个维度生成深度溯源报告。要求语调专业、具有科技感，字数200字左右。"""
 
-    # 模拟连接大模型的思考延迟
-    yield "data: " + json.dumps({"status": "start", "content": ""}, ensure_ascii=False) + "\n\n"
-    await asyncio.sleep(0.5)
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        try:
+            async with client.stream(
+                    "POST",
+                    f"{config['deepseek']['base_url']}/chat/completions",
+                    headers={"Authorization": f"Bearer {config['deepseek']['api_key']}"},
+                    json={
+                        "model": config['deepseek']['model'],
+                        "messages": [{"role": "user", "content": prompt}],
+                        "stream": True
+                    }
+            ) as response:
+                if response.status_code != 200:
+                    yield f"data: {json.dumps({'status': 'generating', 'content': 'AI 服务暂时繁忙，请稍后再试。'})}\n\n"
+                    return
 
-    # 模拟打字机推流
-    for char in text:
-        chunk = {"status": "generating", "content": char}
-        yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
-        await asyncio.sleep(0.03)  # 这里控制吐字速度
+                async for line in response.aiter_lines():
+                    if line.startswith("data: "):
+                        if "[DONE]" in line: break
+                        data = json.loads(line[6:])
+                        chunk = data["choices"][0]["delta"].get("content", "")
+                        if chunk:
+                            yield f"data: {json.dumps({'status': 'generating', 'content': chunk})}\n\n"
 
-    # 结束标志
-    yield "data: " + json.dumps({"status": "done", "content": ""}, ensure_ascii=False) + "\n\n"
+                yield f"data: {json.dumps({'status': 'done'})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'status': 'generating', 'content': f'连接模型失败: {str(e)}'})}\n\n"
 
 
 @router.post("/generate_report_stream")
-async def generate_report_stream(
-    req: ReportRequest,
-    current_user: User = Depends(get_current_user)
-):
-    return StreamingResponse(
-        generate_llm_report_stream(req.model_id, req.mode, req.confidence),
-        media_type="text/event-stream"
-    )
+async def generate_report_stream(req: ReportRequest, current_user: User = Depends(get_current_user)):
+    return StreamingResponse(generate_deepseek_stream(req), media_type="text/event-stream")
