@@ -2,11 +2,14 @@
   <header class="screen-header">
     <div class="header-inner">
       <div class="header-left">
-        <div class="nav-btn" :class="{ active: currentPath === '/congestion-analysis' }" @click="$router.push('/congestion-analysis')">
-          <el-icon><Location /></el-icon> 拥堵溯源
+        <div class="nav-btn" :class="{ active: currentPath === '/' }" @click="$router.push('/')">
+          <el-icon><HomeFilled /></el-icon> 首页总览
         </div>
-        <div class="nav-btn" :class="{ active: currentPath === '/green-travel' }" @click="$router.push('/green-travel')">
-          <el-icon><DataAnalysis /></el-icon> 绿色出行
+        <div class="nav-btn" :class="{ active: currentPath === '/dashboard' }" @click="$router.push('/dashboard')">
+          <el-icon><DataBoard /></el-icon> 态势感知
+        </div>
+        <div class="nav-btn" :class="{ active: currentPath === '/tech-support' }" @click="$router.push('/tech-support')">
+          <el-icon><Cpu /></el-icon> 技术支撑
         </div>
       </div>
 
@@ -20,8 +23,11 @@
       </div>
 
       <div class="header-right">
-        <div class="nav-btn" :class="{ active: currentPath === '/dashboard' }" @click="$router.push('/dashboard')">
-          <el-icon><DataBoard /></el-icon> 态势感知
+        <div class="nav-btn" :class="{ active: currentPath === '/congestion-analysis' }" @click="$router.push('/congestion-analysis')">
+          <el-icon><Location /></el-icon> 拥堵溯源
+        </div>
+        <div class="nav-btn" :class="{ active: currentPath === '/green-travel' }" @click="$router.push('/green-travel')">
+          <el-icon><DataAnalysis /></el-icon> 绿色出行
         </div>
         
         <div class="user-info-trigger" v-if="authStore.isAuthenticated()" @click="$router.push('/user-center')">
@@ -39,7 +45,8 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { Location, DataAnalysis, DataBoard } from '@element-plus/icons-vue'
+// 引入所有需要的图标
+import { Location, DataAnalysis, DataBoard, HomeFilled, Cpu } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -78,7 +85,13 @@ onUnmounted(() => clearInterval(timer))
   height: 100%;
 }
 
-.header-left, .header-right { display: flex; gap: 15px; align-items: center; flex: 1; }
+/* 调整 flex 布局让两边按钮对齐 */
+.header-left, .header-right { 
+  display: flex; 
+  gap: 10px; /* 稍微调小一点间距，放得下三个按钮 */
+  align-items: center; 
+  flex: 1; 
+}
 .header-right { justify-content: flex-end; }
 .header-center { text-align: center; cursor: pointer; min-width: 300px; }
 
@@ -88,7 +101,6 @@ onUnmounted(() => clearInterval(timer))
   font-weight: bold;
   letter-spacing: 2px;
   background: linear-gradient(to right, #fff, #00f0ff);
-  /* 🚀 修复 CSS 兼容性报错 */
   background-clip: text;
   -webkit-background-clip: text;
   color: transparent;
@@ -99,12 +111,13 @@ onUnmounted(() => clearInterval(timer))
   color: #84a2d4;
   font-size: 14px;
   cursor: pointer;
-  padding: 6px 12px;
+  padding: 6px 10px;
   border: 1px solid transparent;
   transition: all 0.3s;
   display: flex;
   align-items: center;
   gap: 6px;
+  border-radius: 4px; /* 增加一点圆角更好看 */
 }
 
 .nav-btn:hover, .nav-btn.active {
@@ -122,7 +135,7 @@ onUnmounted(() => clearInterval(timer))
   padding: 5px 12px;
   background: rgba(0, 229, 255, 0.1);
   border-radius: 4px;
-  margin: 0 15px;
+  margin: 0 10px;
 }
 
 .user-status-dot {

@@ -1,58 +1,64 @@
 <template>
-  <div class="user-page-container">
-    <div class="cyber-content-wrapper">
-      
-      <div class="cyber-header">
-        <h2 class="title-text">
-          <span class="gradient-line"></span>
-          个人中心 / USER CONSOLE
-        </h2>
-        <p class="desc-text">Level 1 开发者权限已启用，核心数据接口已就绪</p>
-      </div>
+  <div class="user-center-page">
+    <div class="page-header">
+      <h2>用户管理中心</h2>
+      <p class="subtitle">管理您的研究账号信息与系统偏好</p>
+    </div>
 
-      <div class="cyber-grid">
-        <div class="glass-panel profile-card">
-          <div class="avatar-box">
-            <span class="emoji-icon">👨‍🚀</span>
-            <div class="glow-ring"></div>
+    <div class="user-dashboard">
+      <div class="profile-card">
+        <div class="avatar-wrapper">
+          <div class="avatar">{{ userInitials }}</div>
+        </div>
+        <h3 class="username">{{ authStore.username || '未命名研究员' }}</h3>
+        <span class="role-badge">系统管理员 / 核心研发</span>
+        
+        <div class="info-list">
+          <div class="info-item">
+            <span class="label">邮箱：</span>
+            <span class="value">{{ 'admin@traffic-rec.edu.cn' }}</span>
           </div>
-          <h3 class="user-name">{{ authStore.username }}</h3>
-          <div class="badge">SYSTEM OPERATOR</div>
-          
-          <div class="stats-list">
-            <div class="stat-row">
-              <span class="label">连接状态</span>
-              <span class="value green-glow">已加密授权</span>
-            </div>
-            <div class="stat-row">
-              <span class="label">数据访问</span>
-              <span class="value">UNRESTRICTED</span>
-            </div>
+          <div class="info-item">
+            <span class="label">所属机构：</span>
+            <span class="value">安徽师范大学 计算机与信息学院</span>
           </div>
-          
-          <button @click="handleLogout" class="exit-button">销毁会话 (LOGOUT)</button>
+          <div class="info-item">
+            <span class="label">注册时间：</span>
+            <span class="value">2026-01-15</span>
+          </div>
         </div>
 
-        <div class="glass-panel detail-panel">
-          <div class="section-title">
-            <span class="blue-icon">◈</span> 系统权限列表
-          </div>
-          
-          <div class="module-cards">
-            <div class="m-card" v-for="item in modules" :key="item.name">
-              <div class="m-info">
-                <h4>{{ item.name }}</h4>
-                <p>{{ item.desc }}</p>
-              </div>
-              <div class="m-status">ENABLED</div>
-            </div>
-          </div>
+        <button class="edit-btn">修改个人信息</button>
+      </div>
 
-          <div class="token-section">
-            <label>当前会话令牌 (JWT TOKEN)</label>
-            <div class="token-display">
-              <code>Bearer {{ authStore.token }}</code>
-            </div>
+      <div class="settings-panel">
+        <div class="setting-section">
+          <h4>📌 当前参与竞赛与项目</h4>
+          <ul class="project-list">
+            <li>
+              <div class="proj-title">“互联网+” 创新创业大赛</div>
+              <div class="proj-desc">数字心理健康服务平台 (已归档)</div>
+            </li>
+            <li>
+              <div class="proj-title">中国大学生计算机设计大赛</div>
+              <div class="proj-desc">TrafficRec: 多模态交通方式识别系统 (前端负责人)</div>
+            </li>
+            <li>
+              <div class="proj-title">全国大学生统计建模大赛</div>
+              <div class="proj-desc">基于时空轨迹的减排核算模型 (进行中)</div>
+            </li>
+          </ul>
+        </div>
+
+        <div class="setting-section">
+          <h4>⚙️ 系统偏好设置</h4>
+          <div class="pref-item">
+            <span>接收实验完成邮件通知</span>
+            <input type="checkbox" checked class="toggle-switch">
+          </div>
+          <div class="pref-item">
+            <span>开启大模型深度推理模式 (消耗Token增加)</span>
+            <input type="checkbox" checked class="toggle-switch">
           </div>
         </div>
       </div>
@@ -61,73 +67,176 @@
 </template>
 
 <script setup lang="ts">
-import { useRouter } from 'vue-router'
+import { computed } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 
-const router = useRouter()
 const authStore = useAuthStore()
 
-const modules = [
-  { name: '轨迹特征识别引擎 (CNN-LSTM)', desc: '支持多维时空数据关联分析' },
-  { name: 'GeoLife 结构化数据集', desc: '包含 18,000+ 清洗后的轨迹段' },
-  { name: 'AI 研报自动生成', desc: '基于 SSE 的实时流式评估报告生成' }
-]
-
-const handleLogout = () => {
-  if (confirm('确认注销并清除本地 Token 吗？')) {
-    authStore.logout()
-    router.push('/login')
-  }
-}
+const userInitials = computed(() => {
+  const name = authStore.username || 'A'
+  return name.charAt(0).toUpperCase()
+})
 </script>
 
 <style scoped>
-.user-page-container { min-height: 80vh; padding: 20px; }
-.cyber-content-wrapper { max-width: 1200px; margin: 0 auto; }
-.cyber-header { margin-bottom: 30px; }
-
-.title-text { 
-  font-size: 24px; color: #fff; display: flex; align-items: center; gap: 12px; font-weight: bold; 
-}
-
-.gradient-line { 
-  width: 4px; height: 24px; background: linear-gradient(to bottom, #0070f3, #00f0ff); 
-  border-radius: 4px; box-shadow: 0 0 10px #00f0ff; 
-}
-
-.desc-text { color: #64748b; margin-top: 8px; font-size: 14px; }
-.cyber-grid { display: grid; grid-template-columns: 1fr 2fr; gap: 30px; }
-
-.glass-panel {
-  background: rgba(15, 23, 42, 0.4);
-  border: 1px solid rgba(0, 240, 255, 0.2);
-  border-radius: 16px;
+.user-center-page {
   padding: 30px;
-  backdrop-filter: blur(10px);
+  height: 100%;
+  overflow-y: auto;
+  box-sizing: border-box;
 }
 
-.profile-card { text-align: center; }
-.avatar-box { position: relative; width: 100px; height: 100px; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; }
-.emoji-icon { font-size: 50px; z-index: 2; }
-.glow-ring { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 2px solid #00f0ff; border-radius: 50%; box-shadow: 0 0 20px rgba(0, 240, 255, 0.5); }
+.page-header h2 {
+  color: #e2e8f0;
+  margin: 0 0 8px 0;
+  font-size: 24px;
+}
+.subtitle {
+  color: #94a3b8;
+  margin: 0 0 30px 0;
+}
 
-.user-name { font-size: 24px; color: #fff; margin-bottom: 5px; }
-.badge { background: rgba(0, 240, 255, 0.1); color: #00f0ff; border: 1px solid rgba(0, 240, 255, 0.5); padding: 3px 12px; border-radius: 20px; font-size: 11px; display: inline-block; margin-bottom: 25px; }
+.user-dashboard {
+  display: flex;
+  gap: 30px;
+  align-items: flex-start;
+}
 
-.stats-list { border-top: 1px solid rgba(255,255,255,0.1); padding-top: 20px; }
-.stat-row { display: flex; justify-content: space-between; margin-bottom: 15px; font-size: 13px; }
-.green-glow { color: #22c55e; text-shadow: 0 0 5px #22c55e; }
+.profile-card, .settings-panel {
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 30px;
+}
 
-.exit-button { width: 100%; padding: 12px; border: 1px solid #ef4444; background: transparent; color: #f87171; border-radius: 8px; cursor: pointer; margin-top: 10px; transition: 0.3s; }
-.exit-button:hover { background: rgba(239, 68, 68, 0.2); border-color: #ff4d4f; }
+.profile-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
 
-.section-title { font-size: 18px; color: #fff; margin-bottom: 25px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px; }
-.m-card { background: rgba(255,255,255,0.03); padding: 15px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
-.m-info h4 { color: #fff; margin: 0 0 5px 0; font-size: 15px; }
-.m-info p { color: #94a3b8; font-size: 12px; margin: 0; }
-.m-status { color: #00f0ff; font-size: 11px; border: 1px solid #00f0ff; padding: 2px 8px; border-radius: 4px; }
+.avatar-wrapper {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #0ea5e9, #3b82f6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 20px;
+  box-shadow: 0 4px 20px rgba(14, 165, 233, 0.4);
+}
 
-.token-section { margin-top: 30px; }
-.token-section label { color: #94a3b8; font-size: 12px; display: block; margin-bottom: 10px; }
-.token-display { background: rgba(0, 0, 0, 0.5); border: 1px solid rgba(255,255,255,0.1); padding: 15px; border-radius: 8px; overflow-x: auto; color: #64748b; font-family: monospace; font-size: 12px; }
+.avatar {
+  font-size: 40px;
+  color: white;
+  font-weight: bold;
+}
+
+.username {
+  color: white;
+  font-size: 22px;
+  margin: 0 0 10px 0;
+}
+
+.role-badge {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 13px;
+  margin-bottom: 30px;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+.info-list {
+  width: 100%;
+  margin-bottom: 30px;
+}
+
+.info-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 0;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+.info-item .label { color: #94a3b8; }
+.info-item .value { color: #e2e8f0; font-weight: 500; }
+
+.edit-btn {
+  width: 100%;
+  padding: 10px;
+  background: transparent;
+  border: 1px solid #0ea5e9;
+  color: #0ea5e9;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+.edit-btn:hover {
+  background: #0ea5e9;
+  color: white;
+}
+
+.settings-panel {
+  flex: 2;
+}
+
+.setting-section {
+  margin-bottom: 40px;
+}
+
+.setting-section h4 {
+  color: #e2e8f0;
+  font-size: 16px;
+  margin: 0 0 20px 0;
+  border-left: 4px solid #0ea5e9;
+  padding-left: 10px;
+}
+
+.project-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.project-list li {
+  background: rgba(15, 23, 42, 0.5);
+  padding: 15px;
+  border-radius: 6px;
+  margin-bottom: 15px;
+  border: 1px solid rgba(255,255,255,0.05);
+}
+
+.proj-title {
+  color: #38bdf8;
+  font-weight: 500;
+  margin-bottom: 5px;
+}
+
+.proj-desc {
+  color: #94a3b8;
+  font-size: 14px;
+}
+
+.pref-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px;
+  background: rgba(15, 23, 42, 0.5);
+  border-radius: 6px;
+  margin-bottom: 10px;
+  color: #cbd5e1;
+}
+
+/* 简单的开关样式伪造 */
+.toggle-switch {
+  width: 40px;
+  height: 20px;
+  cursor: pointer;
+  accent-color: #0ea5e9;
+}
 </style>
