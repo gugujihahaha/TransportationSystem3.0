@@ -1,96 +1,81 @@
 <template>
-  <div class="admin-user-center">
-    <aside class="sidebar">
-      <div class="user-brief">
-        <div class="avatar">{{ authStore.username ? authStore.username.charAt(0).toUpperCase() : 'U' }}</div>
-        <div class="name">{{ authStore.username }}</div>
-        <div class="role">超级管理员</div>
+  <div class="user-page-container">
+    <div class="cyber-content-wrapper">
+      
+      <div class="cyber-header">
+        <h2 class="title-text">
+          <span class="gradient-line"></span>
+          系统用户中心 / USER CONTROL
+        </h2>
+        <p class="desc-text">欢迎回来, {{ authStore.username }}。当前系统权限：Level 1 开发者</p>
       </div>
-      
-      <nav class="menu">
-        <a :class="{ active: activeTab === 'profile' }" @click="activeTab = 'profile'">账号概览</a>
-        <a :class="{ active: activeTab === 'activity' }" @click="activeTab = 'activity'">近期动态</a>
-        <a :class="{ active: activeTab === 'api' }" @click="activeTab = 'api'">API 开发者</a>
-        <a :class="{ active: activeTab === 'settings' }" @click="activeTab = 'settings'">安全设置</a>
-      </nav>
-    </aside>
 
-    <main class="content-area">
-      
-      <section v-if="activeTab === 'profile'" class="panel">
-        <h3>基本信息</h3>
-        <div class="info-list">
-          <div class="info-item"><label>登录账号：</label> <span>{{ authStore.username }}</span></div>
-          <div class="info-item"><label>当前状态：</label> <span class="tag success">正常运转</span></div>
+      <div class="cyber-grid">
+        <div class="glass-panel profile-card">
+          <div class="avatar-box">
+            <span class="emoji-icon">👨‍🚀</span>
+            <div class="glow-ring"></div>
+          </div>
+          <h3 class="user-name">{{ authStore.username }}</h3>
+          <div class="badge">SYSTEM OPERATOR</div>
+          
+          <div class="stats-list">
+            <div class="stat-row">
+              <span class="label">认证状态</span>
+              <span class="value green-glow">已加密授权</span>
+            </div>
+            <div class="stat-row">
+              <span class="label">数据访问</span>
+              <span class="value">FULL ACCESS</span>
+            </div>
+          </div>
+          
+          <button @click="handleLogout" class="exit-button">断开连接 (LOGOUT)</button>
         </div>
 
-        <h3 class="mt-4">模块访问权限</h3>
-        <table class="auth-table">
-          <thead>
-            <tr>
-              <th>系统模块</th>
-              <th>授权状态</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>轨迹预测核心 (Exp1-Exp4)</td>
-              <td><span class="tag success">● 授权有效</span></td>
-            </tr>
-            <tr>
-              <td>底层数据大盘</td>
-              <td><span class="tag success">● 授权有效</span></td>
-            </tr>
-            <tr>
-              <td>AI 智能评估报告</td>
-              <td><span class="tag success">● 授权有效</span></td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
+        <div class="glass-panel detail-panel">
+          <div class="section-title">
+            <span class="blue-icon">◈</span> 系统模块凭证状态
+          </div>
+          
+          <div class="module-cards">
+            <div class="m-card" v-for="item in modules" :key="item.name">
+              <div class="m-info">
+                <h4>{{ item.name }}</h4>
+                <p>{{ item.desc }}</p>
+              </div>
+              <div class="m-status">ACTIVE</div>
+            </div>
+          </div>
 
-      <section v-if="activeTab === 'activity'" class="panel">
-        <h3>系统操作日志</h3>
-        <ul class="timeline">
-          <li><strong>刚才</strong> - 成功登录交通方式识别系统</li>
-          <li><strong>今天</strong> - 验证了 JWT 身份认证模块</li>
-          <li><strong>今天</strong> - 访问了底层数据集统计接口</li>
-        </ul>
-      </section>
-
-      <section v-if="activeTab === 'api'" class="panel">
-        <h3>开发者 Token</h3>
-        <p>您可以使用此 Bearer Token 在 Python 或 Postman 中直接调用后端 API。</p>
-        <div class="token-box">
-          <code>{{ authStore.token || '未获取到 Token' }}</code>
+          <div class="token-section">
+            <label>当前会话令牌 (JWT TOKEN)</label>
+            <div class="token-display">
+              <code>Bearer {{ authStore.token }}</code>
+            </div>
+            <p class="token-tip">该令牌用于所有后端 API 验证，请勿泄露。</p>
+          </div>
         </div>
-      </section>
-
-      <section v-if="activeTab === 'settings'" class="panel">
-        <h3>危险操作</h3>
-        <div class="danger-zone">
-          <p>退出当前账号将清除本地的认证 Token，终止所有未完成的预测任务。</p>
-          <button @click="handleLogout" class="btn-logout">安全退出系统</button>
-        </div>
-      </section>
-
-    </main>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
 const authStore = useAuthStore()
 
-// 控制右侧面板切换的状态
-const activeTab = ref('profile')
+const modules = [
+  { name: '多模态轨迹识别核心', desc: 'CNN-LSTM-Transformer 混合推理引擎' },
+  { name: 'GeoLife 异构数据集', desc: '包含 182 名用户清洗后的轨迹特征' },
+  { name: 'LLM 智能研报系统', desc: '基于 SSE 的流式生成评估报告' }
+]
 
 const handleLogout = () => {
-  if (confirm('确定要退出系统吗？')) {
+  if (confirm('是否确定退出并销毁当前令牌？')) {
     authStore.logout()
     router.push('/login')
   }
@@ -98,181 +83,55 @@ const handleLogout = () => {
 </script>
 
 <style scoped>
-/* 基础骨架样式，后续可统一美化 */
-.admin-user-center {
-  display: flex;
-  min-height: calc(100vh - 80px); /* 减去顶部导航栏高度 */
-  background-color: #f4f7f9;
-  border-radius: 8px;
-  overflow: hidden;
-  border: 1px solid #e1e4e8;
-  margin: 20px;
-}
-
-/* 左侧边栏 */
-.sidebar {
-  width: 250px;
-  background-color: #fff;
-  border-right: 1px solid #e1e4e8;
-  padding: 30px 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.user-brief {
-  text-align: center;
-  margin-bottom: 30px;
-  padding: 0 20px;
-}
-
-.avatar {
-  width: 64px;
-  height: 64px;
-  background-color: #2b3a4a;
-  color: #fff;
-  border-radius: 50%;
-  font-size: 28px;
-  line-height: 64px;
-  margin: 0 auto 10px;
-}
-
-.name {
-  font-weight: bold;
-  font-size: 18px;
-  color: #333;
-}
-
-.role {
-  font-size: 13px;
-  color: #888;
-  margin-top: 4px;
-}
-
-.menu {
-  display: flex;
-  flex-direction: column;
-}
-
-.menu a {
-  padding: 15px 30px;
-  color: #555;
-  cursor: pointer;
-  border-left: 3px solid transparent;
-  transition: all 0.2s;
-}
-
-.menu a:hover {
-  background-color: #f8f9fa;
-}
-
-.menu a.active {
-  background-color: #eef2f5;
-  color: #2b3a4a;
-  border-left-color: #2b3a4a;
-  font-weight: bold;
-}
-
-/* 右侧内容区 */
-.content-area {
-  flex: 1;
-  padding: 40px;
-  background-color: #fcfcfc;
-}
-
-.panel h3 {
-  margin-top: 0;
-  margin-bottom: 20px;
-  font-size: 20px;
-  color: #2c3e50;
-  border-bottom: 2px solid #eee;
-  padding-bottom: 10px;
-}
-
-.mt-4 {
-  margin-top: 40px;
-}
-
-.info-list .info-item {
-  margin-bottom: 15px;
-  font-size: 15px;
-}
-
-.info-item label {
-  color: #666;
-  display: inline-block;
-  width: 100px;
-}
-
-.auth-table {
-  width: 100%;
-  border-collapse: collapse;
-  background: #fff;
-  border: 1px solid #eee;
-}
-
-.auth-table th, .auth-table td {
-  padding: 12px 15px;
-  text-align: left;
-  border-bottom: 1px solid #eee;
-}
-
-.auth-table th {
-  background-color: #f9fafb;
-  color: #555;
-}
-
-.tag {
-  font-size: 12px;
-  padding: 4px 8px;
-  border-radius: 4px;
-}
-
-.tag.success {
-  background-color: #e6f7ff;
-  color: #1890ff;
-  border: 1px solid #91d5ff;
-}
-
-.timeline {
-  list-style-type: disc;
-  padding-left: 20px;
-  line-height: 2;
-  color: #444;
-}
-
-.token-box {
-  background-color: #282c34;
-  color: #abb2bf;
-  padding: 15px;
-  border-radius: 6px;
-  overflow-x: auto;
-  margin-top: 15px;
-  font-family: monospace;
-}
-
-.danger-zone {
-  border: 1px solid #ffccc7;
-  background-color: #fff2f0;
+.user-page-container {
+  min-height: 80vh;
   padding: 20px;
-  border-radius: 6px;
 }
 
-.danger-zone p {
-  color: #ff4d4f;
-  margin-bottom: 15px;
+.cyber-content-wrapper { max-width: 1200px; margin: 0 auto; }
+
+.cyber-header { margin-bottom: 30px; }
+.title-text { font-size: 24px; color: #fff; display: flex; align-items: center; gap: 12px; font-weight: bold; letter-spacing: 1px; }
+.gradient-line { width: 4px; height: 24px; background: linear-gradient(to bottom, #0070f3, #00f0ff); border-radius: 4px; box-shadow: 0 0 10px #00f0ff; }
+.desc-text { color: #64748b; margin-top: 8px; font-size: 14px; }
+
+.cyber-grid { display: grid; grid-template-columns: 1fr 2fr; gap: 30px; }
+@media (max-width: 900px) { .cyber-grid { grid-template-columns: 1fr; } }
+
+.glass-panel {
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid rgba(0, 240, 255, 0.2);
+  border-radius: 16px;
+  padding: 30px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
 }
 
-.btn-logout {
-  background-color: #ff4d4f;
-  color: #fff;
-  border: none;
-  padding: 10px 20px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-weight: bold;
-}
+.profile-card { text-align: center; height: fit-content; }
+.avatar-box { position: relative; width: 100px; height: 100px; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; }
+.emoji-icon { font-size: 50px; z-index: 2; }
+.glow-ring { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 2px solid #00f0ff; border-radius: 50%; box-shadow: 0 0 20px rgba(0, 240, 255, 0.5); }
 
-.btn-logout:hover {
-  background-color: #cf1322;
-}
+.user-name { font-size: 24px; color: #fff; margin-bottom: 5px; }
+.badge { background: rgba(0, 240, 255, 0.1); color: #00f0ff; border: 1px solid rgba(0, 240, 255, 0.5); padding: 3px 12px; border-radius: 20px; font-size: 11px; display: inline-block; margin-bottom: 25px; letter-spacing: 1px; }
+
+.stats-list { border-top: 1px solid rgba(255,255,255,0.1); padding-top: 20px; }
+.stat-row { display: flex; justify-content: space-between; margin-bottom: 15px; font-size: 13px; }
+.label { color: #94a3b8; }
+.green-glow { color: #22c55e; text-shadow: 0 0 5px #22c55e; }
+
+.exit-button { width: 100%; padding: 12px; border: 1px solid #ef4444; background: transparent; color: #f87171; border-radius: 8px; cursor: pointer; margin-top: 10px; transition: 0.3s; font-weight: bold; }
+.exit-button:hover { background: rgba(239, 68, 68, 0.2); border-color: #ff4d4f; color: #fff; }
+
+.section-title { font-size: 18px; color: #fff; margin-bottom: 25px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px; font-weight: bold; }
+.m-card { background: rgba(255,255,255,0.03); padding: 15px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; transition: 0.3s; }
+.m-card:hover { background: rgba(0, 240, 255, 0.05); border-color: rgba(0, 240, 255, 0.2); }
+.m-info h4 { color: #fff; margin: 0 0 5px 0; font-size: 15px; }
+.m-info p { color: #94a3b8; font-size: 12px; margin: 0; }
+.m-status { color: #00f0ff; font-size: 11px; border: 1px solid #00f0ff; padding: 2px 8px; border-radius: 4px; font-weight: bold; }
+
+.token-section { margin-top: 30px; }
+.token-section label { color: #94a3b8; font-size: 12px; display: block; margin-bottom: 10px; }
+.token-display { background: rgba(0, 0, 0, 0.5); border: 1px solid rgba(255,255,255,0.1); padding: 15px; border-radius: 8px; overflow-x: auto; color: #64748b; font-family: monospace; font-size: 12px; line-height: 1.5; }
+.token-tip { font-size: 11px; color: #475569; margin-top: 10px; }
 </style>
