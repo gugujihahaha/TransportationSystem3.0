@@ -1,6 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import AppLayout from '../components/AppLayout.vue'
-import HomeView from '../views/HomeView.vue'
 import LoginView from '../views/LoginView.vue' 
 import { useAuthStore } from '@/stores/auth'
 
@@ -15,13 +14,8 @@ const router = createRouter({
     },
     {
       path: '/',
-      name: 'home',
-      component: HomeView,
-      meta: { requiresAuth: true } // 标记需要鉴权
-    },
-    {
-      path: '/',
       component: AppLayout,
+      // 只要是在 AppLayout 下面的子路由，都会被加上顶部导航栏
       children: [
         {
           path: '',
@@ -53,21 +47,28 @@ const router = createRouter({
           component: () => import('../views/TechSupport.vue'),
           meta: { title: '技术支撑与系统架构' }
         },
+        // 👇 修复报错1：新增个人中心的路由注册
+        {
+          path: 'user-center',
+          name: 'userCenter',
+          component: () => import('../views/UserCenterView.vue'),
+          meta: { title: '个人中心' }
+        }
       ],
     },
   ],
 })
 
-router.beforeEach((to, from, next) => {
+// 👇 修复报错2：使用 Vue Router 4 推荐的 return 语法替代 next()
+router.beforeEach((to, from) => {
   const authStore = useAuthStore() 
   
-  // 判断该目标路由是否需要鉴权（或者是所有的页面只要不是 /login 就拦截）
-  // 这里我们采用最严格的模式：只要去的不是登录页，且没有 Token，就全部打回登录页！
+  // 判断该目标路由是否需要鉴权
   if (to.path !== '/login' && !authStore.isAuthenticated()) {
-    next({ path: '/login' }) // 强行重定向到登录页
-  } else {
-    next() // 检票通过，放行
-  }
+    return { path: '/login' } // 强行重定向到登录页
+  } 
+  
+  return true // 检票通过，放行
 })
 
 export default router
