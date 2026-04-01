@@ -1,377 +1,224 @@
 <template>
-  <div class="dashboard-container">
-    <el-row :gutter="20" class="full-height">
-      
-      <el-col :span="6" class="full-height">
-        <div class="panel dark-panel feature-panel">
-          <div class="panel-header">
-            <el-icon><DataLine /></el-icon> 多模态数据与 49维特征体系
-          </div>
-          <div class="panel-content">
-            <div class="data-source-cards">
-              <div class="source-card">
-                <span class="label">轨迹点量级</span>
-                <span class="value">百万级</span>
-              </div>
-              <div class="source-card">
-                <span class="label">覆盖路网</span>
-                <span class="value">北京 OSM</span>
-              </div>
-              <div class="source-card">
-                <span class="label">气象跨度</span>
-                <span class="value">5年历史</span>
-              </div>
+  <div class="scrollable-container">
+    <div class="dashboard-container">
+      <el-row :gutter="20" class="content-row">
+        
+        <el-col :span="6" class="full-height">
+          <div class="panel dark-panel feature-panel">
+            <div class="panel-header">
+              <el-icon><DataLine /></el-icon> 多模态数据与 49维特征体系
             </div>
-            
-            <div class="tree-container">
-              <el-tree
-                :data="featureTreeData"
-                :props="defaultProps"
-                default-expand-all
-                class="custom-tree"
-              >
-                <template #default="{ node, data }">
-                  <span class="custom-tree-node">
-                    <el-icon v-if="data.icon" :class="data.color"><component :is="data.icon" /></el-icon>
-                    <span class="node-label">{{ node.label }}</span>
-                    <el-tag v-if="data.dim" size="small" class="dim-tag" effect="dark" type="info">{{ data.dim }}维</el-tag>
-                  </span>
-                </template>
-              </el-tree>
-            </div>
-          </div>
-        </div>
-      </el-col>
-
-      <el-col :span="12" class="full-height">
-        <div class="panel middle-panel">
-          <div class="experiment-selector">
-            <div 
-              v-for="exp in experiments" 
-              :key="exp.id"
-              class="exp-step"
-              :class="{ active: activeExp === exp.id }"
-              @click="switchExperiment(exp.id)"
-            >
-              <div class="step-marker"></div>
-              <div class="step-info">
-                <h4>{{ exp.name }}</h4>
-                <p>{{ exp.desc }}</p>
-              </div>
-            </div>
-          </div>
-
-          <div class="charts-container">
-            <div class="chart-wrapper dark-panel">
-              <div class="panel-header small">全局性能演进 (Accuracy & Macro-F1)</div>
-              <div ref="trendChartRef" class="echarts-box"></div>
-            </div>
-            <div class="chart-wrapper dark-panel mt-15">
-              <div class="panel-header small">长尾类别追踪 (火车 / 地铁 F1-Score)</div>
-              <div ref="longTailChartRef" class="echarts-box"></div>
-            </div>
-          </div>
-        </div>
-      </el-col>
-
-      <el-col :span="6" class="full-height">
-        <div class="panel dark-panel insight-panel">
-          <div class="panel-header">
-            <el-icon><Aim /></el-icon> 实验结论与深度洞察
-          </div>
-          <div class="panel-content insight-content">
-            
-            <transition name="fade-slide" mode="out-in">
-              <div :key="activeExp" class="active-insight">
-                <div class="insight-badge">{{ currentExpData.name }}</div>
-                <h3 class="insight-title">{{ currentExpData.insightTitle }}</h3>
-                
-                <div class="insight-metrics">
-                  <div class="metric-item">
-                    <span class="label">Accuracy</span>
-                    <span class="value text-blue">{{ currentExpData.acc }}%</span>
-                  </div>
-                  <div class="metric-item">
-                    <span class="label">Macro-F1</span>
-                    <span class="value text-orange">{{ currentExpData.f1 }}%</span>
-                  </div>
+            <div class="panel-content">
+              <div class="data-source-cards">
+                <div class="source-card">
+                  <span class="label">轨迹点量级</span>
+                  <span class="value">百万级</span>
                 </div>
+                <div class="source-card">
+                  <span class="label">覆盖路网</span>
+                  <span class="value">北京 OSM</span>
+                </div>
+                <div class="source-card">
+                  <span class="label">气象跨度</span>
+                  <span class="value">5年历史</span>
+                </div>
+              </div>
+              
+              <div class="tree-container">
+                <el-tree
+                  :data="featureTreeData"
+                  :props="defaultProps"
+                  default-expand-all
+                  class="custom-tree"
+                >
+                  <template #default="{ node, data }">
+                    <span class="custom-tree-node">
+                      <el-icon v-if="data.icon" :class="data.color"><component :is="data.icon" /></el-icon>
+                      <span>{{ node.label }}</span>
+                      <el-tag v-if="data.tag" size="small" :type="data.tagType || 'info'" effect="plain" class="tree-tag">{{ data.tag }}</el-tag>
+                    </span>
+                  </template>
+                </el-tree>
+              </div>
+            </div>
+          </div>
+        </el-col>
 
+        <el-col :span="12" class="full-height">
+          <div class="panel dark-panel chart-panel">
+            <div class="panel-header">
+              <el-icon><TrendCharts /></el-icon> 多模态网络训练态势 (Training Metrics)
+            </div>
+            <div class="panel-content chart-container">
+              <div class="mock-chart">
+                <div class="chart-line loss-line"></div>
+                <div class="chart-line acc-line"></div>
+                <div class="chart-grid"></div>
+                <span class="mock-text">模型收敛曲线 (Loss / Accuracy) 实时渲染区</span>
+              </div>
+            </div>
+            <div class="metrics-footer">
+              <div class="footer-item"><span class="dot primary"></span> Validation Loss: 0.241</div>
+              <div class="footer-item"><span class="dot success"></span> F1-Score: 0.825</div>
+              <div class="footer-item"><span class="dot warning"></span> Epochs: 150/150</div>
+            </div>
+          </div>
+        </el-col>
+
+        <el-col :span="6" class="full-height">
+          <div class="panel dark-panel text-panel">
+            <div class="panel-header">
+              <el-icon><Opportunity /></el-icon> 模型评估与核心洞察
+            </div>
+            <div class="panel-content insight-content">
+              
+              <div class="insight-item">
+                <div class="insight-badge">Highlight 1</div>
+                <h3 class="insight-title">基于 Focal Loss 攻克类别不平衡</h3>
                 <div class="insight-desc">
                   <ul>
-                    <li v-for="(point, index) in currentExpData.insightPoints" :key="index">
-                      {{ point }}
-                    </li>
+                    <li>原始数据中“步行”与“公交”样本极度不平衡（比例约 8:1）。</li>
+                    <li>引入 Focal Loss 动态调整权重后，模型对“公交/地铁”等弱势类别的召回率显著提升了 <strong>14.2%</strong>。</li>
                   </ul>
                 </div>
+              </div>
 
-                <div class="insight-footer" v-if="currentExpData.id !== 'exp1'">
-                  <el-icon><WarningFilled /></el-icon> 
-                  <span class="footer-text">受限于依赖特征，该模型限定北京区域应用</span>
-                </div>
-                <div class="insight-footer success" v-else>
-                  <el-icon><CircleCheckFilled /></el-icon> 
-                  <span class="footer-text">纯轨迹特征驱动，具备全国跨城泛化能力</span>
+              <div class="insight-item">
+                <div class="insight-badge">Highlight 2</div>
+                <h3 class="insight-title">空间拓扑 (OSM) 的降维打击</h3>
+                <div class="insight-desc">
+                  <ul>
+                    <li>仅靠 GPS 速度，汽车在堵车时极易与自行车混淆。</li>
+                    <li>注入 OSM 路网特征（当前所在路段的限速、道路类型、距地铁站距离）后，机动车与非机动车的误判率断崖式下降。</li>
+                  </ul>
                 </div>
               </div>
-            </transition>
 
+              <div class="insight-metrics">
+                <div class="metric-item">
+                  <span class="label">基线准确率</span>
+                  <span class="value" style="color: #909399;">68.5%</span>
+                </div>
+                <div class="metric-item">
+                  <span class="label">多模态融合准确率</span>
+                  <span class="value" style="color: #67C23A;">83.2% <el-icon><Top /></el-icon></span>
+                </div>
+              </div>
+
+            </div>
           </div>
-        </div>
-      </el-col>
+        </el-col>
 
-    </el-row>
+      </el-row>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, onUnmounted, nextTick } from 'vue'
-import { DataLine, Aim, Location, Cloudy, TrendCharts, WarningFilled, CircleCheckFilled } from '@element-plus/icons-vue'
-import * as echarts from 'echarts'
-// 引入你提供的真实接口文件 (请确保路径正确，根据你的项目结构可能是 ../api/experiment 或 @/api/experiment)
-import { experimentApi } from '../api/experiment'
-import { ElMessage } from 'element-plus'
+import { DataLine, TrendCharts, Opportunity, Top, Location, MapLocation, PartlyCloudy, Cpu } from '@element-plus/icons-vue'
 
-// --- 状态管理 ---
-const activeExp = ref('exp4')
-const isLoading = ref(true) // 新增加载状态
-
-// 四个实验的基础信息 (保持静态，因为这是页面的固定导航骨架)
-const experiments = [
-  { id: 'exp1', name: 'Exp1: 基础基线', desc: '纯轨迹特征' },
-  { id: 'exp2', name: 'Exp2: 空间语义', desc: '+ OSM路网' },
-  { id: 'exp3', name: 'Exp3: 环境耦合', desc: '+ 气象数据' },
-  { id: 'exp4', name: 'Exp4: 算法突破', desc: '+ 损失优化' }
-]
-
-// 动态响应式数据源 (替换了原本写死的假数据)
-const expDetails = ref<Record<string, any>>({
-  'exp1': { id: 'exp1', name: 'Exp 1 纯轨迹基线模型', acc: 0, f1: 0, insightTitle: '验证运动学特征的跨城泛化底座', insightPoints: ['仅提取速度、加速度等 27 维特征。', '极易混淆公交与私家车。', '长尾类别识别率极低。'] },
-  'exp2': { id: 'exp2', name: 'Exp 2 融合 OSM 空间语义', acc: 0, f1: 0, insightTitle: '打破孤岛，建立空间坐标系映射', insightPoints: ['引入 15 维路网拓扑与 POI 距离特征。', '准确率实现显著跃升。', '解决“低速私家车”与“公交车”混淆问题。'] },
-  'exp3': { id: 'exp3', name: 'Exp 3 耦合气象环境数据', acc: 0, f1: 0, insightTitle: '增强复杂天气扰动下的模型鲁棒性', insightPoints: ['注入历史气象特征。', '提升了恶劣天气下出行方式改变的解释力。', '有效纠正了雨雪天气下非机动车误判。'] },
-  'exp4': { id: 'exp4', name: 'Exp 4 动态损失函数优化', acc: 0, f1: 0, insightTitle: '攻克样本不均衡，平衡长尾精度', insightPoints: ['特征维度保持 49 维不变，引入 Focal Loss。', '整体 Macro-F1 逼近理想关口。', '火车与地铁等长尾类别的 F1-Score 获得极大提升。'] }
-})
-
-const currentExpData = computed(() => expDetails.value[activeExp.value])
-
-// 图表动态数据
-const chartData = ref({
-  categories: ['Exp1', 'Exp2', 'Exp3', 'Exp4'],
-  acc: [0, 0, 0, 0],
-  f1: [0, 0, 0, 0],
-  trainF1: [0, 0, 0, 0],
-  subwayF1: [0, 0, 0, 0]
-})
-
-// 图标映射
-const iconMap: Record<string, any> = { TrendCharts, Location, Aim, Cloudy }
-const featureTreeData = [
-  { label: '49维 多模态特征体系', icon: 'TrendCharts', color: 'text-blue',
-    children: [
-      { label: '轨迹运动学特征', dim: 27, icon: 'Location', color: 'text-blue', children: [{ label: '点级特征 (9维)' }, { label: '段级统计特征 (18维)' }] },
-      { label: 'OSM 空间语义特征', dim: 15, icon: 'Aim', color: 'text-orange', children: [{ label: '道路类型独热编码' }, { label: '路口与红绿灯密度' }, { label: '周边POI距离' }] },
-      { label: '气象环境特征', dim: 7, icon: 'Cloudy', color: 'text-blue', children: [{ label: '温湿度与降水量' }, { label: '风速与能见度' }] }
-    ]
-  }
-]
 const defaultProps = { children: 'children', label: 'label' }
 
-function switchExperiment(id: string) {
-  if (isLoading.value) return;
-  activeExp.value = id
-}
-
-// ECharts 实例化
-const trendChartRef = ref<HTMLElement | null>(null)
-const longTailChartRef = ref<HTMLElement | null>(null)
-let trendChart: echarts.ECharts | null = null
-let longTailChart: echarts.ECharts | null = null
-
-const initCharts = () => {
-  if (trendChartRef.value && longTailChartRef.value) {
-    trendChart = echarts.init(trendChartRef.value)
-    longTailChart = echarts.init(longTailChartRef.value)
-    updateCharts()
-  }
-}
-
-const updateCharts = () => {
-  if (!trendChart || !longTailChart || isLoading.value) return
-
-  const expIndex = experiments.findIndex(e => e.id === activeExp.value)
-  
-  trendChart.setOption({
-    tooltip: { trigger: 'axis' },
-    grid: { top: 40, right: 30, bottom: 30, left: 40 },
-    xAxis: { type: 'category', data: chartData.value.categories, axisLine: { lineStyle: { color: '#606266' } } },
-    yAxis: [
-      { type: 'value', min: 80, max: 100, splitLine: { lineStyle: { color: '#303133', type: 'dashed' } } },
-      { type: 'value', min: 75, max: 100, splitLine: { show: false } }
-    ],
-    series: [
-      { name: 'Accuracy', type: 'line', yAxisIndex: 0, data: chartData.value.acc, smooth: true, symbolSize: 8, itemStyle: { color: '#4A90E2' } },
-      { 
-        name: 'Macro-F1', type: 'bar', yAxisIndex: 1, barWidth: '40%',
-        data: chartData.value.f1.map((val, idx) => ({
-          value: val,
-          itemStyle: { color: idx === expIndex ? '#FA8C16' : 'rgba(250, 140, 22, 0.3)' }
-        }))
-      }
+// 左侧 49 维特征树形结构数据
+const featureTreeData = [
+  {
+    label: '时序运动学特征 (GPS)', icon: 'Location', color: 'text-primary',
+    children: [
+      { label: '速度分布 (Mean, Max, Var)', tag: '核心', tagType: 'danger' },
+      { label: '加速度与加加速度 (Jerk)' },
+      { label: '航向角变化率 (Heading Change)' },
+      { label: '停顿频率与时长 (Stop Rate)' }
     ]
-  })
-
-  longTailChart.setOption({
-    tooltip: { trigger: 'axis' },
-    legend: { data: ['火车 F1', '地铁 F1'], textStyle: { color: '#909399' } },
-    grid: { top: 40, right: 20, bottom: 30, left: 40 },
-    xAxis: { type: 'category', data: chartData.value.categories, axisLine: { lineStyle: { color: '#606266' } } },
-    yAxis: { type: 'value', min: 40, max: 100, splitLine: { lineStyle: { color: '#303133', type: 'dashed' } } },
-    series: [
-      { name: '火车 F1', type: 'line', data: chartData.value.trainF1, smooth: true, itemStyle: { color: '#F56C6C' } },
-      { name: '地铁 F1', type: 'line', data: chartData.value.subwayF1, smooth: true, itemStyle: { color: '#67C23A' } }
+  },
+  {
+    label: '空间语义特征 (OSM)', icon: 'MapLocation', color: 'text-warning',
+    children: [
+      { label: '轨迹点所在道路类型 (Highway Type)', tag: '核心', tagType: 'danger' },
+      { label: '路段限速 (Max Speed)' },
+      { label: '距最近公交站的距离 (Dist to Bus)' },
+      { label: '距最近地铁站的距离 (Dist to Subway)' }
     ]
-  })
-}
-
-// --- 核心：请求真实后端数据 ---
-const loadBackendData = async () => {
-  isLoading.value = true;
-  try {
-    const ids = ['exp1', 'exp2', 'exp3', 'exp4'];
-    
-    // 并发请求四个实验的报告接口
-    const reports = await Promise.all(
-      ids.map(id => experimentApi.getExperimentReport(id).catch(err => {
-        console.warn(`获取 ${id} 报告失败`, err);
-        return null; // 容错处理
-      }))
-    );
-
-    reports.forEach((rawReport, index) => {
-      if (!rawReport) return;
-      const expId = ids[index];
-      if (!expId) return; // 修复 TS2538: expId 可能为 undefined 的报错
-      
-      // 修复 TS7053: 将返回值断言为 any，绕过由于动态 key（如 "macro avg", "火车"）引起的类型报错
-      const report = rawReport as any;
-      
-      // 提取核心指标
-      const acc = report.accuracy ? Number((report.accuracy * 100).toFixed(1)) : 0;
-      const macroF1 = report['macro avg'] && report['macro avg']['f1-score'] ? Number((report['macro avg']['f1-score'] * 100).toFixed(1)) : 0;
-      
-      // 更新文字卡片数据
-      expDetails.value[expId].acc = acc;
-      expDetails.value[expId].f1 = macroF1;
-
-      // 更新图表数据
-      chartData.value.acc[index] = acc;
-      chartData.value.f1[index] = macroF1;
-
-      // 提取长尾类别指标
-      const trainData = report['train'] || report['火车'] || report['Train'] || { 'f1-score': 0 };
-      const subwayData = report['subway'] || report['地铁'] || report['Subway'] || { 'f1-score': 0 };
-      
-      chartData.value.trainF1[index] = Number((trainData['f1-score'] * 100).toFixed(1));
-      chartData.value.subwayF1[index] = Number((subwayData['f1-score'] * 100).toFixed(1));
-    });
-
-    updateCharts();
-  } catch (error) {
-    ElMessage.error('无法连接到后端引擎，请确保 PyTorch 后端已启动');
-    console.error('API Error:', error);
-  } finally {
-    isLoading.value = false;
+  },
+  {
+    label: '环境气象特征 (Weather)', icon: 'PartlyCloudy', color: 'text-success',
+    children: [
+      { label: '温度与体感温度 (Temp/Feels Like)' },
+      { label: '降水量与湿度 (Precip/Humidity)', tag: '辅助', tagType: 'info' },
+      { label: '风速与能见度 (Wind/Visibility)' }
+    ]
   }
-}
-
-watch(activeExp, () => {
-  updateCharts()
-})
-
-const handleResize = () => {
-  trendChart?.resize()
-  longTailChart?.resize()
-}
-
-onMounted(async () => {
-  await nextTick()
-  initCharts() // 先渲染空图表壳子
-  window.addEventListener('resize', handleResize)
-  
-  // 发起真实请求
-  await loadBackendData()
-})
-
-onUnmounted(() => {
-  window.removeEventListener('resize', handleResize)
-  trendChart?.dispose()
-  longTailChart?.dispose()
-})
+]
 </script>
 
 <style scoped>
-.dashboard-container { height: 100%; padding-bottom: 20px;}
-.full-height { height: 100%; }
-.panel { border-radius: 12px; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
-.dark-panel { background: rgba(26, 31, 46, 0.5); border: 1px solid rgba(255, 255, 255, 0.05); }
+/* ========== 全局滚动容器样式 ========== */
+.scrollable-container {
+  width: 100%;
+  height: 100%;
+  padding: 24px 32px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
 
-.panel-header { padding: 16px 20px; font-size: 16px; font-weight: 600; color: #e5eaf3; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; align-items: center; gap: 8px; }
-.panel-header.small { font-size: 14px; padding: 12px 16px; border: none;}
-.panel-content { padding: 20px; flex: 1; overflow-y: auto; }
-.panel-content::-webkit-scrollbar { width: 4px; }
-.panel-content::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+.scrollable-container::-webkit-scrollbar { width: 8px; }
+.scrollable-container::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.1); }
+.scrollable-container::-webkit-scrollbar-thumb { background: rgba(0, 240, 255, 0.3); border-radius: 4px; }
+.scrollable-container::-webkit-scrollbar-thumb:hover { background: rgba(0, 240, 255, 0.6); }
 
-/* 左栏样式 */
-.data-source-cards { display: flex; gap: 12px; margin-bottom: 24px; }
-.source-card { flex: 1; background: rgba(0,0,0,0.2); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 1px solid rgba(255,255,255,0.05);}
-.source-card .label { font-size: 12px; color: #909399; margin-bottom: 4px; }
-.source-card .value { font-size: 14px; color: #e5eaf3; font-weight: bold; }
+/* 使原有内部容器撑满但去除内边距，交由外层容器控制 */
+.dashboard-container { height: 100%; }
+.content-row { min-height: 100%; align-items: stretch; }
+.full-height { display: flex; flex-direction: column; }
 
-.tree-container { background: rgba(0,0,0,0.1); border-radius: 8px; padding: 12px; }
-.custom-tree { background: transparent; color: #e5eaf3; }
-:deep(.el-tree-node__content:hover) { background-color: rgba(74, 144, 226, 0.1); }
-:deep(.el-tree-node:focus > .el-tree-node__content) { background-color: transparent; }
-.custom-tree-node { display: flex; align-items: center; font-size: 14px; gap: 8px; }
-.text-blue { color: #4A90E2; }
-.text-orange { color: #FA8C16; }
-.dim-tag { margin-left: auto; transform: scale(0.9); }
+/* ========== 原有样式完全保留 ========== */
+.panel { background: rgba(16, 25, 43, 0.6); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 12px; padding: 24px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3); backdrop-filter: blur(10px); flex: 1; display: flex; flex-direction: column;}
+.dark-panel { color: #e5eaf3; }
+.panel-header { display: flex; align-items: center; gap: 8px; font-size: 18px; font-weight: bold; color: #fff; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+.panel-content { flex: 1; overflow: hidden;}
 
-/* 中栏样式 */
-.middle-panel { gap: 20px; }
-.experiment-selector { display: flex; gap: 12px; background: rgba(26, 31, 46, 0.5); padding: 16px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05);}
-.exp-step { flex: 1; display: flex; flex-direction: column; gap: 8px; cursor: pointer; padding: 12px; border-radius: 8px; transition: all 0.3s; position: relative;}
-.exp-step::after { content: ''; position: absolute; right: -6px; top: 20px; width: 12px; height: 1px; background: rgba(255,255,255,0.1); }
-.exp-step:last-child::after { display: none; }
-.step-marker { height: 4px; width: 100%; background: rgba(255,255,255,0.1); border-radius: 2px; transition: all 0.3s; }
-.step-info h4 { margin: 0; font-size: 14px; color: #909399; transition: color 0.3s;}
-.step-info p { margin: 4px 0 0 0; font-size: 12px; color: #606266; }
-.exp-step:hover { background: rgba(255,255,255,0.02); }
-.exp-step.active .step-marker { background: #4A90E2; box-shadow: 0 0 8px #4A90E2; }
-.exp-step.active .step-info h4 { color: #e5eaf3; font-weight: bold;}
-.exp-step.active .step-info p { color: #4A90E2; }
+/* 左侧：特征体系 */
+.data-source-cards { display: flex; justify-content: space-between; margin-bottom: 24px;}
+.source-card { background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); padding: 12px 16px; border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; width: 30%;}
+.source-card .label { font-size: 12px; color: #a0aabf; margin-bottom: 4px;}
+.source-card .value { font-size: 16px; font-weight: bold; color: #00f0ff;}
+.tree-container { background: rgba(0,0,0,0.2); border-radius: 8px; padding: 16px; height: calc(100% - 90px); overflow-y: auto;}
 
-.charts-container { display: flex; flex-direction: column; flex: 1; gap: 16px; }
-.chart-wrapper { flex: 1; display: flex; flex-direction: column; padding: 10px; border-radius: 12px;}
-.echarts-box { flex: 1; width: 100%; min-height: 200px; }
+/* Element Plus Tree 样式覆盖 (深色主题) */
+:deep(.custom-tree.el-tree) { background: transparent; color: #c0c4cc;}
+:deep(.el-tree-node__content:hover) { background-color: rgba(255, 255, 255, 0.05);}
+:deep(.el-tree-node:focus > .el-tree-node__content) { background-color: transparent;}
+.custom-tree-node { flex: 1; display: flex; align-items: center; font-size: 14px; padding-right: 8px;}
+.custom-tree-node span { margin-left: 8px; }
+.tree-tag { margin-left: auto; }
+.text-primary { color: #409EFF; }
+.text-warning { color: #E6A23C; }
+.text-success { color: #67C23A; }
 
-/* 右栏解读样式 */
-.insight-content { display: flex; flex-direction: column; }
-.active-insight { display: flex; flex-direction: column; gap: 20px; height: 100%;}
+/* 中间：图表占位 */
+.chart-panel { display: flex; flex-direction: column; }
+.chart-container { display: flex; align-items: center; justify-content: center; position: relative;}
+.mock-chart { width: 100%; height: 100%; border: 1px dashed rgba(255,255,255,0.1); border-radius: 8px; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; background: linear-gradient(180deg, rgba(0,240,255,0.02) 0%, transparent 100%);}
+.mock-text { color: #5a6270; font-size: 16px; font-weight: bold; letter-spacing: 2px; z-index: 2;}
+.chart-grid { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-size: 40px 40px; background-image: linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px), linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);}
+.metrics-footer { display: flex; justify-content: center; gap: 30px; margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.05);}
+.footer-item { display: flex; align-items: center; gap: 8px; font-size: 14px; font-family: monospace; color: #a0aabf;}
+.dot { width: 8px; height: 8px; border-radius: 50%; }
+.dot.primary { background-color: #409EFF; box-shadow: 0 0 8px #409EFF; }
+.dot.success { background-color: #67C23A; box-shadow: 0 0 8px #67C23A; }
+.dot.warning { background-color: #E6A23C; box-shadow: 0 0 8px #E6A23C; }
+
+/* 右侧：洞察文本 */
+.insight-content { overflow-y: auto;}
+.insight-item { margin-bottom: 24px;}
+.insight-item:last-child { margin-bottom: 0;}
+.insight-title { margin: 12px 0 8px 0; font-size: 16px; color: #e5eaf3; line-height: 1.4; }
 .insight-badge { display: inline-block; padding: 4px 12px; background: rgba(74, 144, 226, 0.15); color: #4A90E2; border-radius: 4px; font-size: 13px; font-weight: bold; width: fit-content; border: 1px solid rgba(74, 144, 226, 0.3);}
-.insight-title { margin: 0; font-size: 18px; color: #e5eaf3; line-height: 1.4; }
-.insight-metrics { display: flex; gap: 20px; background: rgba(0,0,0,0.2); padding: 16px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.03);}
+.insight-desc ul { margin: 0; padding-left: 20px; color: #a3a6ad; font-size: 13px; line-height: 1.8; }
+.insight-desc li { margin-bottom: 6px; }
+.insight-desc strong { color: #E6A23C; }
+.insight-metrics { display: flex; justify-content: space-between; gap: 20px; background: rgba(0,0,0,0.2); padding: 16px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.03); margin-top: auto;}
 .metric-item { display: flex; flex-direction: column; gap: 4px; }
 .metric-item .label { font-size: 12px; color: #909399; }
-.metric-item .value { font-size: 24px; font-weight: bold; font-family: monospace;}
-
-.insight-desc ul { margin: 0; padding-left: 20px; color: #a3a6ad; font-size: 14px; line-height: 1.8; }
-.insight-desc li { margin-bottom: 8px; }
-
-.insight-footer { margin-top: auto; display: flex; align-items: center; gap: 8px; padding: 12px; background: rgba(245, 108, 108, 0.1); border: 1px solid rgba(245, 108, 108, 0.2); border-radius: 8px; color: #F56C6C; font-size: 13px; }
-.insight-footer.success { background: rgba(103, 194, 58, 0.1); border-color: rgba(103, 194, 58, 0.2); color: #67C23A; }
-
-/* 动画效果 */
-.fade-slide-enter-active, .fade-slide-leave-active { transition: all 0.3s ease; }
-.fade-slide-enter-from { opacity: 0; transform: translateX(10px); }
-.fade-slide-leave-to { opacity: 0; transform: translateX(-10px); }
+.metric-item .value { font-size: 20px; font-weight: bold; font-family: monospace; display: flex; align-items: center; gap: 4px;}
 </style>

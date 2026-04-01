@@ -15,7 +15,7 @@ const router = createRouter({
     {
       path: '/',
       component: AppLayout,
-      // 只要是在 AppLayout 下面的子路由，都会被加上顶部导航栏
+      // 恢复你所有的原有层级和 name，保证 PageHeader 导航栏不崩溃
       children: [
         {
           path: '',
@@ -27,48 +27,47 @@ const router = createRouter({
           path: 'dashboard',
           name: 'dashboard',
           component: () => import('../views/DataDashboard.vue'),
-          meta: { title: '数据与实验驾驶舱' }
+          meta: { title: 'TrafficRec 多模态数据大屏' } // 只改了展示文字
         },
         {
           path: 'congestion-analysis',
           name: 'congestion',
           component: () => import('../views/CongestionAnalysis.vue'),
-          meta: { title: '应用验证A：拥堵溯源解析' }
+          meta: { title: '场景验证 A：拥堵溯源' }
         },
         {
           path: 'green-travel',
           name: 'green',
           component: () => import('../views/GreenTravel.vue'),
-          meta: { title: '应用验证B：绿色出行与碳普惠' }
+          meta: { title: '场景验证 B：碳足迹与普惠' }
         },
         {
           path: 'tech-support',
           name: 'tech',
           component: () => import('../views/TechSupport.vue'),
-          meta: { title: '技术支撑与系统架构' }
+          meta: { title: '核心算法与模型演进' }
         },
-        // 👇 修复报错1：新增个人中心的路由注册
         {
           path: 'user-center',
           name: 'userCenter',
           component: () => import('../views/UserCenterView.vue'),
           meta: { title: '个人中心' }
-        }
+        },
+        { path: 'verification/congestion', redirect: '/congestion-analysis' },
+        { path: 'verification/green', redirect: '/green-travel' },
+        { path: 'tech', redirect: '/tech-support' },
+        { path: 'user', redirect: '/user-center' }
       ],
     },
   ],
 })
 
-// 👇 修复报错2：使用 Vue Router 4 推荐的 return 语法替代 next()
 router.beforeEach((to, from) => {
   const authStore = useAuthStore() 
-  
-  // 判断该目标路由是否需要鉴权
   if (to.path !== '/login' && !authStore.isAuthenticated()) {
-    return { path: '/login' } // 强行重定向到登录页
+    return { path: '/login' } 
   } 
-  
-  return true // 检票通过，放行
+  return true 
 })
 
 export default router

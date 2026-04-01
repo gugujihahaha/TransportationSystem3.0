@@ -262,7 +262,11 @@ onUnmounted(() => { if (map) { map.remove(); map = null } })
 
 <style scoped>
 /* 保持所有完美的地图与布局样式 */
-.congestion-container { height: 100%; padding-bottom: 20px;}
+.congestion-container { 
+  height: calc(100vh - 70px); 
+  padding: 20px; 
+  box-sizing: border-box;
+}
 .full-height { height: 100%; }
 .panel { border-radius: 12px; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
 .dark-panel { background: rgba(26, 31, 46, 0.5); border: 1px solid rgba(255, 255, 255, 0.05); }
@@ -274,7 +278,14 @@ onUnmounted(() => { if (map) { map.remove(); map = null } })
 .flex-1 { flex: 1; }
 
 .map-wrapper { padding: 0; background: #0b0d12; position: relative; }
-.leaflet-map { width: 100%; height: 100%; z-index: 1;}
+.leaflet-map { 
+  position: absolute; 
+  top: 0; 
+  left: 0; 
+  width: 100%; 
+  height: 100%; 
+  z-index: 1;
+}
 
 :deep(.dark-map-tiles) { filter: brightness(0.7) invert(1) contrast(1.2) hue-rotate(200deg); }
 :deep(.custom-end-marker) { background: transparent; border: none; }

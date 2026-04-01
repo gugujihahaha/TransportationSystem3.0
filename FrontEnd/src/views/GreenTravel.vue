@@ -100,7 +100,7 @@ import { Compass, Bicycle, UploadFilled, Guide, WindPower, Sunny, Tickets } from
 import { ElMessage } from 'element-plus'
 import { trajectoryApi } from '../api/trajectory'
 
-// 引入 Leaflet 核心库与样式 (吸收学长的 GIS 基因)
+// 引入 Leaflet 核心库与样式 (吸收 的 GIS 基因)
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
@@ -193,7 +193,7 @@ const simulateTyping = (text: string) => {
 }
 
 // ==========================================
-// 🗺️ Leaflet 真实 GIS 地图渲染引擎 (移植自学长代码)
+// 🗺️ Leaflet 真实 GIS 地图渲染引擎 (移植自 代码)
 // ==========================================
 
 const initLeafletMap = () => {
@@ -284,7 +284,11 @@ onUnmounted(() => {
 
 <style scoped>
 /* 保持原有 UI 样式 */
-.green-container { height: 100%; padding-bottom: 20px;}
+.green-container { 
+  height: calc(100vh - 70px); 
+  padding: 20px; 
+  box-sizing: border-box;
+}
 .full-height { height: 100%; }
 .panel { border-radius: 12px; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
 .dark-panel { background: rgba(26, 31, 46, 0.5); border: 1px solid rgba(255, 255, 255, 0.05); }
@@ -297,11 +301,18 @@ onUnmounted(() => {
 
 .map-wrapper { padding: 0; background: #0b0d12; position: relative; }
 /* Leaflet 容器必须指定宽和高 */
-.leaflet-map { width: 100%; height: 100%; z-index: 1;}
+.leaflet-map { 
+  position: absolute; 
+  top: 0; 
+  left: 0; 
+  width: 100%; 
+  height: 100%; 
+  z-index: 1;
+}
 
 /* 可选：给地图加一点点暗色滤镜，适应整体的科技感风格 */
 :deep(.dark-map-tiles) { filter: brightness(0.7) invert(1) contrast(1.2) hue-rotate(200deg); }
-/* 消除学长终点标记自带的背景 */
+/* 消除 终点标记自带的背景 */
 :deep(.custom-end-marker) { background: transparent; border: none; }
 
 .map-legend { position: absolute; bottom: 20px; right: 20px; background: rgba(0,0,0,0.7); padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(4px); z-index: 1000;}
