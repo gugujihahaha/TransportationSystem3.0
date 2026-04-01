@@ -6,18 +6,18 @@
         <div class="panel dark-panel map-panel">
           <div class="panel-header">
             <div class="header-left">
-              <el-icon><Compass /></el-icon> 跨城轨迹泛化识别与碳足迹渲染
+              <el-icon><Compass /></el-icon> 跨城轨迹泛化识别与真实路网映射
             </div>
             <div class="header-actions">
-              <el-tag size="small" type="success" effect="dark">驱动引擎: Exp4 焦点损失优化模型</el-tag>
+              <el-tag size="small" type="success" effect="dark">驱动引擎: Exp1 纯轨迹基线模型</el-tag>
             </div>
           </div>
-          <div class="panel-content map-wrapper" v-loading="isAnalyzing" element-loading-text="PyTorch 模型跨城特征提取与推理中..." element-loading-background="rgba(11, 13, 18, 0.8)">
-            <div ref="mapChartRef" class="echarts-map"></div>
+          <div class="panel-content map-wrapper" v-loading="isAnalyzing" element-loading-text="PyTorch 引擎推理中..." element-loading-background="rgba(11, 13, 18, 0.8)">
+            <div ref="mapContainer" class="leaflet-map"></div>
             
             <div class="map-legend">
-              <div class="legend-item"><span class="line green"></span> 绿色出行 (步行/骑行/公交/地铁)</div>
-              <div class="legend-item"><span class="line grey"></span> 高碳出行 (私家车/网约车)</div>
+              <div class="legend-item"><span class="line green"></span> 绿色出行 (公交/地铁/骑行/步行)</div>
+              <div class="legend-item"><span class="line red"></span> 高碳出行 (私家车/出租车)</div>
             </div>
           </div>
         </div>
@@ -97,26 +97,32 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted, nextTick } from 'vue'
 import { Compass, Bicycle, UploadFilled, Guide, WindPower, Sunny, Tickets } from '@element-plus/icons-vue'
-import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import { trajectoryApi } from '../api/trajectory'
+
+// 引入 Leaflet 核心库与样式 (吸收学长的 GIS 基因)
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 
 // --- 状态与变量 ---
 const hasData = ref(false)
 const isAnalyzing = ref(false)
 const aiReport = ref('')
-const mapChartRef = ref<HTMLElement | null>(null)
-let mapChart: echarts.ECharts | null = null
 
-// 统计数据响应式对象
+// Leaflet 地图变量
+const mapContainer = ref<HTMLElement | null>(null)
+let map: L.Map | null = null
+let currentPolyline: L.Polyline | null = null
+let markers: L.Layer[] = []
+
+// 统计数据
 const stats = reactive({
   greenDistance: '0.00',
   co2Saved: '0.00',
   treesPlanted: '0.0'
 })
 
-// --- 核心：完全基于真实数据的解析逻辑 ---
-// --- 核心：完全基于真实数据的解析逻辑 ---
+// --- 核心业务逻辑 ---
 const handleFileUpload = async (uploadFile: any) => {
   const file = uploadFile.raw;
   if (!file) return;
@@ -126,22 +132,16 @@ const handleFileUpload = async (uploadFile: any) => {
   aiReport.value = '';
   
   try {
-    // 调用接口，使用 exp1 模型
     const response = await trajectoryApi.predict(file, 'exp1'); 
     const result = response as any; 
     
-    console.log("========== [碳普惠] 后端真实返回 ==========", result);
-
-    // 1. 获取真实的预测模式和真实物理距离
     const mode = result.predicted_mode || 'unknown';
     const distanceMeters = result.stats?.distance || 0;
     const distanceKm = (distanceMeters / 1000).toFixed(2); 
 
-    // 👇 【关键点】：这里定义了 isGreen，判断是不是绿色出行
     const lowerMode = mode.toLowerCase();
     const isGreen = ['walk', 'bike', 'bus', 'subway', '步行', '自行车', '公交车', '地铁'].includes(lowerMode);
 
-    // 3. 真实核算碳减排
     const calcGreenDist = isGreen ? distanceKm : '0.00';
     const calcCo2 = (Number(calcGreenDist) * 0.15).toFixed(2); 
     const calcTrees = (Number(calcCo2) * 0.05).toFixed(1);     
@@ -152,121 +152,138 @@ const handleFileUpload = async (uploadFile: any) => {
 
     hasData.value = true;
     
-    // 4. 将真实的 GPS 点数组交由 ECharts 渲染，同时传入上面定义的 isGreen
+    // 将真实经纬度交给 Leaflet 渲染
     if (result.points && result.points.length > 0) {
-      renderRealTrajectory(result.points, isGreen);
+      renderLeafletTrajectory(result.points, isGreen);
     } else {
-      ElMessage.warning('后端推理成功，但未返回可渲染的经纬度 points 数组');
+      ElMessage.warning('未能解析出坐标数据，无法在地图上绘制');
     }
 
-    // 5. 根据真实数据拼接战报
     generateAIReport(calcGreenDist, calcCo2, calcTrees, translateMode(mode));
-
     ElMessage.success(`模型解析完毕！真实判定为：${translateMode(mode)}`);
 
   } catch (error) {
-    ElMessage.error('模型推理失败，请检查轨迹文件格式或后端服务状态');
+    ElMessage.error('模型推理失败，请检查服务状态');
     console.error('Prediction Error:', error);
   } finally {
     isAnalyzing.value = false;
   }
 }
 
-// 辅助：中英文出行方式映射
 const translateMode = (mode: string) => {
   const map: Record<string, string> = { 'car': '私家车', 'bus': '公交车', 'walk': '步行', 'bike': '自行车', 'subway': '地铁', 'train': '火车' };
   return map[mode.toLowerCase()] || mode;
 }
 
-// 动态生成绝对真实的报告文案
 const generateAIReport = (dist: string, co2: string, trees: string, modeName: string) => {
   aiReport.value = ''
-  let reportText = `<b>[解析完成]</b><br/>系统已成功使用 Exp1 纯轨迹泛化模型对上传的 GPS 序列进行特征提取。模型判定本次真实出行为：<b>${modeName}</b>。<br/><br/>`
-  
+  let reportText = `<b>[解析完成]</b><br/>系统已成功使用 Exp1 纯轨迹泛化模型进行特征提取。模型判定本次真实出行为：<b>${modeName}</b>。<br/><br/>`
   if (Number(dist) > 0) {
-    reportText += `这是一次完美的低碳出行！您的绿色出行里程达到 <b>${dist}km</b>。<br/><br/>经核算，相比全程驾驶高碳排交通工具，您本次出行累计减少了 <b>${co2}kg</b> 碳排放，相当于种下了 <b>${trees}棵树</b>。感谢您为城市低碳生态做出的贡献！`
+    reportText += `这是一次完美的低碳出行！您的绿色出行里程达到 <b>${dist}km</b>。<br/>累计减少了 <b>${co2}kg</b> 碳排放，相当于种下了 <b>${trees}棵树</b>。`
   } else {
-    reportText += `经识别，本次出行为高碳排交通方式。如果将这 <b>${dist === '0.00' ? '段' : dist}</b> 行程替换为公共交通或慢行系统，您可以大幅减少城市碳足迹，期待您下次选择绿色出行！`
+    reportText += `经识别，本次出行为高碳排交通方式。期待您下次选择公共交通或慢行系统，减少城市碳足迹！`
   }
   simulateTyping(reportText)
 }
 
-// --- ECharts 地图渲染 ---
-const initMapChart = () => {
-  if (!mapChartRef.value) return
-  mapChart = echarts.init(mapChartRef.value)
-  mapChart.setOption({
-    backgroundColor: 'transparent',
-    // 必须设置 scale: true，否则无法适应真实的经纬度极值坐标
-    xAxis: { type: 'value', scale: true, show: false },
-    yAxis: { type: 'value', scale: true, show: false },
-    series: [] 
-  })
-}
-
-// 核心：基于真实的 3000+ 个坐标点绘制轨迹
-// 核心：基于真实的 3000+ 个坐标点绘制轨迹
-const renderRealTrajectory = (points: any[], isGreen: boolean) => {
-  if (!mapChart) return
-
-  // 灵活解析各种可能格式的后端经纬度 (增加了对 longitude/latitude 全拼的支持)
-  const echartsData = points.map(p => {
-    if (Array.isArray(p)) return [p[0], p[1]]; 
-    return [
-      p.lng || p.lon || p.longitude || p.x || p[0], 
-      p.lat || p.latitude || p.y || p[1]
-    ];
-  }).filter(p => p[0] !== undefined && p[1] !== undefined);
-
-  if (echartsData.length === 0) {
-    ElMessage.warning('警告：轨迹点解析失败，请按 F12 检查后端经纬度字段名！');
-    return;
-  }
-
-  const lineColor = isGreen ? '#67C23A' : '#909399';
-  const lineName = isGreen ? '绿色出行' : '高碳出行';
-
-  mapChart.setOption({
-    // 【关键修复】：必须在这里重新声明 xAxis 和 yAxis，否则会被末尾的 true 彻底清空！
-    xAxis: { type: 'value', scale: true, show: false },
-    yAxis: { type: 'value', scale: true, show: false },
-    series: [
-      {
-        type: 'line', 
-        data: echartsData,
-        lineStyle: { color: lineColor, width: 4 }, 
-        smooth: false, // 关闭平滑，展示真实的 GPS 噪点折线特征
-        symbol: 'none', 
-        name: lineName
-      }
-    ]
-  }, true); // true 表示清空上一次画的线，只保留当前配置
-}
-
-// 打字机动效
 let typingTimer: any = null
 const simulateTyping = (text: string) => {
   if (typingTimer) clearInterval(typingTimer)
-  aiReport.value = ''
   aiReport.value = text 
 }
 
-const handleResize = () => mapChart?.resize()
+// ==========================================
+// 🗺️ Leaflet 真实 GIS 地图渲染引擎 (移植自学长代码)
+// ==========================================
+
+const initLeafletMap = () => {
+  if (!mapContainer.value) return
+  
+  // 初始化地图，默认中心设置在北京天安门附近
+  map = L.map(mapContainer.value).setView([39.9042, 116.4074], 12)
+
+  // 挂载 OpenStreetMap 真实街道瓦片
+  // 为了搭配你的暗色 UI，这里加上了一层滤镜让地图显得高级一点，你也可以删掉 className
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors',
+    maxZoom: 19,
+    className: 'dark-map-tiles' 
+  }).addTo(map)
+}
+
+const renderLeafletTrajectory = (points: any[], isGreen: boolean) => {
+  if (!map) return
+
+  // 1. 清理上一条轨迹和标记
+  if (currentPolyline) map.removeLayer(currentPolyline)
+  markers.forEach(m => map!.removeLayer(m))
+  markers = []
+
+  // 2. 提取并清洗坐标点 (注意 Leaflet 需要 [纬度lat, 经度lng] 的顺序)
+  const latLngs = points.map(p => {
+    const lat = p.lat || p.latitude || p.y || (Array.isArray(p) ? p[1] : undefined);
+    const lng = p.lng || p.lon || p.longitude || p.x || (Array.isArray(p) ? p[0] : undefined);
+    return [lat, lng] as [number, number];
+  }).filter(p => p[0] !== undefined && p[1] !== undefined);
+
+  if (latLngs.length === 0) return;
+
+  // 3. 画轨迹线：绿色代表低碳，红色代表高碳
+  const lineColor = isGreen ? '#67C23A' : '#F56C6C';
+  
+  currentPolyline = L.polyline(latLngs, {
+    color: lineColor,
+    weight: 5,
+    opacity: 0.85,
+    lineCap: 'round',
+    lineJoin: 'round'
+  }).addTo(map);
+
+  // 4. 起终点标记
+  const startPoint = latLngs[0] as [number, number];
+  const endPoint = latLngs[latLngs.length - 1] as [number, number];
+  // 起点：绿色小圆点
+  const startMarker = L.circleMarker(startPoint, {
+    radius: 7,
+    fillColor: '#52C41A',
+    color: '#fff',
+    weight: 2,
+    fillOpacity: 1,
+  }).addTo(map);
+  startMarker.bindTooltip('起点', { permanent: false, direction: 'top' });
+
+  // 终点：红色小方块
+const endMarker = L.marker(endPoint, {
+    icon: L.divIcon({
+      className: 'custom-end-marker',
+      html: '<div style="width: 14px; height: 14px; background: #F5222D; border: 2px solid #fff; border-radius: 2px; box-shadow: 0 0 5px rgba(0,0,0,0.5);"></div>',
+      iconSize: [14, 14],
+      iconAnchor: [7, 7],
+    }),
+  }).addTo(map);
+  endMarker.bindTooltip('终点', { permanent: false, direction: 'top' });
+
+  markers.push(startMarker, endMarker);
+
+  // 5. 灵魂魔法：地图视角自动平滑缩放至恰好容纳整条轨迹！
+  map.fitBounds(currentPolyline.getBounds(), { padding: [50, 50], animate: true, duration: 1 });
+}
 
 onMounted(async () => {
   await nextTick()
-  initMapChart()
-  window.addEventListener('resize', handleResize)
+  initLeafletMap()
 })
 
 onUnmounted(() => {
-  window.removeEventListener('resize', handleResize)
-  mapChart?.dispose()
+  if (map) {
+    map.remove()
+    map = null
+  }
 })
 </script>
 
 <style scoped>
-/* 样式部分保持一致 */
+/* 保持原有 UI 样式 */
 .green-container { height: 100%; padding-bottom: 20px;}
 .full-height { height: 100%; }
 .panel { border-radius: 12px; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
@@ -278,14 +295,21 @@ onUnmounted(() => {
 .flex-col { display: flex; flex-direction: column; gap: 20px; }
 .flex-1 { flex: 1; }
 
-.map-wrapper { padding: 0; background: #0b0d12; }
-.echarts-map { width: 100%; height: 100%; }
-.map-legend { position: absolute; bottom: 20px; right: 20px; background: rgba(0,0,0,0.6); padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(4px); z-index: 10;}
+.map-wrapper { padding: 0; background: #0b0d12; position: relative; }
+/* Leaflet 容器必须指定宽和高 */
+.leaflet-map { width: 100%; height: 100%; z-index: 1;}
+
+/* 可选：给地图加一点点暗色滤镜，适应整体的科技感风格 */
+:deep(.dark-map-tiles) { filter: brightness(0.7) invert(1) contrast(1.2) hue-rotate(200deg); }
+/* 消除学长终点标记自带的背景 */
+:deep(.custom-end-marker) { background: transparent; border: none; }
+
+.map-legend { position: absolute; bottom: 20px; right: 20px; background: rgba(0,0,0,0.7); padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(4px); z-index: 1000;}
 .legend-item { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #e5eaf3; margin-bottom: 8px;}
 .legend-item:last-child { margin-bottom: 0;}
 .line { width: 20px; height: 4px; border-radius: 2px; }
 .line.green { background: #67C23A; box-shadow: 0 0 5px #67C23A;}
-.line.grey { background: #909399; }
+.line.red { background: #F56C6C; box-shadow: 0 0 5px #F56C6C;}
 
 .section-box { background: rgba(0,0,0,0.2); border-radius: 8px; padding: 16px; border: 1px solid rgba(255,255,255,0.03); transition: all 0.3s;}
 .box-title { font-size: 14px; color: #a3a6ad; margin-bottom: 16px; font-weight: 500; display: flex; align-items: center;}
