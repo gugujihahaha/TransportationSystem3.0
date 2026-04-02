@@ -112,3 +112,15 @@ class UserResponse(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str
+
+class HistoryRecord(BaseModel):
+    id: int
+    trajectory_id: str
+    model_id: str
+    predicted_mode: str
+    confidence: float
+    distance: float
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

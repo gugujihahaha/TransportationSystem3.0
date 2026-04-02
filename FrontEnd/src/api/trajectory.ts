@@ -1,26 +1,42 @@
 import { useAuthStore } from '@/stores/auth';
 
 export const trajectoryApi = {
-  // 原生 fetch 改造的预测接口 
-  async predict(file: File, modelId: string) {
-    const authStore = useAuthStore(); // 👈 第一步：去兜里把钥匙拿出来
+  // 1. 获取所有交通方式的配置
+  async getModes() {
+    const authStore = useAuthStore();
+    const response = await fetch('/api/trajectory/modes', {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${authStore.token}`
+      }
+    });
 
+    if (!response.ok) {
+      if (response.status === 401) {
+        authStore.logout();
+        throw new Error('登录已过期，请重新登录');
+      }
+      throw new Error(`获取交通配置失败，状态码: ${response.status}`);
+    }
+    return await response.json();
+  },
+
+  // 2. 原生 fetch 改造的预测接口 
+  async predict(file: File, modelId: string) {
+    const authStore = useAuthStore(); 
     const formData = new FormData()
     formData.append('file', file)
     formData.append('modelId', modelId)
 
-    // 使用 /api 触发 vite.config.ts 的跨域代理
     const response = await fetch('/api/trajectory/predict', {
       method: 'POST',
       headers: {
-        // 👈 第二步：把钥匙（Token）塞进请求头里！注意 Bearer 后面有个空格
         'Authorization': `Bearer ${authStore.token}` 
       },
       body: formData
     })
 
     if (!response.ok) {
-      // 捕获 401 错误，可以提示用户重新登录
       if (response.status === 401) {
           throw new Error('登录已过期，请重新登录');
       }
@@ -29,8 +45,28 @@ export const trajectoryApi = {
     return await response.json()
   },
 
-  // LLM 流式报告接口 (SSE 新增功能)
-async streamReport(
+  // 3. 获取真实历史记录接口
+  async getHistory() {
+    const authStore = useAuthStore();
+    const response = await fetch('/api/trajectory/history', {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${authStore.token}` 
+      }
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        authStore.logout();
+        throw new Error('登录已过期');
+      }
+      throw new Error(`获取历史失败，状态码: ${response.status}`);
+    }
+    return await response.json();
+  },
+
+  // 4. LLM 流式报告接口 (SSE)
+  async streamReport(
     params: { 
       model_id: string; 
       mode: string; 

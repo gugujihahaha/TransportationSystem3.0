@@ -5,6 +5,10 @@ import { trajectoryApi } from '@/api/trajectory'
 
 export const useTrajectoryStore = defineStore('trajectory', () => {
   const predictions = ref<TrajectoryPrediction[]>([])
+  
+  // 用于存储从数据库拉取的真实历史记录
+  const history = ref<any[]>([]) 
+  
   const selectedTrajectory = ref<TrajectoryPrediction | null>(null)
   const transportModes = ref<TransportMode[]>([])
   const loading = ref(false)
@@ -41,6 +45,15 @@ export const useTrajectoryStore = defineStore('trajectory', () => {
     }
   }
 
+  // 拉取真实历史记录的方法
+  async function fetchHistory() {
+    try {
+      history.value = await trajectoryApi.getHistory()
+    } catch (e) {
+      console.error('拉取真实历史失败:', e)
+    }
+  }
+
   function selectTrajectory(trajectory: TrajectoryPrediction) {
     selectedTrajectory.value = trajectory
   }
@@ -52,6 +65,7 @@ export const useTrajectoryStore = defineStore('trajectory', () => {
 
   return {
     predictions,
+    history,             // 导出
     selectedTrajectory,
     transportModes,
     loading,
@@ -59,6 +73,7 @@ export const useTrajectoryStore = defineStore('trajectory', () => {
     filteredPredictions,
     loadTransportModes,
     predictTrajectory,
+    fetchHistory,        // 导出
     selectTrajectory,
     clearPredictions,
   }
