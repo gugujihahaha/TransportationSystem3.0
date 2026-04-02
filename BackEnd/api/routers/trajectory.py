@@ -14,6 +14,11 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from api.models import User
 from api.security import get_current_user
 
+from sqlalchemy.orm import Session
+from api.database import get_db
+from api.models import TrajectoryHistory
+from api.schemas import HistoryRecord
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from api.schemas import (
@@ -482,7 +487,7 @@ def predict_with_model(traj_features: np.ndarray, segment_stats: np.ndarray,
     return None, None
 
 @router.post("/predict", response_model=TrajectoryPrediction)
-async def predict_trajectory(file: UploadFile = File(...), modelId: str = Form('exp1')):
+async def predict_trajectory(file: UploadFile = File(...), modelId: str = Form('exp1'),db: Session = Depends(get_db),current_user: User = Depends(get_current_user)):
     model = modelId  # 将接收到的 modelId 赋值给内部逻辑使用的 model 变量
     """上传GPS文件并预测交通方式"""
     if not predictors:
@@ -584,7 +589,18 @@ async def predict_trajectory(file: UploadFile = File(...), modelId: str = Form('
             avg_speed=float(avg_speed),
             max_speed=float(max_speed)
         )
-        
+
+        new_history = TrajectoryHistory(
+            user_id=current_user.id,
+            trajectory_id=trajectory_id,
+            model_id=modelId,
+            predicted_mode=predicted_mode,
+            confidence=float(confidence),
+            distance=float(total_distance)
+        )
+        db.add(new_history)
+        db.commit()
+
         return TrajectoryPrediction(
             trajectory_id=trajectory_id,
             predicted_mode=predicted_mode,
@@ -669,3 +685,17 @@ async def generate_deepseek_stream(req: ReportRequest):
 @router.post("/generate_report_stream")
 async def generate_report_stream(req: ReportRequest, current_user: User = Depends(get_current_user)):
     return StreamingResponse(generate_deepseek_stream(req), media_type="text/event-stream")
+
+
+@router.get("/history", response_model=List[HistoryRecord])
+async def get_prediction_history(
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """获取当前登录用户的真实推断历史记录"""
+    # 查询当前用户的所有记录，按时间倒序排列
+    records = db.query(TrajectoryHistory).filter(
+        TrajectoryHistory.user_id == current_user.id
+    ).order_by(TrajectoryHistory.created_at.desc()).all()
+
+    return records
