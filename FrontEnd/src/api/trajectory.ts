@@ -1,7 +1,7 @@
 import { useAuthStore } from '@/stores/auth';
 
 export const trajectoryApi = {
-  // 1. 获取所有交通方式的配置
+  // 获取所有交通方式的配置
   async getModes() {
     const authStore = useAuthStore();
     const response = await fetch('/api/trajectory/modes', {
@@ -21,13 +21,13 @@ export const trajectoryApi = {
     return await response.json();
   },
 
-  // 2. 原生 fetch 改造的预测接口 
-  async predict(file: File, modelId: string) {
+  // 原生 fetch 改造的预测接口 
+  async predict(file: File, modelId: string, scene: string = 'unknown') {
     const authStore = useAuthStore(); 
     const formData = new FormData()
     formData.append('file', file)
     formData.append('modelId', modelId)
-
+    formData.append('scene', scene)
     const response = await fetch('/api/trajectory/predict', {
       method: 'POST',
       headers: {
@@ -44,8 +44,17 @@ export const trajectoryApi = {
     }
     return await response.json()
   },
-
-  // 3. 获取真实历史记录接口
+  // 新增一个根据 ID 获取单条记录的接口
+  async getHistoryById(id: string) {
+    const authStore = useAuthStore();
+    const response = await fetch(`/api/trajectory/history/${id}`, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${authStore.token}` }
+    });
+    if (!response.ok) throw new Error('获取失败');
+    return await response.json();
+  },
+  // 获取真实历史记录接口
   async getHistory() {
     const authStore = useAuthStore();
     const response = await fetch('/api/trajectory/history', {
@@ -65,7 +74,7 @@ export const trajectoryApi = {
     return await response.json();
   },
 
-  // 4. LLM 流式报告接口 (SSE)
+  // LLM 流式报告接口 (SSE)
   async streamReport(
     params: { 
       model_id: string; 

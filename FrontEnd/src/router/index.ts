@@ -15,7 +15,6 @@ const router = createRouter({
     {
       path: '/',
       component: AppLayout,
-      // 恢复你所有的原有层级和 name，保证 PageHeader 导航栏不崩溃
       children: [
         {
           path: '',
@@ -27,7 +26,13 @@ const router = createRouter({
           path: 'dashboard',
           name: 'dashboard',
           component: () => import('../views/DataDashboard.vue'),
-          meta: { title: 'TrafficRec 多模态数据大屏' } // 只改了展示文字
+          meta: { title: 'TrafficRec 多模态数据大屏' }
+        },
+        {
+          path: 'history', // 👈 [新增] 独立的历史档案页
+          name: 'history',
+          component: () => import('../views/HistoryView.vue'),
+          meta: { title: '历史轨迹档案' }
         },
         {
           path: 'congestion-analysis',

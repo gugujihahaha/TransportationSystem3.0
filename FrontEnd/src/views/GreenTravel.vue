@@ -12,7 +12,7 @@
               <el-tag size="small" type="success" effect="dark">驱动引擎: Exp1 纯轨迹基线模型</el-tag>
             </div>
           </div>
-          <div class="panel-content map-wrapper" v-loading="isAnalyzing" element-loading-text="PyTorch 引擎推理中..." element-loading-background="rgba(11, 13, 18, 0.8)">
+          <div class="panel-content map-wrapper" v-loading="isAnalyzing" element-loading-text="历史数据追溯与渲染中..." element-loading-background="rgba(11, 13, 18, 0.8)">
             <div ref="mapContainer" class="leaflet-map"></div>
             
             <div class="map-legend">
@@ -86,7 +86,7 @@
               <div class="ai-content" ref="scrollBox">
                 <div v-if="!aiReport && !isGeneratingReport" class="empty-text">等待模型分析完成...</div>
                 <div v-if="isGeneratingReport && !aiReport" class="empty-text" style="color: #4A90E2; animation: pulse 1s infinite;">
-                  星火大模型正在为你定制朋友圈文案...
+                  星火大模型正在为你定制文案...
                 </div>
                 <div v-else-if="aiReport" class="typing-text">
                   <span v-html="formattedReport"></span>
@@ -141,6 +141,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted, nextTick, computed } from 'vue'
+import { useRoute } from 'vue-router'
 import { Compass, Bicycle, UploadFilled, Guide, WindPower, Sunny, Tickets } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { trajectoryApi } from '../api/trajectory'
@@ -149,6 +150,7 @@ import html2pdf from 'html2pdf.js'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
+const route = useRoute()
 const authStore = useAuthStore()
 const userName = computed(() => authStore.username || '首席交通体验官')
 const currentDate = new Date().toLocaleDateString()
@@ -171,7 +173,6 @@ const stats = reactive({
   treesPlanted: '0.0'
 })
 
-// 增强版 Markdown 解析器（处理 ### 标题、加粗和换行）
 const formattedReport = computed(() => {
   if (!aiReport.value) return ''
   return aiReport.value
@@ -190,7 +191,8 @@ const handleFileUpload = async (uploadFile: any) => {
   aiReport.value = '';
   
   try {
-    const response = await trajectoryApi.predict(file, 'exp1'); 
+    // 重点修改：向后端发送 scene = 'green'
+    const response = await trajectoryApi.predict(file, 'exp1', 'green'); 
     const result = response as any; 
     
     const mode = result.predicted_mode || 'unknown';
@@ -227,6 +229,44 @@ const handleFileUpload = async (uploadFile: any) => {
   }
 }
 
+// 核心时空穿梭功能：根据 ID 还原页面
+const restoreHistoryData = async (id: string) => {
+  isAnalyzing.value = true;
+  hasData.value = false;
+  try {
+    const record = await trajectoryApi.getHistoryById(id);
+    const mode = record.predicted_mode || 'unknown';
+    currentMode.value = translateMode(mode);
+    
+    const distanceKm = record.distance ? record.distance.toFixed(2) : '0.00';
+    const lowerMode = mode.toLowerCase();
+    const isGreen = ['walk', 'bike', 'bus', 'subway', '步行', '自行车', '公交车', '地铁'].includes(lowerMode);
+
+    const calcGreenDist = isGreen ? distanceKm : '0.00';
+    const calcCo2 = (Number(calcGreenDist) * 0.15).toFixed(2);
+    const calcTrees = (Number(calcCo2) * 0.05).toFixed(1);
+
+    stats.greenDistance = calcGreenDist;
+    stats.co2Saved = calcCo2;
+    stats.treesPlanted = calcTrees;
+    hasData.value = true;
+
+    // 重新在地图上绘制坐标！
+    if (record.points && record.points !== '[]') {
+      const pts = typeof record.points === 'string' ? JSON.parse(record.points) : record.points;
+      renderLeafletTrajectory(pts, isGreen);
+    }
+
+    // 再次触发大模型生成当年情境的报告
+    generateAIReport(calcGreenDist, calcCo2, calcTrees, currentMode.value);
+    ElMessage.success(`时空档案已还原！当时判定为：${currentMode.value}`);
+  } catch (error) {
+    ElMessage.error('无法读取历史档案数据，文件可能已损坏');
+  } finally {
+    isAnalyzing.value = false;
+  }
+}
+
 const translateMode = (mode: string) => {
   const map: Record<string, string> = { 'car': '私家车', 'bus': '公交车', 'walk': '步行', 'bike': '自行车', 'subway': '地铁', 'train': '火车' };
   return map[mode.toLowerCase()] || mode;
@@ -236,10 +276,9 @@ const generateAIReport = async (dist: string, co2: string, trees: string, modeNa
   isGeneratingReport.value = true
   aiReport.value = ''
   
-  // 🚀 为大模型增加“朋友圈段子手”人设，打破写死感
   let prompt = ''
   if (Number(dist) > 0) {
-    prompt = `你是一个非常幽默、热情的网络爆款文案编辑。这位名叫“${userName.value}”的用户今天完成了 ${dist}km 的【${modeName}】绿色出行，减少了 ${co2}kg 的碳排放，等于种了 ${trees} 棵树！\n请为TA写一段适合发在微信朋友圈的夸奖文案。要求：\n1. 语气生动活泼，大量使用 emoji 表情\n2. 要有高级感，显得TA很自律、很环保\n3. 不要机械重复数据，要融入生活化的场景（比如“拯救地球的日常”等）\n4. 100-150字左右，必须排版精美。`
+    prompt = `你是一个非常幽默、热情的网络爆款文案编辑。这位名叫“${userName.value}”的用户今天完成了 ${dist}km 的【${modeName}】绿色出行，减少了 ${co2}kg 的碳排放，等于种了 ${trees} 棵树！\n请为TA写一段适合发在微信朋友圈的夸奖文案。要求：\n1. 语气生动活泼，大量使用 emoji 表情\n2. 要有高级感，显得TA很自律、很环保\n3. 不要机械重复数据，要融入生活化的场景\n4. 100-150字左右，必须排版精美。`
   } else {
     prompt = `你是一个贴心且带点幽默的环保倡导者。用户“${userName.value}”本次出行被系统识别为【${modeName}】。请写一段暖心的寄语，先肯定出行的辛苦，再用一句俏皮的话鼓励TA下次有机会可以尝试低碳出行（地铁/骑行），字数100字左右，多用点Emoji。`
   }
@@ -251,36 +290,22 @@ const generateAIReport = async (dist: string, co2: string, trees: string, modeNa
         'Content-Type': 'application/json',
         'Authorization': `Bearer ZOawgFgAMWrgzoramwRS:BkjUHBXpuOrXCpVQfFtJ` 
       },
-      body: JSON.stringify({
-        model: 'lite',
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.85, // 调高温度让每次回答更不一样
-        stream: true
-      })
+      body: JSON.stringify({ model: 'lite', messages: [{ role: 'user', content: prompt }], temperature: 0.85, stream: true })
     })
 
     if (!response.body) throw new Error('流式响应不可用')
-
     const reader = response.body.getReader()
     const decoder = new TextDecoder('utf-8')
 
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
-
-      const chunk = decoder.decode(value, { stream: true })
-      const lines = chunk.split('\n')
-
+      const lines = decoder.decode(value, { stream: true }).split('\n')
       for (const line of lines) {
         if (line.startsWith('data: ') && !line.includes('[DONE]')) {
           try {
-            const data = JSON.parse(line.substring(6))
-            const text = data.choices[0].delta.content || ''
-            aiReport.value += text
-            
-            nextTick(() => {
-              if (scrollBox.value) scrollBox.value.scrollTop = scrollBox.value.scrollHeight
-            })
+            aiReport.value += JSON.parse(line.substring(6)).choices[0].delta.content || ''
+            nextTick(() => { if (scrollBox.value) scrollBox.value.scrollTop = scrollBox.value.scrollHeight })
           } catch (e) {}
         }
       }
@@ -292,20 +317,15 @@ const generateAIReport = async (dist: string, co2: string, trees: string, modeNa
   }
 }
 
-// 📸 魔法：导出我们精心设计的隐藏海报！
 const exportToPDF = () => {
   const element = document.getElementById('green-pdf-poster')
   if (!element) return
-
   const opt = {
-    margin:       0,
-    filename:     `${userName.value}的绿色出行认证_${new Date().getTime()}.pdf`,
-    image:        { type: 'jpeg' as const, quality: 1.0 },
-    html2canvas:  { scale: 3, useCORS: true, backgroundColor: '#f0f4f8' },
-    jsPDF:        { unit: 'px' as const, format: [800, 1000] as [number, number], orientation: 'portrait' as const }
+    margin: 0, filename: `${userName.value}的绿色出行认证.pdf`,
+    image: { type: 'jpeg' as const, quality: 1.0 },
+    html2canvas: { scale: 3, useCORS: true, backgroundColor: '#f0f4f8' },
+    jsPDF: { unit: 'px' as const, format: [800, 1000] as [number, number], orientation: 'portrait' as const }
   }
-  
-  // 给用户提示
   ElMessage.success('正在为您生成专属纪念海报，请稍候...')
   html2pdf().set(opt).from(element).save()
 }
@@ -314,9 +334,7 @@ const initLeafletMap = () => {
   if (!mapContainer.value) return
   map = L.map(mapContainer.value).setView([39.9042, 116.4074], 12)
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors',
-    maxZoom: 19,
-    className: 'dark-map-tiles' 
+    attribution: '© OSM', maxZoom: 19, className: 'dark-map-tiles' 
   }).addTo(map)
 }
 
@@ -326,7 +344,6 @@ const renderLeafletTrajectory = (points: any[], isGreen: boolean) => {
   markers.forEach(m => map!.removeLayer(m))
   markers = []
 
-  // ⬇️ 重点修改 1：末尾加上 as [number, number][] 强制断言
   const latLngs = points.map(p => {
     const lat = p.lat || p.latitude || p.y || (Array.isArray(p) ? p[1] : undefined);
     const lng = p.lng || p.lon || p.longitude || p.x || (Array.isArray(p) ? p[0] : undefined);
@@ -335,33 +352,32 @@ const renderLeafletTrajectory = (points: any[], isGreen: boolean) => {
 
   if (latLngs.length === 0) return;
 
-  // ⬇️ 绿色出行的专属颜色逻辑：环保方式用绿色，高碳方式用红色
   const lineColor = isGreen ? '#67C23A' : '#F56C6C';
   currentPolyline = L.polyline(latLngs, { color: lineColor, weight: 5, opacity: 0.85, lineCap: 'round', lineJoin: 'round'}).addTo(map);
 
-  // ⬇️ 重点修改 2：明确指定起点和终点为 L.LatLngExpression 类型
   const startPoint = latLngs[0] as L.LatLngExpression;
   const endPoint = latLngs[latLngs.length - 1] as L.LatLngExpression;
-
   const startMarker = L.circleMarker(startPoint, { radius: 7, fillColor: '#52C41A', color: '#fff', weight: 2, fillOpacity: 1 }).addTo(map);
   const endMarker = L.marker(endPoint, {
-    icon: L.divIcon({
-      className: 'custom-end-marker',
-      html: '<div style="width: 14px; height: 14px; background: #F5222D; border: 2px solid #fff; border-radius: 2px; box-shadow: 0 0 5px rgba(0,0,0,0.5);"></div>',
-      iconSize: [14, 14], iconAnchor: [7, 7],
-    }),
+    icon: L.divIcon({ className: 'custom-end-marker', html: '<div style="width: 14px; height: 14px; background: #F5222D; border: 2px solid #fff; border-radius: 2px; box-shadow: 0 0 5px rgba(0,0,0,0.5);"></div>', iconSize: [14, 14], iconAnchor: [7, 7] }),
   }).addTo(map);
 
   markers.push(startMarker, endMarker);
   map.fitBounds(currentPolyline.getBounds(), { padding: [50, 50], animate: true, duration: 1 });
 }
 
-onMounted(() => { nextTick(() => { initLeafletMap() }) })
+onMounted(() => { 
+  nextTick(() => { initLeafletMap() }) 
+  // 检查是否是从历史记录穿越回来的
+  if (route.query.id) {
+    restoreHistoryData(route.query.id as string)
+  }
+})
 onUnmounted(() => { if (map) { map.remove(); map = null } })
 </script>
 
 <style scoped>
-/* 原有页面样式完全保持不变 */
+/* 保持你的完美样式不变，直接沿用你发我的即可 */
 .green-container { height: calc(100vh - 70px); padding: 20px; box-sizing: border-box; }
 .full-height { height: 100%; }
 .panel { border-radius: 12px; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
@@ -403,73 +419,22 @@ onUnmounted(() => { if (map) { map.remove(); map = null } })
 @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
 @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
 
-/* ========================================= */
-/* 📸 专为导出 PDF 设计的绝美海报样式（在网页上隐藏） */
-/* ========================================= */
-.pdf-export-wrapper {
-  position: absolute;
-  top: -9999px; /* 把它藏在屏幕外面 */
-  left: -9999px;
-  z-index: -1;
-}
-
-.pdf-poster {
-  width: 800px;
-  min-height: 1000px; /* 保证一定的高度 */
-  background: linear-gradient(135deg, #f0fdf4 0%, #e0f2fe 100%);
-  padding: 60px;
-  font-family: 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  color: #334155;
-  box-sizing: border-box;
-  position: relative;
-  overflow: hidden;
-}
-
-/* 装饰性光晕 */
-.pdf-poster::before {
-  content: ''; position: absolute; top: -100px; right: -100px;
-  width: 300px; height: 300px; background: rgba(56, 189, 248, 0.2);
-  border-radius: 50%; filter: blur(50px);
-}
-
-.poster-header {
-  border-bottom: 2px solid #cbd5e1;
-  padding-bottom: 20px;
-  margin-bottom: 40px;
-}
+.pdf-export-wrapper { position: absolute; top: -9999px; left: -9999px; z-index: -1; }
+.pdf-poster { width: 800px; min-height: 1000px; background: linear-gradient(135deg, #f0fdf4 0%, #e0f2fe 100%); padding: 60px; font-family: 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', sans-serif; color: #334155; box-sizing: border-box; position: relative; overflow: hidden; }
+.pdf-poster::before { content: ''; position: absolute; top: -100px; right: -100px; width: 300px; height: 300px; background: rgba(56, 189, 248, 0.2); border-radius: 50%; filter: blur(50px); }
+.poster-header { border-bottom: 2px solid #cbd5e1; padding-bottom: 20px; margin-bottom: 40px; }
 .poster-title { font-size: 38px; font-weight: 800; color: #0f172a; margin-bottom: 10px; letter-spacing: 2px;}
 .poster-subtitle { font-size: 18px; color: #64748b; display: flex; justify-content: space-between; align-items: flex-end;}
 .poster-subtitle strong { color: #10b981; font-size: 22px; margin-left: 5px; }
-
-.poster-stats {
-  display: flex; justify-content: space-between; gap: 20px; margin-bottom: 40px;
-}
-.stat-box {
-  flex: 1; background: #ffffff; padding: 30px 20px; border-radius: 16px;
-  box-shadow: 0 10px 25px rgba(0,0,0,0.05); text-align: center; border-top: 5px solid #38bdf8;
-}
+.poster-stats { display: flex; justify-content: space-between; gap: 20px; margin-bottom: 40px; }
+.stat-box { flex: 1; background: #ffffff; padding: 30px 20px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); text-align: center; border-top: 5px solid #38bdf8; }
 .stat-box:nth-child(2) { border-color: #10b981; }
 .stat-value { font-size: 36px; font-weight: bold; color: #0ea5e9; font-family: monospace; line-height: 1.2;}
 .stat-value small { font-size: 18px; }
 .stat-label { font-size: 16px; color: #64748b; margin-top: 10px; }
-
-.poster-ai-section {
-  background: #ffffff; padding: 40px; border-radius: 16px;
-  box-shadow: 0 10px 25px rgba(0,0,0,0.05); position: relative;
-}
-.ai-badge {
-  position: absolute; top: -15px; left: 40px; background: #E6A23C; color: white;
-  padding: 5px 15px; border-radius: 20px; font-weight: bold; font-size: 14px;
-}
-.pdf-ai-text {
-  font-size: 18px; line-height: 2; color: #334155;
-}
-
-.poster-footer {
-  margin-top: 60px; text-align: center; color: #94a3b8; font-size: 14px; position: relative;
-}
-.watermark {
-  font-size: 60px; font-weight: 900; color: rgba(0,0,0,0.03); 
-  position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); white-space: nowrap; pointer-events: none;
-}
+.poster-ai-section { background: #ffffff; padding: 40px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); position: relative; }
+.ai-badge { position: absolute; top: -15px; left: 40px; background: #E6A23C; color: white; padding: 5px 15px; border-radius: 20px; font-weight: bold; font-size: 14px; }
+.pdf-ai-text { font-size: 18px; line-height: 2; color: #334155; }
+.poster-footer { margin-top: 60px; text-align: center; color: #94a3b8; font-size: 14px; position: relative; }
+.watermark { font-size: 60px; font-weight: 900; color: rgba(0,0,0,0.03); position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); white-space: nowrap; pointer-events: none; }
 </style>
