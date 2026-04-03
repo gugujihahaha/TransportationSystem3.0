@@ -1,222 +1,339 @@
 <template>
-  <div class="scrollable-container">
-    
-    <el-row class="mb-20">
-      <el-col :span="24">
-        <div class="panel dark-panel">
-          <div class="panel-header">
-            <el-icon><DataLine /></el-icon> TrafficRec 核心算法演进 (Exp1 - Exp4 性能消融分析)
-          </div>
-          <div class="panel-content chart-wrapper">
-            <div ref="evolutionChartRef" class="evolution-chart"></div>
-          </div>
-        </div>
-      </el-col>
-    </el-row>
+  <div class="tech-support-container">
+    <div class="tech-bg">
+      <div class="grid-overlay"></div>
+      <div class="glow-sphere"></div>
+    </div>
 
-    <el-row :gutter="20" class="content-row">
+    <div class="content-wrapper" :class="{ 'is-loaded': isLoaded }">
       
-      <el-col :span="11" class="full-height">
-        <div class="panel dark-panel flex-col">
-          <div class="section-box flex-1">
-            <div class="box-title"><el-icon><Cpu /></el-icon> 系统技术架构 (Pipeline)</div>
-            <div class="arch-content">
-              <div class="arch-layer data-layer">
-                <div class="layer-title">数据层 (Data & Preprocessing)</div>
-                <div class="layer-items">
-                  <el-tag type="info" effect="dark">GPS 轨迹时空解析</el-tag>
-                  <el-tag type="warning" effect="dark">OSM 路网拓扑查询</el-tag>
-                  <el-tag type="success" effect="dark">历史气象特征对齐</el-tag>
-                </div>
-              </div>
-              <div class="arch-arrow"><el-icon><Bottom /></el-icon></div>
-              
-              <div class="arch-layer engine-layer">
-                <div class="layer-title">算法引擎层 (PyTorch / ML Models)</div>
-                <div class="layer-items">
-                  <el-tag type="danger" effect="dark">49维多模态特征融合</el-tag>
-                  <el-tag type="danger" effect="dark">Focal Loss 不均衡优化</el-tag>
-                  <el-tag type="danger" effect="dark">时序序列注意力机制</el-tag>
-                </div>
-              </div>
-              <div class="arch-arrow"><el-icon><Bottom /></el-icon></div>
-              
-              <div class="arch-layer service-layer">
-                <div class="layer-title">服务与业务层 (FastAPI & Vue3)</div>
-                <div class="layer-items">
-                  <el-tag effect="dark">RESTful API 预测服务</el-tag>
-                  <el-tag effect="dark">ECharts 态势感知大屏</el-tag>
-                  <el-tag effect="dark">高德地图轨迹映射</el-tag>
-                </div>
-              </div>
+      <header class="page-header">
+        <h1 class="main-title">
+          <span class="text-glow">系统工程架构与防御沙盘</span>
+        </h1>
+        <p class="description">
+          System Engineering Architecture & Q&A Defense Sandbox <br>
+          全链路多模态数据处理流、底层核心技术栈，以及针对真实应用场景的系统局限性应对方案。
+        </p>
+      </header>
+
+      <section class="glass-panel mb-30">
+        <h2 class="section-title"><span class="icon">🔄</span> 多模态数据流向拓扑 (Data Pipeline)</h2>
+        <div class="pipeline-container">
+          <div class="pipeline-node data-layer">
+            <div class="node-header">L1: 多源数据层 (Data Ingestion)</div>
+            <div class="node-body">
+              <span class="tech-tag">GPS 轨迹解析</span>
+              <span class="tech-tag">OSM 路网拓扑抽取</span>
+              <span class="tech-tag">历史气象对齐</span>
+            </div>
+          </div>
+          
+          <div class="pipeline-arrow"><el-icon><ArrowRightBold /></el-icon></div>
+
+          <div class="pipeline-node engine-layer">
+            <div class="node-header text-gold">L2: 核心推理引擎 (AI Engine)</div>
+            <div class="node-body">
+              <span class="tech-tag gold">49维特征融合矩阵</span>
+              <span class="tech-tag gold">双路 Attention 机制</span>
+              <span class="tech-tag gold">Focal Loss 优化器</span>
+            </div>
+          </div>
+
+          <div class="pipeline-arrow"><el-icon><ArrowRightBold /></el-icon></div>
+
+          <div class="pipeline-node service-layer">
+            <div class="node-header text-cyan">L3: 业务服务层 (Business Logic)</div>
+            <div class="node-body">
+              <span class="tech-tag cyan">FastAPI 推理调度</span>
+              <span class="tech-tag cyan">星火 LLM 报告生成</span>
+              <span class="tech-tag cyan">SQLite 历史资产存储</span>
+            </div>
+          </div>
+
+          <div class="pipeline-arrow"><el-icon><ArrowRightBold /></el-icon></div>
+
+          <div class="pipeline-node ui-layer">
+            <div class="node-header text-green">L4: 态势展现层 (Visualization)</div>
+            <div class="node-body">
+              <span class="tech-tag green">ECharts 宏观大屏</span>
+              <span class="tech-tag green">Leaflet 时空溯源地图</span>
+              <span class="tech-tag green">动态雷达交互栈</span>
             </div>
           </div>
         </div>
-      </el-col>
+      </section>
 
-      <el-col :span="13" class="full-height">
-        <div class="panel dark-panel flex-col limitation-box">
-          <div class="section-box flex-1">
-            <div class="box-title text-warning"><el-icon><Warning /></el-icon> 应用局限与应对声明 (Limitations)</div>
-            <div class="boundary-content">
-              <ul>
-                <li><strong>场景边界：</strong> 当前模型（TrafficRec v3.0）的 OSM 路网特征抽取主要基于<strong>北京市</strong>的空间拓扑数据进行训练。由于不同城市的道路网格密度、公交地铁覆盖率存在显著差异，若直接将模型泛化至其他城市（如重庆的山地路网），预测精度可能会出现可预见的衰减。</li>
-                <li><strong>应对机制：</strong> 系统架构已解耦特征工程与推理模块。在跨城市部署时，只需替换目标城市的 OSM 底图并进行少量样本的迁移学习（Transfer Learning）即可快速适配。</li>
-                <br>
-                <li><strong>极端气象的扰动：</strong> 虽已引入气象维度（温度、风速等），但在遇到极端恶劣天气（如特大暴雨导致全城拥堵、地铁停运）时，用户的历史出行习惯会被打破，多模态特征之间的联合分布会发生偏移（Distribution Shift）。</li>
-                <li><strong>持续优化方向：</strong> 计划在下一代版本中引入<strong>实时气象动态惩罚权重</strong>，降低模型在此类长尾分布场景下的过拟合风险。</li>
-              </ul>
+      <div class="dual-column">
+        
+        <section class="glass-panel flex-1">
+          <h2 class="section-title"><span class="icon">🛠️</span> 核心技术栈全景 (Tech Stack)</h2>
+          <div class="tech-grid">
+            <div class="stack-card">
+              <div class="stack-icon" style="color: #ee4c2c;">🔥</div>
+              <div class="stack-name">PyTorch</div>
+              <div class="stack-role">底层深度学习框架</div>
+            </div>
+            <div class="stack-card">
+              <div class="stack-icon" style="color: #009688;">⚡</div>
+              <div class="stack-name">FastAPI</div>
+              <div class="stack-role">高性能异步后端驱动</div>
+            </div>
+            <div class="stack-card">
+              <div class="stack-icon" style="color: #4fc08d;">🟢</div>
+              <div class="stack-name">Vue 3 (Composition)</div>
+              <div class="stack-role">响应式大屏前端框架</div>
+            </div>
+            <div class="stack-card">
+              <div class="stack-icon" style="color: #e44d26;">📊</div>
+              <div class="stack-name">Apache ECharts</div>
+              <div class="stack-role">数据科学可视化引擎</div>
+            </div>
+            <div class="stack-card">
+              <div class="stack-icon" style="color: #2196f3;">🗺️</div>
+              <div class="stack-name">Leaflet.js + OSM</div>
+              <div class="stack-role">空间路网渲染引擎</div>
+            </div>
+            <div class="stack-card">
+              <div class="stack-icon" style="color: #00a8ff;">💬</div>
+              <div class="stack-name">星火大模型 (Spark)</div>
+              <div class="stack-role">LLM 流式研判报告</div>
             </div>
           </div>
-        </div>
-      </el-col>
+        </section>
 
-    </el-row>
+        <section class="glass-panel flex-1 defense-section">
+          <h2 class="section-title text-warning"><span class="icon">🛡️</span> 答辩防御沙盘 (Limitations & Solutions)</h2>
+          <p class="defense-intro">本模块用于直面系统在极度复杂真实场景下的局限性，并提供清晰的工程与算法兜底策略。</p>
+          
+          <div class="defense-cards">
+            <div class="defense-card">
+              <div class="q-part">
+                <span class="label">⚠️ 潜在提问 (边界泛化)：</span>
+                模型在北京市训练，如果跨城部署到山城（如重庆），精度会大幅衰减吗？
+              </div>
+              <div class="a-part">
+                <span class="label text-cyan">💡 防御策略 (解耦与迁移)：</span>
+                当前系统架构已完全解耦“特征工程”与“推理模块”。在跨城部署时，只需替换目标城市的 OSM 底图，利用少样本进行<strong>迁移学习 (Transfer Learning)</strong> 即可快速对齐空间拓扑，极大降低了重新训练的算力成本。
+              </div>
+            </div>
+
+            <div class="defense-card mt-15">
+              <div class="q-part">
+                <span class="label">⚠️ 潜在提问 (极端长尾分布)：</span>
+                如果遭遇特大暴雨导致全城瘫痪、地铁停运，模型还能准确认知出行方式吗？
+              </div>
+              <div class="a-part">
+                <span class="label text-gold">💡 防御策略 (时序惩罚权重)：</span>
+                极端天气下多模态特征的联合分布必然发生偏移 (Distribution Shift)。目前的 Exp3 仅做了气象特征的静态拼接。下一代版本架构设计中，我们将引入<strong>实时气象动态惩罚权重</strong>，通过调整 Loss 函数对异常时空特征的敏感度，避免模型在此类绝对长尾场景下过拟合。
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { Cpu, Bottom, Warning, DataLine } from '@element-plus/icons-vue'
-import { ref, onMounted, onBeforeUnmount } from 'vue'
-import * as echarts from 'echarts'
+import { ref, onMounted } from 'vue'
+import { ArrowRightBold } from '@element-plus/icons-vue'
 
-// ECharts 实例化
-const evolutionChartRef = ref<HTMLElement | null>(null)
-let chartInstance: echarts.ECharts | null = null
-
-// 基于 Exp1 - Exp4 提取的真实数据
-const expData = {
-  categories: ['Exp 1 (基线模型)', 'Exp 2 (特征优化)', 'Exp 3 (地铁强化)', 'Exp 4 (轻量化/消融)'],
-  series: [
-    { name: 'Subway (地铁)', data: [0.666, 0.736, 0.800, 0.764] },
-    { name: 'Bus (公交)', data: [0.761, 0.817, 0.802, 0.787] },
-    { name: 'Car & taxi (汽车)', data: [0.514, 0.550, 0.539, 0.452] },
-    { name: 'Train (火车)', data: [0.871, 0.842, 0.806, 0.758] },
-    { name: 'Bike (骑行)', data: [0.936, 0.932, 0.919, 0.934] },
-    { name: 'Walk (步行)', data: [0.916, 0.878, 0.893, 0.824] }
-  ]
-}
-
-const initChart = () => {
-  if (!evolutionChartRef.value) return
-  chartInstance = echarts.init(evolutionChartRef.value)
-
-  const option = {
-    backgroundColor: 'transparent',
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: { type: 'cross' },
-      backgroundColor: 'rgba(3, 8, 22, 0.9)',
-      borderColor: '#00f0ff',
-      textStyle: { color: '#fff' }
-    },
-    legend: {
-      data: expData.series.map(s => s.name),
-      textStyle: { color: '#a0aabf' },
-      top: 0
-    },
-    grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
-    xAxis: {
-      type: 'category',
-      boundaryGap: false,
-      data: expData.categories,
-      axisLabel: { color: '#a0aabf', fontSize: 13 },
-      axisLine: { lineStyle: { color: '#334155' } }
-    },
-    yAxis: {
-      type: 'value',
-      name: 'F1-Score',
-      nameTextStyle: { color: '#a0aabf' },
-      min: 0.4,
-      max: 1.0,
-      axisLabel: { color: '#a0aabf' },
-      splitLine: { lineStyle: { color: 'rgba(255, 255, 255, 0.05)', type: 'dashed' } }
-    },
-    series: expData.series.map(item => ({
-      name: item.name,
-      type: 'line',
-      data: item.data,
-      smooth: true,
-      symbol: 'circle',
-      symbolSize: 8,
-      lineStyle: {
-        width: item.name.includes('Subway') || item.name.includes('Bus') ? 4 : 2,
-        type: item.name.includes('Walk') || item.name.includes('Bike') ? 'dashed' : 'solid'
-      }
-    }))
-  }
-
-  chartInstance.setOption(option)
-}
-
-const handleResize = () => {
-  chartInstance?.resize()
-}
+const isLoaded = ref(false)
 
 onMounted(() => {
-  initChart()
-  window.addEventListener('resize', handleResize)
-})
-
-onBeforeUnmount(() => {
-  window.removeEventListener('resize', handleResize)
-  chartInstance?.dispose()
+  setTimeout(() => {
+    isLoaded.value = true
+  }, 100)
 })
 </script>
 
 <style scoped>
-/* ========== 全局滚动容器样式 ========== */
-.scrollable-container {
-  width: 100%;
-  height: 100%;
-  padding: 24px 32px;
-  overflow-y: auto;
+.tech-support-container {
+  min-height: 100vh;
+  background-color: #070b19;
+  color: #fff;
+  position: relative;
   overflow-x: hidden;
-  box-sizing: border-box;
+  font-family: 'Rajdhani', 'Microsoft YaHei', sans-serif;
+  padding: 40px 20px 80px;
 }
 
-.scrollable-container::-webkit-scrollbar { width: 8px; }
-.scrollable-container::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.1); }
-.scrollable-container::-webkit-scrollbar-thumb { background: rgba(0, 240, 255, 0.3); border-radius: 4px; }
-.scrollable-container::-webkit-scrollbar-thumb:hover { background: rgba(0, 240, 255, 0.6); }
+/* 背景特效 */
+.tech-bg { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+.grid-overlay { position: absolute; inset: 0; background-image: linear-gradient(rgba(0, 240, 255, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(0, 240, 255, 0.03) 1px, transparent 1px); background-size: 40px 40px; opacity: 0.5; }
+.glow-sphere { position: absolute; top: 20%; left: 50%; transform: translateX(-50%); width: 60vw; height: 60vw; background: radial-gradient(circle, rgba(0, 240, 255, 0.08) 0%, transparent 60%); border-radius: 50%; filter: blur(60px); }
 
-/* ========== 布局辅助 ========== */
-.mb-20 { margin-bottom: 20px; }
-.content-row { min-height: 400px; }
+.content-wrapper {
+  position: relative;
+  z-index: 1;
+  max-width: 1400px;
+  margin: 0 auto;
+  opacity: 0;
+  transform: translateY(20px);
+  transition: all 0.8s ease-out;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.content-wrapper.is-loaded { opacity: 1; transform: translateY(0); }
 
-/* ========== ECharts 图表样式 ========== */
-.chart-wrapper { padding: 10px 0; }
-.evolution-chart { width: 100%; height: 350px; }
+/* Header */
+.page-header { text-align: center; margin-bottom: 20px; padding-top: 10px;}
+.main-title { font-size: 3rem; font-weight: 900; margin-bottom: 10px; }
+.text-glow { color: #fff; text-shadow: 0 0 20px rgba(0, 240, 255, 0.6); }
+.description { color: #94a3b8; font-size: 1.1rem; line-height: 1.6; max-width: 800px; margin: 0 auto; }
 
-/* ========== 原有样式完整保留 ========== */
-.tech-container { height: 100%; padding: 20px; box-sizing: border-box; }
-.full-height { height: 100%; }
-.panel { background: rgba(16, 25, 43, 0.6); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 12px; padding: 24px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3); backdrop-filter: blur(10px);}
-.dark-panel { color: #e5eaf3; }
-.flex-col { display: flex; flex-direction: column; }
+/* 玻璃面板 */
+.glass-panel {
+  background: rgba(13, 20, 40, 0.6);
+  border: 1px solid rgba(0, 240, 255, 0.15);
+  backdrop-filter: blur(10px);
+  border-radius: 12px;
+  padding: 25px 30px;
+  box-shadow: inset 0 0 20px rgba(0,240,255,0.02);
+}
+.mb-30 { margin-bottom: 20px; }
+.section-title { font-size: 1.3rem; font-weight: bold; margin: 0 0 25px 0; display: flex; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 15px;}
+.section-title .icon { margin-right: 10px; }
+
+/* ================= 模块一：Pipeline 拓扑 ================= */
+.pipeline-container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 0;
+  overflow-x: auto;
+}
+
+.pipeline-node {
+  flex: 1;
+  min-width: 220px;
+  background: rgba(0,0,0,0.4);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  transition: all 0.3s;
+}
+.pipeline-node:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 10px 20px rgba(0,240,255,0.1);
+  border-color: rgba(0,240,255,0.4);
+}
+
+.node-header { font-size: 1.05rem; font-weight: bold; margin-bottom: 15px; color: #e2e8f0; text-align: center;}
+.node-body { display: flex; flex-direction: column; gap: 10px; width: 100%;}
+.tech-tag { 
+  background: rgba(255,255,255,0.05); 
+  border: 1px solid rgba(255,255,255,0.1); 
+  padding: 8px 10px; 
+  border-radius: 4px; 
+  font-size: 0.9rem; 
+  text-align: center;
+  color: #cbd5e1;
+}
+
+/* 定制化节点色彩 */
+.text-gold { color: #ffb800; }
+.text-cyan { color: #00f0ff; }
+.text-green { color: #00ff88; }
+
+.tech-tag.gold { background: rgba(255,184,0,0.1); border-color: rgba(255,184,0,0.3); color: #ffb800; }
+.tech-tag.cyan { background: rgba(0,240,255,0.1); border-color: rgba(0,240,255,0.3); color: #00f0ff; }
+.tech-tag.green { background: rgba(0,255,136,0.1); border-color: rgba(0,255,136,0.3); color: #00ff88; }
+
+.pipeline-arrow {
+  color: #00f0ff;
+  font-size: 24px;
+  padding: 0 15px;
+  animation: pulseMove 2s infinite;
+}
+@keyframes pulseMove {
+  0% { transform: translateX(-5px); opacity: 0.5; }
+  50% { transform: translateX(5px); opacity: 1; }
+  100% { transform: translateX(-5px); opacity: 0.5; }
+}
+
+/* ================= 模块二：双列布局 ================= */
+.dual-column {
+  display: flex;
+  gap: 25px;
+}
 .flex-1 { flex: 1; }
-.panel-header { display: flex; align-items: center; gap: 8px; font-size: 18px; font-weight: bold; color: #fff; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
 
-/* 系统架构相关样式 */
-.section-box { display: flex; flex-direction: column;}
-.box-title { font-size: 18px; font-weight: bold; color: #00f0ff; display: flex; align-items: center; gap: 8px; margin-bottom: 20px;}
-.arch-content { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: space-around; padding: 20px 0;}
-.arch-layer { width: 80%; padding: 20px; border-radius: 8px; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.08); text-align: center; transition: all 0.3s;}
-.arch-layer:hover { border-color: rgba(74, 144, 226, 0.5); background: rgba(74, 144, 226, 0.05);}
-.layer-title { font-size: 13px; color: #909399; margin-bottom: 12px; font-weight: bold; letter-spacing: 1px;}
-.layer-items { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap;}
-.arch-arrow { color: #4A90E2; font-size: 20px; animation: floatDown 2s infinite;}
-
-@keyframes floatDown {
-  0% { transform: translateY(0); opacity: 0.5; }
-  50% { transform: translateY(5px); opacity: 1; }
-  100% { transform: translateY(0); opacity: 0.5; }
+/* 技术栈网格 */
+.tech-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 15px;
 }
+.stack-card {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.05);
+  border-radius: 8px;
+  padding: 20px 15px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  transition: all 0.3s;
+}
+.stack-card:hover {
+  background: rgba(255,255,255,0.05);
+  border-color: rgba(255,255,255,0.2);
+  transform: scale(1.02);
+}
+.stack-icon { font-size: 2.2rem; margin-bottom: 10px; }
+.stack-name { font-size: 1.1rem; font-weight: bold; color: #e2e8f0; margin-bottom: 5px;}
+.stack-role { font-size: 0.85rem; color: #64748b; }
 
-/* 边界声明样式 */
-.limitation-box { background: rgba(230, 162, 60, 0.05); border-color: rgba(230, 162, 60, 0.2);}
-.text-warning { color: #E6A23C; }
-.boundary-content ul { margin: 0; padding-left: 20px; color: #a3a6ad; font-size: 13px; line-height: 1.8; }
-.boundary-content li { margin-bottom: 10px; }
-.boundary-content strong { color: #e5eaf3; }
+/* ================= 模块三：防御沙盘 ================= */
+.defense-section {
+  border-color: rgba(230, 162, 60, 0.3);
+  background: linear-gradient(135deg, rgba(13, 20, 40, 0.6) 0%, rgba(230, 162, 60, 0.05) 100%);
+}
+.text-warning { color: #E6A23C; border-bottom-color: rgba(230, 162, 60, 0.3) !important;}
+.defense-intro { font-size: 0.95rem; color: #a3a6ad; margin-bottom: 20px; line-height: 1.6;}
+
+.defense-cards { display: flex; flex-direction: column; gap: 20px; }
+.defense-card {
+  background: rgba(0,0,0,0.4);
+  border: 1px solid rgba(255,255,255,0.05);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.q-part {
+  background: rgba(255,255,255,0.05);
+  padding: 15px 20px;
+  font-size: 0.95rem;
+  color: #e2e8f0;
+  line-height: 1.6;
+}
+.q-part .label { color: #ff6b6b; font-weight: bold; }
+
+.a-part {
+  padding: 15px 20px;
+  font-size: 0.95rem;
+  color: #cbd5e1;
+  line-height: 1.7;
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+.a-part .label { font-weight: bold; display: block; margin-bottom: 5px;}
+.a-part strong { color: #fff; }
+
+@media (max-width: 1200px) {
+  .pipeline-container { flex-direction: column; gap: 15px; }
+  .pipeline-arrow { transform: rotate(90deg); margin: 10px 0;}
+  @keyframes pulseMove {
+    0% { transform: translateY(-5px) rotate(90deg); opacity: 0.5; }
+    50% { transform: translateY(5px) rotate(90deg); opacity: 1; }
+    100% { transform: translateY(-5px) rotate(90deg); opacity: 0.5; }
+  }
+  .dual-column { flex-direction: column; }
+}
 </style>
