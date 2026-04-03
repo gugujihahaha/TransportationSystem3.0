@@ -29,7 +29,7 @@ const router = createRouter({
           meta: { title: 'TrafficRec 多模态数据大屏' }
         },
         {
-          path: 'history', // 👈 [新增] 独立的历史档案页
+          path: 'history',
           name: 'history',
           component: () => import('../views/HistoryView.vue'),
           meta: { title: '历史轨迹档案' }
@@ -50,14 +50,9 @@ const router = createRouter({
           path: 'tech-support',
           name: 'tech',
           component: () => import('../views/TechSupport.vue'),
-          meta: { title: '核心算法与模型演进' }
+          meta: { title: '系统工程架构与防御沙盘' } // 名字顺便改得更霸气
         },
-        {
-          path: 'model-comparison',
-          name: 'modelComparison',
-          component: () => import('../views/ModelComparison.vue'),
-          meta: { title: '消融实验与模型对比' }
-        },
+        // 删除了原本在这里的 model-comparison 路由，因为已经融合进了 dashboard
         {
           path: 'user-center',
           name: 'userCenter',

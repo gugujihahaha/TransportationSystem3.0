@@ -20,7 +20,6 @@
         
         <router-link to="/tech" class="nav-item" active-class="active">技术支撑</router-link>
         
-        <router-link to="/model-comparison" class="nav-item" active-class="active">消融实验与模型对比</router-link>
         <router-link to="/user" class="nav-item" active-class="active">用户中心</router-link>
       </nav>
 

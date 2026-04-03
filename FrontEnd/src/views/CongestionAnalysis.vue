@@ -325,7 +325,6 @@ onUnmounted(() => { if (map) { map.remove(); map = null } })
 </script>
 
 <style scoped>
-/* 保持你的完美样式不变，直接沿用你发我的即可 */
 .congestion-container { height: calc(100vh - 70px); padding: 20px; box-sizing: border-box; }
 .full-height { height: 100%; }
 .panel { border-radius: 12px; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
