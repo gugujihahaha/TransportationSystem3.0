@@ -53,7 +53,7 @@
           <div class="stat-card panel-glass">
             <div class="stat-icon text-green">🌿</div>
             <div class="stat-info">
-              <div class="stat-title">预估碳减排量 (基于真实历史)</div>
+              <div class="stat-title">预估碳减排量 (基于真实里程)</div>
               <div class="stat-value text-green">{{ totalCarbonReduction }} <span class="unit">kg CO₂</span></div>
             </div>
           </div>
@@ -101,7 +101,7 @@
           </div>
         </div>
 
-<div class="archive-banner panel-glass" @click="router.push('/history')">
+        <div class="archive-banner panel-glass" @click="router.push('/history')">
           <div class="banner-content">
             <div class="banner-icon text-cyan">📂</div>
             <div class="banner-text">
@@ -137,7 +137,6 @@ const chartInstance = shallowRef<echarts.ECharts | null>(null)
 // 1. 基础信息
 const userInitials = computed(() => (authStore.username ? authStore.username.charAt(0).toUpperCase() : 'U'))
 const totalRecords = computed(() => trajectoryStore.history.length)
-const recentHistory = computed(() => trajectoryStore.history.slice(0, 5)) // 后端已做了倒序，直接取前5个
 
 // 2. 动态等级计算
 const userLevel = computed(() => Math.floor(totalRecords.value / 10) + 1)
@@ -148,40 +147,24 @@ const levelTitle = computed(() => {
 })
 const levelColor = computed(() => userLevel.value >= 5 ? 'bg-gold' : 'bg-green')
 
-// 防御性解析函数：强制指定返回值类型为 string，彻底消灭 undefined 警告
+// 精准匹配后端字段 predicted_mode，并统一转为小写处理
 const getRecordMode = (record: any): string => {
-  if (!record) return 'Unknown'
-  return String(record.pred_label || record.mode || record.predicted_class || 'Unknown')
+  if (!record) return 'unknown'
+  return String(record.predicted_mode || record.pred_label || record.mode || 'unknown').toLowerCase()
 }
 
-const getRecordConfidence = (record: any): string => {
-  if (!record) return '0.0%'
-  const conf = record.confidence || record.prob || 0
-  return (Number(conf) * 100).toFixed(1) + '%'
-}
-
-// 3. 分类统计逻辑 (已修复 TS 严格模式报错)
+// 3. 分类统计逻辑 (匹配小写，确保雷达图真实激活)
 const modeCounts = computed(() => {
-  // 明确对象键值，消除 ts-plugin(2532) 警告
-  const counts = {
-    'Walk': 0,
-    'Bike': 0,
-    'Bus': 0,
-    'Subway': 0,
-    'Train': 0,
-    'Car & taxi': 0
-  }
+  const counts = { 'Walk': 0, 'Bike': 0, 'Bus': 0, 'Subway': 0, 'Train': 0, 'Car & taxi': 0 }
   
   trajectoryStore.history.forEach(p => {
     const mode = getRecordMode(p)
-    if (typeof mode === 'string') {
-      if (mode.includes('Walk')) counts['Walk']++
-      else if (mode.includes('Bike')) counts['Bike']++
-      else if (mode.includes('Bus')) counts['Bus']++
-      else if (mode.includes('Subway')) counts['Subway']++
-      else if (mode.includes('Train')) counts['Train']++
-      else if (mode.includes('Car')) counts['Car & taxi']++
-    }
+    if (mode.includes('walk')) counts['Walk']++
+    else if (mode.includes('bike')) counts['Bike']++
+    else if (mode.includes('bus')) counts['Bus']++
+    else if (mode.includes('subway')) counts['Subway']++
+    else if (mode.includes('train')) counts['Train']++
+    else if (mode.includes('car') || mode.includes('taxi')) counts['Car & taxi']++
   })
   return counts
 })
@@ -199,8 +182,22 @@ const greenScore = computed(() => {
   return Math.round((green / totalRecords.value) * 100)
 })
 
+// 将计算逻辑改为“基于真实轨迹里程(distance)”的科学计算
 const totalCarbonReduction = computed(() => {
-  const reduction = (modeCounts.value['Walk'] * 0.15) + (modeCounts.value['Bike'] * 0.1) + (modeCounts.value['Bus'] * 0.05) + (modeCounts.value['Subway'] * 0.05)
+  let reduction = 0
+  trajectoryStore.history.forEach(record => {
+    const mode = getRecordMode(record)
+    const distanceKm = (record.distance || 0) / 1000 // 数据库存的是米，转为公里
+    
+    // 各模态低碳因子：步行 0.15kg/km, 骑行 0.10kg/km, 公交/地铁 0.05kg/km
+    if (mode.includes('walk')) {
+      reduction += distanceKm * 0.15
+    } else if (mode.includes('bike')) {
+      reduction += distanceKm * 0.10
+    } else if (mode.includes('bus') || mode.includes('subway')) {
+      reduction += distanceKm * 0.05
+    }
+  })
   return reduction.toFixed(2)
 })
 
@@ -223,7 +220,7 @@ const initRadarChart = () => {
     chartInstance.value = echarts.init(radarChartRef.value)
   }
   
-  const option = {
+const option = {
     backgroundColor: 'transparent',
     radar: {
       indicator: [
@@ -237,10 +234,17 @@ const initRadarChart = () => {
       shape: 'polygon',
       radius: '65%',
       splitNumber: 4,
-      axisName: { color: '#94a3b8', fontSize: 13 },
-      splitLine: { lineStyle: { color: ['rgba(0, 240, 255, 0.1)', 'rgba(0, 240, 255, 0.2)', 'rgba(0, 240, 255, 0.4)'] } },
+      // 坐标轴文字颜色（改亮一点）
+      axisName: { color: '#e5eaf3', fontSize: 13, fontWeight: 'bold' },
+      // 雷达图内部的网格线颜色（发光青色透明）
+      splitLine: { 
+        lineStyle: { 
+          color: ['rgba(0, 240, 255, 0.1)', 'rgba(0, 240, 255, 0.2)', 'rgba(0, 240, 255, 0.4)', 'rgba(0, 240, 255, 0.6)'] 
+        } 
+      },
       splitArea: { show: false },
-      axisLine: { lineStyle: { color: 'rgba(0, 240, 255, 0.3)' } }
+      // 从中心射出的轴线颜色
+      axisLine: { lineStyle: { color: 'rgba(0, 240, 255, 0.5)' } }
     },
     series: [{
       name: '真实数据画像',
@@ -255,16 +259,20 @@ const initRadarChart = () => {
           modeCounts.value['Car & taxi']
         ],
         name: '当前真实记录',
+        // 数据点颜色（高亮青色）
         itemStyle: { color: '#00f0ff' },
-        lineStyle: { width: 2, shadowBlur: 10, shadowColor: '#00f0ff' },
-        areaStyle: { color: 'rgba(0, 240, 255, 0.2)' }
+        // 连接线的颜色和发光效果
+        lineStyle: { width: 2, color: '#00f0ff', shadowBlur: 15, shadowColor: '#00f0ff' },
+        // 内部填充区域的颜色（带透明度的青色）
+        areaStyle: { color: 'rgba(0, 240, 255, 0.3)' }
       }]
     }]
   }
   chartInstance.value.setOption(option)
 }
 
-watch(modeCounts, () => {
+// 监听 history 数据的变化，重新渲染雷达图
+watch(() => trajectoryStore.history, () => {
   if (totalRecords.value > 0) {
     setTimeout(initRadarChart, 100)
   }
@@ -347,7 +355,7 @@ onUnmounted(() => {
   width: 100%; padding: 12px; background: rgba(0, 240, 255, 0.1); 
   border: 1px solid var(--theme-cyan); color: var(--theme-cyan);
   border-radius: 8px; font-weight: bold; cursor: pointer; 
-  transition: all 0.3s; margin-bottom: 15px; /* 与登出按钮拉开间距 */
+  transition: all 0.3s; margin-bottom: 15px; 
 }
 .history-btn:hover {
   background: var(--theme-cyan); color: #000; box-shadow: 0 0 15px var(--theme-cyan);
@@ -417,29 +425,12 @@ onUnmounted(() => {
 .progress-track { width: 100%; height: 8px; background: rgba(0,0,0,0.5); border-radius: 4px; overflow: hidden; }
 .progress-bar { height: 100%; border-radius: 4px; transition: width 1.5s cubic-bezier(0.2, 0.8, 0.2, 1); }
 
-.recent-reports { padding: 25px; }
-.report-row {
-  display: grid; grid-template-columns: 120px 1fr 150px 100px; align-items: center;
-  padding: 15px; background: rgba(255,255,255,0.02); border-radius: 8px;
-  margin-bottom: 10px; transition: background 0.3s;
-}
-.report-row:hover { background: rgba(0,240,255,0.05); }
-.report-id { color: #94a3b8; font-family: 'Courier New', Courier, monospace; }
-.report-status { font-weight: bold; font-family: 'Courier New', Courier, monospace; color: #cbd5e1; }
-.view-btn {
-  background: rgba(0, 240, 255, 0.1); border: 1px solid var(--theme-cyan);
-  color: var(--theme-cyan); padding: 5px 15px; border-radius: 4px; cursor: pointer;
-}
-.view-btn:hover { background: var(--theme-cyan); color: #000; }
-
 @keyframes spin { 100% { transform: rotate(360deg); } }
 @keyframes scan { 0% { top: -10%; } 100% { top: 110%; } }
 
 @media (max-width: 1024px) {
   .dashboard-grid { grid-template-columns: 1fr; }
   .chart-section { grid-template-columns: 1fr; height: auto; }
-  .report-row { grid-template-columns: 100px 1fr 100px; gap: 10px; }
-  .report-status { display: none; }
 }
 
 .archive-banner { margin-top: 25px; padding: 25px; cursor: pointer; transition: all 0.4s; overflow: hidden; position: relative; }

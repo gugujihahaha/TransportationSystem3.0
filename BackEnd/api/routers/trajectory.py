@@ -660,53 +660,133 @@ class ReportRequest(BaseModel):
     co2: str = "0"
 
 
-async def generate_deepseek_stream(req: ReportRequest):
-    """真正接入 DeepSeek 的流式生成器"""
-    # 针对 TrafficRec 项目场景定制 Prompt
+from datetime import datetime
+
+from datetime import datetime
+
+from datetime import datetime
+
+
+async def generate_spark_stream(req: ReportRequest):
+    """接入讯飞星火的流式生成器（小红书/朋友圈长文案爆发版 Prompt）"""
+
+    # ========== 场景一：绿色出行（百万博主级小红书/朋友圈长文案） ==========
     if req.scene == "green":
-        prompt = f"""你是一个低碳出行专家。系统利用多模态深度学习识别了用户的出行轨迹：
-        - 判定模态：{req.mode} (置信度 {req.confidence}%)
-        - 绿色里程：{req.distance} km
-        - 累计减排：{req.co2} kg
-        请基于以上数据生成一份个性化报告。要求包含：1.对本次识别结果的专业确认；2.对环保贡献的量化赞赏；3.一条关于该路段后续绿色出行的建议。字数150字左右。"""
+        # 1. 获取当前时间，增加文案场景感
+        hour = datetime.now().hour
+        if hour < 9:
+            time_str = "清晨"
+        elif hour < 12:
+            time_str = "上午"
+        elif hour < 18:
+            time_str = "下午"
+        else:
+            time_str = "夜间"
+
+        # 2. 组装极具“人味”和“网感”的长篇 Prompt
+        if float(req.distance) > 0:
+            prompt = f"""你现在是一位拥有百万粉丝的小红书生活美学博主、资深朋友圈文案大师，深谙当下年轻人追求的“松弛感”和“情绪价值”。
+            你的任务是为用户定制一篇【字数充沛（250-350字）、排版精美、直接用于生成海报分享到社交平台】的出行日记。完全禁止任何“好的”、“这是为您生成的文案”等AI口吻！直接输出正文！
+
+            【本次出行的真实数据】
+            - 出行时间：{time_str}
+            - 交通方式：{req.mode}
+            - 探索里程：{req.distance} km
+            - 减排成就：{req.co2} kg CO₂
+
+            【创作要求 - 必须严格执行】
+            1. 惊艳的吸睛标题：第一行用加粗格式（如 **🌿 今日份的低碳出逃计划 | 拿捏城市松弛感**）写一个吸引眼球的小红书风格标题。
+            2. 电影感开场与白描：结合【{time_str}】和【{req.mode}】，写一段极具画面感的散文式开场。写写风、光影、沿途的白噪音或是那一刻的心境。
+            3. 数据的文艺化解构：严禁像机器人一样播报数据！把 {req.distance} km 写成“丈量城市的刻度”或“与风交手的距离”，把减排 {req.co2} kg 包装成“顺手给发烧的地球贴了一片退热贴”、“为城市的肺叶做了一次微小贡献”。
+            4. 情绪升华：文末拔高立意，谈谈对低碳的坚持，对生活的热爱，输出让人共鸣的治愈系金句。
+            5. 排版美学：多用换行留白，制造呼吸感。精准点缀有质感的Emoji（如 🍃🎧🚲🎫☁️）。
+            6. 热门标签：结尾带上 4 个热门Hashtag（如 #Citywalk #低碳漫游指南 #我的治愈系碎片 #出门捕捉生活）。
+
+            字数一定要足够丰满（250字以上），必须写出细腻、有温度的长文，让人看完就有截图发小红书的冲动！"""
+        else:
+            # 高碳排文案
+            prompt = f"""你是一个充满人情味的朋友圈嘴替。用户本次出行被识别为【{req.mode}】（非低碳方式）。
+            请写一段有意思的、带点自我调侃的随笔记录（约 150-200 字）：
+            1. 没有任何AI前缀，直接输出正文。
+            2. 第一行写一个有趣的标题（加粗）。
+            3. 幽默地承认今天借了机动车的力（如“今天允许自己偷个懒，做个在车窗里看风景的人”）。
+            4. 顺便记录一下{time_str}出行的心情或看到的街景。
+            5. 结尾立个Flag，下次天气好的时候，一定安排一次减碳的绿色出行。
+            6. 排版要有呼吸感，带几个高级的 Emoji。"""
+
+    # ========== 场景二：拥堵分析（专业研判与引擎对比差异化） ==========
     else:
-        prompt = f"""你是一个城市交通研判专家。在北京市路网分析中，系统利用 {req.model_id} 模型得出以下结果：
-        - 识别出的主要交通流：{req.mode}
+        model_context = ""
+        if req.model_id == 'exp1':
+            model_context = '本次推断仅依赖纯轨迹运动学特征（如速度、加速度）。缺乏真实路网映射，在区分公交与私家车等混流轨迹时存在局限。'
+        elif req.model_id == 'exp2':
+            model_context = '本次推断引入了 OSM 空间路网拓扑结构。成功匹配了车道级特征（如公交专用道），有效解决了复杂路网下的模态混淆。'
+        elif req.model_id == 'exp3':
+            model_context = '本次推断在路网基础上，深度解耦了气象环境因素。敏锐捕捉到了天气突变对车速特征造成的干扰。'
+        elif req.model_id == 'exp4':
+            model_context = '本次推断使用了最终的 Focal Loss 优化引擎。在融合多维时空特征的同时，克服了长尾数据分布不平衡的问题，达到最优推断精度。'
+
+        prompt = f"""你是一位顶级的城市交通管理大数据研判专家。
+        当前任务：为一份交通系统监控报告撰写“智能研判深度溯源”结论。
+        输入数据：
+        - 驱动引擎：{req.model_id.upper()} 模型
+        - 引擎技术特性：{model_context}
+        - 溯源结果：发现该路段的主要交通流构成为【{req.mode}】
         - 引擎置信度：{req.confidence}%
-        请从“时空特征分析”和“路段拥堵治理方案”两个维度生成深度溯源报告。要求语调专业、具有科技感，字数200字左右。"""
+
+        输出要求（严格按以下Markdown格式输出）：
+        ### 🧭 时空特征推导
+        结合{req.model_id.upper()}模型的技术特性（务必体现上述提供给你的“引擎技术特性”），专业且严谨地分析为什么会识别出【{req.mode}】。
+        ### 🚦 智能管控建议
+        基于识别出的交通流，给出一条针对性的城市拥堵治理建议。
+
+        语气：干练、专业、有科技感，像一份政府内参报告。总字数控制在 350 字左右。"""
+
+    # 星火 API 配置与请求执行
+    spark_api_key = "ZOawgFgAMWrgzoramwRS:BkjUHBXpuOrXCpVQfFtJ"
+    spark_url = "https://spark-api-open.xf-yun.com/v1/chat/completions"
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         try:
             async with client.stream(
                     "POST",
-                    f"{config['deepseek']['base_url']}/chat/completions",
-                    headers={"Authorization": f"Bearer {config['deepseek']['api_key']}"},
+                    spark_url,
+                    headers={
+                        "Authorization": f"Bearer {spark_api_key}",
+                        "Content-Type": "application/json"
+                    },
                     json={
-                        "model": config['deepseek']['model'],
+                        "model": "lite",
                         "messages": [{"role": "user", "content": prompt}],
-                        "stream": True
+                        "stream": True,
+                        "temperature": 0.85  # 调高温度，激发大模型的文案创作灵感
                     }
             ) as response:
                 if response.status_code != 200:
-                    yield f"data: {json.dumps({'status': 'generating', 'content': 'AI 服务暂时繁忙，请稍后再试。'})}\n\n"
+                    error_msg = await response.aread()
+                    yield f"data: {json.dumps({'status': 'generating', 'content': f'AI 服务请求失败: {error_msg.decode()}'})}\n\n"
                     return
 
                 async for line in response.aiter_lines():
                     if line.startswith("data: "):
                         if "[DONE]" in line: break
-                        data = json.loads(line[6:])
-                        chunk = data["choices"][0]["delta"].get("content", "")
-                        if chunk:
-                            yield f"data: {json.dumps({'status': 'generating', 'content': chunk})}\n\n"
+                        try:
+                            data = json.loads(line[6:])
+                            chunk = data["choices"][0]["delta"].get("content", "")
+                            if chunk:
+                                yield f"data: {json.dumps({'status': 'generating', 'content': chunk})}\n\n"
+                        except Exception as e:
+                            pass
 
                 yield f"data: {json.dumps({'status': 'done'})}\n\n"
         except Exception as e:
-            yield f"data: {json.dumps({'status': 'generating', 'content': f'连接模型失败: {str(e)}'})}\n\n"
+            yield f"data: {json.dumps({'status': 'generating', 'content': f'连接星火大模型失败: {str(e)}'})}\n\n"
 
 
 @router.post("/generate_report_stream")
 async def generate_report_stream(req: ReportRequest, current_user: User = Depends(get_current_user)):
-    return StreamingResponse(generate_deepseek_stream(req), media_type="text/event-stream")
+    # 调用星火流式生成器
+    return StreamingResponse(generate_spark_stream(req), media_type="text/event-stream")
 
 
 @router.get("/history", response_model=List[HistoryRecord])

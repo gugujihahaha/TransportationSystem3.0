@@ -276,44 +276,35 @@ const generateAIReport = async (dist: string, co2: string, trees: string, modeNa
   isGeneratingReport.value = true
   aiReport.value = ''
   
-  let prompt = ''
-  if (Number(dist) > 0) {
-    prompt = `你是一个非常幽默、热情的网络爆款文案编辑。这位名叫“${userName.value}”的用户今天完成了 ${dist}km 的【${modeName}】绿色出行，减少了 ${co2}kg 的碳排放，等于种了 ${trees} 棵树！\n请为TA写一段适合发在微信朋友圈的夸奖文案。要求：\n1. 语气生动活泼，大量使用 emoji 表情\n2. 要有高级感，显得TA很自律、很环保\n3. 不要机械重复数据，要融入生活化的场景\n4. 100-150字左右，必须排版精美。`
-  } else {
-    prompt = `你是一个贴心且带点幽默的环保倡导者。用户“${userName.value}”本次出行被系统识别为【${modeName}】。请写一段暖心的寄语，先肯定出行的辛苦，再用一句俏皮的话鼓励TA下次有机会可以尝试低碳出行（地铁/骑行），字数100字左右，多用点Emoji。`
-  }
-
   try {
-    const response = await fetch('/spark-api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ZOawgFgAMWrgzoramwRS:BkjUHBXpuOrXCpVQfFtJ` 
+    await trajectoryApi.streamReport(
+      {
+        model_id: 'exp1',
+        mode: modeName,
+        confidence: '95.0', // 绿色出行场景使用默认高置信度即可
+        scene: 'green',
+        distance: dist,
+        co2: co2
       },
-      body: JSON.stringify({ model: 'lite', messages: [{ role: 'user', content: prompt }], temperature: 0.85, stream: true })
-    })
-
-    if (!response.body) throw new Error('流式响应不可用')
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder('utf-8')
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      const lines = decoder.decode(value, { stream: true }).split('\n')
-      for (const line of lines) {
-        if (line.startsWith('data: ') && !line.includes('[DONE]')) {
-          try {
-            aiReport.value += JSON.parse(line.substring(6)).choices[0].delta.content || ''
-            nextTick(() => { if (scrollBox.value) scrollBox.value.scrollTop = scrollBox.value.scrollHeight })
-          } catch (e) {}
-        }
+      // onMessage 回调：接收源源不断的文字流
+      (text) => {
+        aiReport.value = text;
+        nextTick(() => { if (scrollBox.value) scrollBox.value.scrollTop = scrollBox.value.scrollHeight })
+      },
+      // onDone 回调
+      () => {
+        isGeneratingReport.value = false;
+      },
+      // onError 回调
+      (error) => {
+        console.error(error);
+        aiReport.value = `**生成文案失败**\n请检查网络连接或后端服务状态。`;
+        isGeneratingReport.value = false;
       }
-    }
+    );
   } catch (error) {
-    aiReport.value = `**生成文案失败**\n请检查网络连接或 API Key 是否有效。`
-  } finally {
-    isGeneratingReport.value = false
+    aiReport.value = `**生成文案失败**\n请检查网络连接。`;
+    isGeneratingReport.value = false;
   }
 }
 
