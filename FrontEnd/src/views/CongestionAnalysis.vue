@@ -272,38 +272,35 @@ const formattedReport = computed(() => {
     .replace(/\*\*(.*?)\*\*/g, '<strong style="color: #E6A23C;">$1</strong>')
     .replace(/\n/g, '<br/>')
 })
-
 const generateAIReport = async (modelId: string, modeName: string, confValue: string) => {
-  isGeneratingReport.value = true; aiReport.value = ''
-  const prompt = `你是一个专业的城市交通规划局高级研判专家。基于以下系统识别数据生成一份逻辑严密的溯源报告：\n1. 驱动引擎：${modelId.toUpperCase()}\n2. 识别出的主要拥堵源交通流：${modeName}\n3. 多模态引擎置信度：${confValue}%\n请按“拥堵时空特征推导”和“路段管控建议”两个层级输出，使用Markdown的 ### 作为小标题，语言要专业干练，总字数约150字左右。`
+  isGeneratingReport.value = true; 
+  aiReport.value = '';
 
   try {
-    const response = await fetch('/spark-api/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ZOawgFgAMWrgzoramwRS:BkjUHBXpuOrXCpVQfFtJ` },
-      body: JSON.stringify({ model: 'lite', messages: [{ role: 'user', content: prompt }], temperature: 0.7, stream: true })
-    })
-
-    if (!response.body) throw new Error('流式响应不可用')
-    const reader = response.body.getReader(); const decoder = new TextDecoder('utf-8')
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      const lines = decoder.decode(value, { stream: true }).split('\n')
-      for (const line of lines) {
-        if (line.startsWith('data: ') && !line.includes('[DONE]')) {
-          try {
-            aiReport.value += JSON.parse(line.substring(6)).choices[0].delta.content || ''
-            nextTick(() => { if (scrollBox.value) scrollBox.value.scrollTop = scrollBox.value.scrollHeight })
-          } catch (e) {}
-        }
+    // 调用安全的后端流式接口
+    await trajectoryApi.streamReport(
+      {
+        model_id: modelId,
+        mode: modeName,
+        confidence: confValue,
+        scene: 'congestion'
+      },
+      (text) => {
+        aiReport.value = text;
+        nextTick(() => { if (scrollBox.value) scrollBox.value.scrollTop = scrollBox.value.scrollHeight })
+      },
+      () => {
+        isGeneratingReport.value = false;
+      },
+      (error) => {
+        console.error(error);
+        aiReport.value = `**生成报告失败**\n请检查后端大模型服务。`;
+        isGeneratingReport.value = false;
       }
-    }
+    );
   } catch (error) {
-    aiReport.value = `**生成报告失败**\n请检查网络。`
-  } finally {
-    isGeneratingReport.value = false
+    aiReport.value = `**生成报告失败**\n请检查网络连接。`;
+    isGeneratingReport.value = false;
   }
 }
 
