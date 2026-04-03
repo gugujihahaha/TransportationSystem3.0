@@ -53,6 +53,12 @@ const router = createRouter({
           meta: { title: '核心算法与模型演进' }
         },
         {
+          path: 'model-comparison',
+          name: 'modelComparison',
+          component: () => import('../views/ModelComparison.vue'),
+          meta: { title: '消融实验与模型对比' }
+        },
+        {
           path: 'user-center',
           name: 'userCenter',
           component: () => import('../views/UserCenterView.vue'),
