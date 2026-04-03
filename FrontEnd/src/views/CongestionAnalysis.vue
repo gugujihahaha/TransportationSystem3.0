@@ -12,7 +12,7 @@
               <el-tag size="small" type="warning" effect="dark">驱动引擎: {{ activeEngine.toUpperCase() }}</el-tag>
             </div>
           </div>
-          <div class="panel-content map-wrapper" v-loading="isAnalyzing" element-loading-text="PyTorch 多模态引擎推理中..." element-loading-background="rgba(11, 13, 18, 0.8)">
+          <div class="panel-content map-wrapper" v-loading="isAnalyzing" element-loading-text="时空档案还原与引擎推理中..." element-loading-background="rgba(11, 13, 18, 0.8)">
             
             <div ref="mapContainer" class="leaflet-map"></div>
             
@@ -40,7 +40,7 @@
               </el-upload>
             </div>
 
-            <div class="section-box" :class="{ 'blur-mask': !currentFile }">
+            <div class="section-box" :class="{ 'blur-mask': !hasData && !currentFile }">
               <div class="box-title">2. 动态消融引擎切换</div>
               <div class="engine-list">
                 <div v-for="(name, key) in engines" :key="key" 
@@ -134,6 +134,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick, computed } from 'vue'
+import { useRoute } from 'vue-router'
 import { Location, DataBoard, UploadFilled, Tickets } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import L from 'leaflet'
@@ -142,6 +143,7 @@ import { trajectoryApi } from '../api/trajectory'
 import { useAuthStore } from '@/stores/auth'
 import html2pdf from 'html2pdf.js'
 
+const route = useRoute()
 const authStore = useAuthStore()
 const userName = computed(() => authStore.username || '交通系统研究员')
 const currentDate = new Date().toLocaleDateString()
@@ -157,19 +159,8 @@ const activeEngine = ref('exp1')
 const currentMode = ref('--')
 const confidence = ref('0.0')
 
-const engines = {
-  exp1: '纯轨迹基线模型',
-  exp2: '+ OSM 路网拓扑增强',
-  exp3: '+ 气象特征解耦',
-  exp4: 'Focal Loss 终极优化'
-}
-
-const modeColors: Record<string, string> = {
-  car: '#F56C6C', taxi: '#F56C6C',
-  bus: '#67C23A', subway: '#67C23A',
-  bike: '#4A90E2', walk: '#4A90E2',
-  unknown: '#909399'
-}
+const engines = { exp1: '纯轨迹基线模型', exp2: '+ OSM 路网拓扑增强', exp3: '+ 气象特征解耦', exp4: 'Focal Loss 终极优化' }
+const modeColors: Record<string, string> = { car: '#F56C6C', taxi: '#F56C6C', bus: '#67C23A', subway: '#67C23A', bike: '#4A90E2', walk: '#4A90E2', unknown: '#909399' }
 
 const mapContainer = ref<HTMLElement | null>(null)
 let map: L.Map | null = null
@@ -179,9 +170,7 @@ let markers: L.Layer[] = []
 const initMap = () => {
   if (!mapContainer.value) return
   map = L.map(mapContainer.value).setView([39.9042, 116.4074], 12)
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors', maxZoom: 19, className: 'dark-map-tiles' 
-  }).addTo(map)
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OSM', maxZoom: 19, className: 'dark-map-tiles' }).addTo(map)
 }
 
 const renderTrajectory = (points: any[], mode: string) => {
@@ -190,27 +179,20 @@ const renderTrajectory = (points: any[], mode: string) => {
   markers.forEach(m => map!.removeLayer(m))
   markers = []
 
-const latLngs = points.map(p => {
+  const latLngs = points.map(p => {
     const lat = p.lat || p.latitude || p.y || (Array.isArray(p) ? p[1] : undefined);
     const lng = p.lng || p.lon || p.longitude || p.x || (Array.isArray(p) ? p[0] : undefined);
     return [lat, lng];
   }).filter(p => p[0] !== undefined && p[1] !== undefined) as [number, number][];
 
   if (latLngs.length === 0) return;
-const color = modeColors[mode.toLowerCase()] || '#4A90E2'
+  const color = modeColors[mode.toLowerCase()] || '#4A90E2'
   currentPolyline = L.polyline(latLngs, { color: color, weight: 6, opacity: 0.9, lineCap: 'round', lineJoin: 'round'}).addTo(map);
 
   const startPoint = latLngs[0] as L.LatLngExpression;
   const endPoint = latLngs[latLngs.length - 1] as L.LatLngExpression;
-
   const startMarker = L.circleMarker(startPoint, { radius: 7, fillColor: '#52C41A', color: '#fff', weight: 2, fillOpacity: 1 }).addTo(map);
-  const endMarker = L.marker(endPoint, {
-    icon: L.divIcon({
-      className: 'custom-end-marker',
-      html: '<div style="width: 14px; height: 14px; background: #F5222D; border: 2px solid #fff; border-radius: 2px; box-shadow: 0 0 5px rgba(0,0,0,0.5);"></div>',
-      iconSize: [14, 14], iconAnchor: [7, 7],
-    }),
-  }).addTo(map);
+  const endMarker = L.marker(endPoint, { icon: L.divIcon({ className: 'custom-end-marker', html: '<div style="width: 14px; height: 14px; background: #F5222D; border: 2px solid #fff; border-radius: 2px; box-shadow: 0 0 5px rgba(0,0,0,0.5);"></div>', iconSize: [14, 14], iconAnchor: [7, 7] }) }).addTo(map);
 
   markers.push(startMarker, endMarker);
   map.fitBounds(currentPolyline.getBounds(), { padding: [50, 50], animate: true, duration: 1 });
@@ -222,18 +204,21 @@ const handleUpload = async (file: any) => {
 }
 
 const switchEngine = async (key: string) => {
-  if (!currentFile.value) return
+  if (!currentFile.value && !hasData.value) return // 只有在没数据且没文件时才阻止
   activeEngine.value = key
+  // 如果是从历史记录进来的，只改变显示，提示用户需重新上传文件来跑新模型
+  if (!currentFile.value) {
+      ElMessage.warning('这是历史记录的快照。若要测试其他引擎，请重新上传轨迹文件。');
+      return;
+  }
   await executeAnalysis(key)
 }
 
 const executeAnalysis = async (modelId: string) => {
-  isAnalyzing.value = true
-  hasData.value = false
-  aiReport.value = ''
-  
+  isAnalyzing.value = true; hasData.value = false; aiReport.value = ''
   try {
-    const res: any = await trajectoryApi.predict(currentFile.value, modelId)
+    // 重点修改：向后端发送 scene = 'congestion'
+    const res: any = await trajectoryApi.predict(currentFile.value, modelId, 'congestion')
     currentMode.value = translateMode(res.predicted_mode || 'unknown')
     confidence.value = res.confidence ? (res.confidence * 100).toFixed(1) : '95.2'
 
@@ -249,12 +234,36 @@ const executeAnalysis = async (modelId: string) => {
   }
 }
 
+// 核心时空穿梭功能：根据 ID 还原页面
+const restoreHistoryData = async (id: string) => {
+  isAnalyzing.value = true; hasData.value = false; aiReport.value = '';
+  try {
+    const record = await trajectoryApi.getHistoryById(id);
+    activeEngine.value = record.model_id || 'exp1';
+    currentMode.value = translateMode(record.predicted_mode || 'unknown');
+    confidence.value = record.confidence ? (record.confidence * 100).toFixed(1) : '95.2';
+    hasData.value = true;
+
+    // 重新在地图上绘制坐标！
+    if (record.points && record.points !== '[]') {
+      const pts = typeof record.points === 'string' ? JSON.parse(record.points) : record.points;
+      renderTrajectory(pts, record.predicted_mode || 'unknown');
+    }
+
+    generateAIReport(activeEngine.value, currentMode.value, confidence.value);
+    ElMessage.success(`时空档案已还原！引擎快照：${activeEngine.value.toUpperCase()}`);
+  } catch (error) {
+    ElMessage.error('无法读取历史档案数据，文件可能已损坏');
+  } finally {
+    isAnalyzing.value = false;
+  }
+}
+
 const translateMode = (mode: string) => {
   const map: Record<string, string> = { 'car': '私家车', 'bus': '公交车', 'walk': '步行', 'bike': '自行车', 'subway': '地铁', 'taxi': '出租车' }
   return map[mode.toLowerCase()] || mode.toUpperCase()
 }
 
-// 解决 ### 符号！强化版的 Markdown 处理器
 const formattedReport = computed(() => {
   if (!aiReport.value) return ''
   return aiReport.value
@@ -265,24 +274,14 @@ const formattedReport = computed(() => {
 })
 
 const generateAIReport = async (modelId: string, modeName: string, confValue: string) => {
-  isGeneratingReport.value = true
-  aiReport.value = ''
-  
+  isGeneratingReport.value = true; aiReport.value = ''
   const prompt = `你是一个专业的城市交通规划局高级研判专家。基于以下系统识别数据生成一份逻辑严密的溯源报告：\n1. 驱动引擎：${modelId.toUpperCase()}\n2. 识别出的主要拥堵源交通流：${modeName}\n3. 多模态引擎置信度：${confValue}%\n请按“拥堵时空特征推导”和“路段管控建议”两个层级输出，使用Markdown的 ### 作为小标题，语言要专业干练，总字数约150字左右。`
 
   try {
     const response = await fetch('/spark-api/v1/chat/completions', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ZOawgFgAMWrgzoramwRS:BkjUHBXpuOrXCpVQfFtJ` 
-      },
-      body: JSON.stringify({
-        model: 'lite',
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.7,
-        stream: true
-      })
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ZOawgFgAMWrgzoramwRS:BkjUHBXpuOrXCpVQfFtJ` },
+      body: JSON.stringify({ model: 'lite', messages: [{ role: 'user', content: prompt }], temperature: 0.7, stream: true })
     })
 
     if (!response.body) throw new Error('流式响应不可用')
@@ -308,29 +307,28 @@ const generateAIReport = async (modelId: string, modeName: string, confValue: st
   }
 }
 
-// 📸 导出专属白底研判简报
 const exportToPDF = () => {
   const element = document.getElementById('congestion-pdf-report') 
   if (!element) return
-
   const opt = {
-    margin:       0,
-    filename:     `交通分析报告_${new Date().getTime()}.pdf`,
-    image:        { type: 'jpeg' as const, quality: 1.0 },
-    html2canvas:  { scale: 3, useCORS: true, backgroundColor: '#ffffff' },
-    jsPDF:        { unit: 'px' as const, format: [800, 1000] as [number, number], orientation: 'portrait' as const }
+    margin: 0, filename: `交通分析报告_${new Date().getTime()}.pdf`,
+    image: { type: 'jpeg' as const, quality: 1.0 },
+    html2canvas: { scale: 3, useCORS: true, backgroundColor: '#ffffff' },
+    jsPDF: { unit: 'px' as const, format: [800, 1000] as [number, number], orientation: 'portrait' as const }
   }
-  
   ElMessage.success('正在为您生成专属报告，请稍候...')
   html2pdf().set(opt).from(element).save()
 }
 
-onMounted(() => { nextTick(() => { initMap() }) })
+onMounted(() => { 
+  nextTick(() => { initMap() }) 
+  if (route.query.id) restoreHistoryData(route.query.id as string)
+})
 onUnmounted(() => { if (map) { map.remove(); map = null } })
 </script>
 
 <style scoped>
-/* 原有页面样式完全保持不变 */
+/* 保持你的完美样式不变，直接沿用你发我的即可 */
 .congestion-container { height: calc(100vh - 70px); padding: 20px; box-sizing: border-box; }
 .full-height { height: 100%; }
 .panel { border-radius: 12px; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
@@ -377,76 +375,21 @@ onUnmounted(() => { if (map) { map.remove(); map = null } })
 @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
 @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
 
-/* ========================================= */
-/* 📑 专为导出 PDF 设计的高级白底简报（在网页上隐藏） */
-/* ========================================= */
-.pdf-export-wrapper {
-  position: absolute;
-  top: -9999px; /* 藏在屏幕外 */
-  left: -9999px;
-  z-index: -1;
-}
-
-.pdf-poster {
-  width: 800px;
-  min-height: 1000px; 
-  background: #ffffff;
-  padding: 60px;
-  font-family: 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  color: #334155;
-  box-sizing: border-box;
-  position: relative;
-  overflow: hidden;
-  border-top: 15px solid #2b3a4a; /* 增加严肃感 */
-}
-
-/* 顶部网格装饰，增加科技感 */
-.pdf-poster::after {
-  content: ''; position: absolute; top: 0; right: 0;
-  width: 300px; height: 150px; 
-  background-image: linear-gradient(rgba(74, 144, 226, 0.1) 1px, transparent 1px),
-  linear-gradient(90deg, rgba(74, 144, 226, 0.1) 1px, transparent 1px);
-  background-size: 20px 20px; z-index: 0;
-}
-
-.poster-header {
-  border-bottom: 2px solid #cbd5e1;
-  padding-bottom: 20px;
-  margin-bottom: 40px;
-  position: relative; z-index: 1;
-}
+.pdf-export-wrapper { position: absolute; top: -9999px; left: -9999px; z-index: -1; }
+.pdf-poster { width: 800px; min-height: 1000px; background: #ffffff; padding: 60px; font-family: 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', sans-serif; color: #334155; box-sizing: border-box; position: relative; overflow: hidden; border-top: 15px solid #2b3a4a; }
+.pdf-poster::after { content: ''; position: absolute; top: 0; right: 0; width: 300px; height: 150px; background-image: linear-gradient(rgba(74, 144, 226, 0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(74, 144, 226, 0.1) 1px, transparent 1px); background-size: 20px 20px; z-index: 0; }
+.poster-header { border-bottom: 2px solid #cbd5e1; padding-bottom: 20px; margin-bottom: 40px; position: relative; z-index: 1; }
 .poster-title { font-size: 34px; font-weight: 800; color: #1e293b; margin-bottom: 10px; letter-spacing: 1px;}
 .poster-subtitle { font-size: 16px; color: #64748b; display: flex; justify-content: space-between; align-items: flex-end;}
 .poster-subtitle strong { color: #4A90E2; font-size: 18px; margin-left: 5px; }
-
-.poster-stats {
-  display: flex; justify-content: space-between; gap: 20px; margin-bottom: 40px; position: relative; z-index: 1;
-}
-.stat-box {
-  flex: 1; background: #f8fafc; padding: 25px 20px; border-radius: 8px;
-  border: 1px solid #e2e8f0; text-align: center;
-}
+.poster-stats { display: flex; justify-content: space-between; gap: 20px; margin-bottom: 40px; position: relative; z-index: 1; }
+.stat-box { flex: 1; background: #f8fafc; padding: 25px 20px; border-radius: 8px; border: 1px solid #e2e8f0; text-align: center; }
 .stat-value { font-size: 30px; font-weight: bold; color: #334155; line-height: 1.2;}
 .stat-value small { font-size: 16px; }
 .stat-label { font-size: 14px; color: #64748b; margin-top: 10px; font-weight: bold;}
-
-.poster-ai-section {
-  background: #ffffff; padding: 40px; border-radius: 8px;
-  border: 1px solid #e2e8f0; position: relative; z-index: 1;
-}
-.ai-badge {
-  position: absolute; top: -12px; left: 30px; color: white;
-  padding: 5px 15px; border-radius: 4px; font-weight: bold; font-size: 14px;
-}
-.pdf-ai-text {
-  font-size: 16px; line-height: 2; color: #334155; text-align: justify;
-}
-
-.poster-footer {
-  margin-top: 60px; text-align: center; color: #94a3b8; font-size: 14px; position: relative;
-}
-.watermark {
-  font-size: 70px; font-weight: 900; 
-  position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); white-space: nowrap; pointer-events: none;
-}
+.poster-ai-section { background: #ffffff; padding: 40px; border-radius: 8px; border: 1px solid #e2e8f0; position: relative; z-index: 1; }
+.ai-badge { position: absolute; top: -12px; left: 30px; color: white; padding: 5px 15px; border-radius: 4px; font-weight: bold; font-size: 14px; }
+.pdf-ai-text { font-size: 16px; line-height: 2; color: #334155; text-align: justify; }
+.poster-footer { margin-top: 60px; text-align: center; color: #94a3b8; font-size: 14px; position: relative; }
+.watermark { font-size: 70px; font-weight: 900; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); white-space: nowrap; pointer-events: none; }
 </style>

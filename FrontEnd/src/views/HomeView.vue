@@ -18,7 +18,7 @@
         </p>
         
         <div class="action-group">
-          <button class="cyber-btn primary" @click="navigateTo('/data-dashboard')">
+          <button class="cyber-btn primary" @click="navigateTo('/dashboard')">
             <span class="btn-text">进入数据舱</span>
             <span class="btn-glitch"></span>
           </button>

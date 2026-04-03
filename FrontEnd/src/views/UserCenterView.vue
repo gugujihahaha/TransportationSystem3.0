@@ -38,6 +38,10 @@
           </div>
         </div>
 
+        <button class="cyber-btn history-btn" @click="router.push('/history')">
+          <span>📂 查阅完整历史档案</span>
+        </button>
+
         <button class="cyber-btn edit-btn" @click="handleLogout">
           <span>安全退出登录</span>
         </button>
@@ -97,18 +101,14 @@
           </div>
         </div>
 
-        <div class="recent-reports panel-glass">
-          <h3 class="panel-title">近期 AI 推断记录 (Top 5)</h3>
-          <div v-if="recentHistory.length === 0" class="empty-state">
-            当前无历史推断记录。
-          </div>
-          <div v-else class="report-list">
-            <div class="report-row" v-for="(record, index) in recentHistory" :key="index">
-              <div class="report-id">记录 #{{ totalRecords - index }}</div>
-              <div class="report-route text-cyan">识别结果: {{ getRecordMode(record) }}</div>
-              <div class="report-status">置信度: {{ getRecordConfidence(record) }}</div>
-              <button class="view-btn">查看明细</button>
+<div class="archive-banner panel-glass" @click="router.push('/history')">
+          <div class="banner-content">
+            <div class="banner-icon text-cyan">📂</div>
+            <div class="banner-text">
+              <h3 class="banner-title">进入全量历史档案馆</h3>
+              <p>查阅、追溯并一键还原所有历史轨迹的 3D 地图与 AI 研判现场</p>
             </div>
+            <div class="banner-arrow">→</div>
           </div>
         </div>
 
@@ -343,7 +343,15 @@ onUnmounted(() => {
   font-size: 1.1rem; color: #cbd5e1; border-bottom: 1px solid rgba(255,255,255,0.05);
   padding-bottom: 15px; margin-bottom: 20px; font-weight: 600; letter-spacing: 1px;
 }
-
+.history-btn {
+  width: 100%; padding: 12px; background: rgba(0, 240, 255, 0.1); 
+  border: 1px solid var(--theme-cyan); color: var(--theme-cyan);
+  border-radius: 8px; font-weight: bold; cursor: pointer; 
+  transition: all 0.3s; margin-bottom: 15px; /* 与登出按钮拉开间距 */
+}
+.history-btn:hover {
+  background: var(--theme-cyan); color: #000; box-shadow: 0 0 15px var(--theme-cyan);
+}
 .text-cyan { color: var(--theme-cyan); text-shadow: 0 0 8px rgba(0,240,255,0.4); }
 .text-green { color: var(--theme-green); text-shadow: 0 0 8px rgba(0,255,136,0.4); }
 .text-gold { color: var(--theme-gold); text-shadow: 0 0 8px rgba(255,184,0,0.4); }
@@ -433,4 +441,15 @@ onUnmounted(() => {
   .report-row { grid-template-columns: 100px 1fr 100px; gap: 10px; }
   .report-status { display: none; }
 }
+
+.archive-banner { margin-top: 25px; padding: 25px; cursor: pointer; transition: all 0.4s; overflow: hidden; position: relative; }
+.archive-banner:hover { border-color: var(--theme-cyan); transform: translateY(-5px); box-shadow: 0 10px 30px rgba(0, 240, 255, 0.15); }
+.archive-banner::after { content: ''; position: absolute; right: -50px; bottom: -50px; width: 150px; height: 150px; background: radial-gradient(circle, rgba(0, 240, 255, 0.1) 0%, transparent 70%); border-radius: 50%; }
+.banner-content { display: flex; align-items: center; justify-content: space-between; position: relative; z-index: 1;}
+.banner-icon { font-size: 3rem; margin-right: 25px; }
+.banner-text { flex: 1; }
+.banner-title { font-size: 1.4rem; color: #fff; margin-bottom: 8px; font-weight: bold; letter-spacing: 1px; }
+.banner-text p { color: #94a3b8; font-size: 0.95rem; margin: 0; }
+.banner-arrow { font-size: 2rem; color: var(--theme-cyan); font-weight: bold; margin-left: 20px; transition: transform 0.3s; }
+.archive-banner:hover .banner-arrow { transform: translateX(10px); }
 </style>

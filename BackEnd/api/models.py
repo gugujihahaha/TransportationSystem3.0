@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text # 👈 确保顶部导入了 Text
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from api.database import Base
@@ -27,4 +27,6 @@ class TrajectoryHistory(Base):
     distance = Column(Float, default=0.0)  # 记录绿色减排里程
     created_at = Column(DateTime, default=datetime.utcnow)  # 预测时间
 
+    scene = Column(String)  # 记录是从哪个页面进来的 ('green' 或 'congestion')
+    points = Column(Text)  # 将包含所有经纬度的 JSON 文本存进来，用于前端重新画图
     owner = relationship("User", back_populates="histories")

@@ -4,6 +4,7 @@ import io
 import sys
 from pathlib import Path
 from typing import List
+import json  # 用于序列化 points
 
 import yaml
 from pydantic import BaseModel
@@ -49,6 +50,7 @@ predictors = {}
 weather_processor = None
 osm_extractor = None
 
+
 def load_osm_data():
     """加载真实OSM数据（优先使用缓存）"""
     global osm_extractor
@@ -56,44 +58,44 @@ def load_osm_data():
         import pickle
         import sys
         from pathlib import Path
-        
+
         exp2_path = str(Path(__file__).parent.parent.parent / "exp2")
         if exp2_path not in sys.path:
             sys.path.insert(0, exp2_path)
-        
+
         from exp2.src.osm_feature_extractor import OsmSpatialExtractor
-        
+
         spatial_cache_path = Path(__file__).parent.parent.parent / "exp2" / "cache" / "spatial_data.pkl"
         if spatial_cache_path.exists():
             print(f"📋 正在从缓存加载OSM数据: {spatial_cache_path}")
             with open(spatial_cache_path, 'rb') as f:
                 osm_extractor = pickle.load(f)
-            
+
             grid_cache_path = Path(__file__).parent.parent.parent / "exp2" / "cache" / "spatial_grid_cache.pkl"
             if grid_cache_path.exists():
                 osm_extractor.load_cache(str(grid_cache_path))
-            
+
             print(f"✅ OSM数据从缓存加载成功")
             print(f"   - 道路节点: {len(osm_extractor.road_coords) if osm_extractor.road_coords is not None else 0}")
             print(f"   - POI节点: {len(osm_extractor.poi_coords) if osm_extractor.poi_coords is not None else 0}")
             return
-        
+
         osm_geojson_path = Path(__file__).parent.parent.parent / "data" / "exp2.geojson"
         if osm_geojson_path.exists():
             print(f"📋 正在加载OSM数据: {osm_geojson_path}")
-            
+
             from exp2.src.data_preprocessing import OSMDataLoader
             osm_loader = OSMDataLoader(str(osm_geojson_path))
             osm_data = osm_loader.load_osm_data()
-            
+
             road_network = osm_loader.extract_road_network(osm_data)
             pois = osm_loader.extract_pois(osm_data)
-            
+
             print(f"   -> 加载了 {len(road_network)} 条道路, {len(pois)} 个POI")
-            
+
             osm_extractor = OsmSpatialExtractor()
             osm_extractor.build_from_osm(road_network, pois)
-            
+
             print(f"✅ OSM数据加载成功")
         else:
             print(f"⚠️ OSM数据文件不存在: {osm_geojson_path}")
@@ -101,6 +103,7 @@ def load_osm_data():
         print(f"⚠️ 加载OSM数据失败: {e}")
         import traceback
         traceback.print_exc()
+
 
 def load_weather_data():
     """加载真实天气数据"""
@@ -117,22 +120,23 @@ def load_weather_data():
     except Exception as e:
         print(f"⚠️ 加载天气数据失败: {e}")
 
+
 def load_predictors():
     """加载所有预测器"""
     import sys
     from pathlib import Path
-    
+
     base_dir = Path(__file__).parent.parent.parent
-    
+
     exp1_path = str(base_dir / "exp1")
     exp2_path = str(base_dir / "exp2")
     exp3_path = str(base_dir / "exp3")
     exp4_path = str(base_dir / "exp4")
-    
+
     for path in [exp1_path, exp2_path, exp3_path, exp4_path]:
         if path not in sys.path:
             sys.path.insert(0, path)
-    
+
     try:
         from exp1.predict import TrajectoryPredictor
         model_path = base_dir / "exp1" / "checkpoints" / "exp1_model.pth"
@@ -144,7 +148,7 @@ def load_predictors():
         print(f"⚠️ 加载 exp1 预测器失败: {e}")
         import traceback
         traceback.print_exc()
-    
+
     try:
         from exp2.predict import TransportationPredictorExp2
         model_path = base_dir / "exp2" / "checkpoints" / "exp2_model.pth"
@@ -156,7 +160,7 @@ def load_predictors():
         print(f"⚠️ 加载 exp2 预测器失败: {e}")
         import traceback
         traceback.print_exc()
-    
+
     try:
         from exp3.predict import TransportationPredictorExp3
         model_path = base_dir / "exp3" / "checkpoints" / "exp3_model.pth"
@@ -168,7 +172,7 @@ def load_predictors():
         print(f"⚠️ 加载 exp3 预测器失败: {e}")
         import traceback
         traceback.print_exc()
-    
+
     try:
         from exp4.predict import TransportationPredictorExp4
         model_path = base_dir / "exp4" / "checkpoints" / "exp4_model.pth"
@@ -181,18 +185,19 @@ def load_predictors():
         import traceback
         traceback.print_exc()
 
+
 # load_predictors()  # 在 main.py 的 startup 事件中调用
 
 def load_plt_file(content: bytes) -> pd.DataFrame:
     """加载 PLT 格式文件（Geolife 格式）"""
     try:
         lines = content.decode('utf-8').splitlines()
-        
+
         if len(lines) < 7:
             raise ValueError("PLT 文件格式错误：文件过短")
-        
+
         data_lines = lines[6:]
-        
+
         data = []
         for line in data_lines:
             parts = line.strip().split(',')
@@ -210,47 +215,48 @@ def load_plt_file(content: bytes) -> pd.DataFrame:
                     })
                 except (ValueError, IndexError):
                     continue
-        
+
         if not data:
             raise ValueError("PLT 文件中没有有效的数据点")
-        
+
         df = pd.DataFrame(data)
         df['timestamp'] = pd.to_datetime(df['timestamp'])
         return df
     except Exception as e:
         raise ValueError(f"解析 PLT 文件失败: {str(e)}")
 
+
 def compute_trajectory_features(df: pd.DataFrame) -> tuple:
     """计算轨迹特征（9维）和统计特征（18维）"""
     df = df.sort_values('timestamp').reset_index(drop=True)
-    
+
     df['time_diff'] = df['timestamp'].diff().dt.total_seconds().fillna(0)
-    
+
     lat1 = df['latitude'].shift(1).fillna(df['latitude'].iloc[0])
     lon1 = df['longitude'].shift(1).fillna(df['longitude'].iloc[0])
     lat2 = df['latitude']
     lon2 = df['longitude']
-    
+
     lat1_rad = np.radians(lat1)
     lon1_rad = np.radians(lon1)
     lat2_rad = np.radians(lat2)
     lon2_rad = np.radians(lon2)
-    
+
     dlat = lat2_rad - lat1_rad
     dlon = lon2_rad - lon1_rad
-    
+
     a = np.sin(dlat / 2) ** 2 + np.cos(lat1_rad) * np.cos(lat2_rad) * np.sin(dlon / 2) ** 2
     c = 2 * np.arcsin(np.sqrt(a))
-    
+
     distances = 6371000 * c
     distances.iloc[0] = 0.0
     df['distance'] = distances
-    
+
     time_diff_safe = df['time_diff'].replace(0, 1e-6)
     df['speed'] = df['distance'] / time_diff_safe
     df['acceleration'] = df['speed'].diff() / time_diff_safe
     df['acceleration'] = df['acceleration'].fillna(0)
-    
+
     y = np.sin(dlon) * np.cos(lat2_rad)
     x = np.cos(lat1_rad) * np.sin(lat2_rad) - np.sin(lat1_rad) * np.cos(lat2_rad) * np.cos(dlon)
     bearing = np.degrees(np.arctan2(y, x))
@@ -263,24 +269,25 @@ def compute_trajectory_features(df: pd.DataFrame) -> tuple:
         360 - df['bearing_change'],
         df['bearing_change']
     )
-    
+
     df['total_distance'] = df['distance'].cumsum()
     df['total_time'] = df['time_diff'].cumsum()
-    
+
     features = df[[
         'latitude', 'longitude', 'speed', 'acceleration',
         'bearing_change', 'distance', 'time_diff',
         'total_distance', 'total_time'
     ]].values.astype(np.float32)
-    
+
     segment_stats = compute_segment_stats(features)
-    
+
     return features, df, segment_stats
+
 
 def compute_trajectory_features_21d(df: pd.DataFrame) -> np.ndarray:
     """计算21维轨迹特征（包含真实OSM空间特征）"""
     features_9d, df_with_stats, _ = compute_trajectory_features(df)
-    
+
     if osm_extractor is not None and osm_extractor.road_kdtree is not None:
         try:
             osm_features = osm_extractor.extract_spatial_features(features_9d)
@@ -288,19 +295,19 @@ def compute_trajectory_features_21d(df: pd.DataFrame) -> np.ndarray:
             return features_21d
         except Exception as e:
             print(f"⚠️ OSM特征提取失败: {e}，使用备用特征")
-    
+
     N = len(features_9d)
-    
+
     lat = df_with_stats['latitude'].values
     lon = df_with_stats['longitude'].values
     speed = df_with_stats['speed'].values
     acceleration = df_with_stats['acceleration'].values
-    
+
     hour_of_day = df_with_stats['timestamp'].dt.hour.values / 24.0
     day_of_week = df_with_stats['timestamp'].dt.dayofweek.values / 6.0
-    
+
     osm_features = np.zeros((N, 12), dtype=np.float32)
-    
+
     for i in range(N):
         osm_features[i, 0] = lat[i]
         osm_features[i, 1] = lon[i]
@@ -314,37 +321,38 @@ def compute_trajectory_features_21d(df: pd.DataFrame) -> np.ndarray:
         osm_features[i, 9] = np.cos(2 * np.pi * day_of_week[i])
         osm_features[i, 10] = speed[i] / (speed.max() + 1e-6)
         osm_features[i, 11] = min(1.0, speed[i] / 15.0)
-    
+
     features_21d = np.hstack([features_9d, osm_features])
-    
+
     return features_21d
+
 
 def compute_weather_features(df: pd.DataFrame) -> np.ndarray:
     """计算10维天气特征（使用真实天气数据）"""
     if weather_processor is not None and weather_processor._load_successful:
         return weather_processor.get_weather_features_for_trajectory(df['timestamp'])
-    
+
     N = len(df)
     weather_features = np.zeros((N, 10), dtype=np.float32)
-    
+
     hour = df['timestamp'].dt.hour.values
     minute = df['timestamp'].dt.minute.values
     day_of_week = df['timestamp'].dt.dayofweek.values
-    
+
     for i in range(N):
         h = hour[i]
         m = minute[i]
         dow = day_of_week[i]
-        
+
         time_of_day = h + m / 60.0
-        
+
         if 6 <= h < 18:
             weather_features[i, 0] = 1.0
             weather_features[i, 1] = 18.0 + 7.0 * np.sin((time_of_day - 6) * np.pi / 12)
         else:
             weather_features[i, 0] = 0.0
             weather_features[i, 1] = 12.0 + 5.0 * np.sin((time_of_day - 18) * np.pi / 12)
-        
+
         weather_features[i, 2] = 0.4 + 0.4 * np.sin(time_of_day * np.pi / 12)
         weather_features[i, 3] = 1013.25 + 4.0 * np.sin(time_of_day * np.pi / 6)
         weather_features[i, 4] = 3.0 + 4.0 * np.sin(time_of_day * np.pi / 8)
@@ -353,17 +361,18 @@ def compute_weather_features(df: pd.DataFrame) -> np.ndarray:
         weather_features[i, 7] = 1.0 if (7 <= h < 9) or (17 <= h < 19) else 0.0
         weather_features[i, 8] = np.sin(2 * np.pi * time_of_day / 24)
         weather_features[i, 9] = np.cos(2 * np.pi * time_of_day / 24)
-    
+
     return weather_features
+
 
 def compute_segment_stats(features: np.ndarray) -> np.ndarray:
     """计算18维统计特征"""
     eps = 1e-8
     N = len(features)
-    
+
     if N == 0:
         return np.zeros(18, dtype=np.float32)
-    
+
     speed = features[:, 2].clip(0)
     accel = np.abs(features[:, 3])
     bearing = np.abs(features[:, 4])
@@ -371,22 +380,22 @@ def compute_segment_stats(features: np.ndarray) -> np.ndarray:
     time_diff = features[:, 6].clip(0)
     total_dist = features[-1, 7] if features[-1, 7] > 0 else distance.sum()
     total_time = features[-1, 8] if features[-1, 8] > 0 else time_diff.sum()
-    
+
     speed_mean = float(np.mean(speed))
     speed_std = float(np.std(speed))
     speed_max = float(np.max(speed))
     speed_cv = speed_std / (speed_mean + eps)
-    
+
     accel_mean = float(np.mean(accel))
     accel_std = float(np.std(accel))
     accel_max = float(np.max(accel))
-    
+
     bearing_mean = float(np.mean(bearing))
     bearing_std = float(np.std(bearing))
-    
+
     stop_ratio = float(np.mean(speed < 0.5))
     high_speed_ratio = float(np.mean(speed > 15.0))
-    
+
     if total_dist > eps:
         lat_start, lon_start = features[0, 0], features[0, 1]
         lat_end, lon_end = features[-1, 0], features[-1, 1]
@@ -397,11 +406,11 @@ def compute_segment_stats(features: np.ndarray) -> np.ndarray:
         linearity = float(min(straight_dist / (total_dist + eps), 1.0))
     else:
         linearity = 0.0
-    
+
     total_distance_val = float(total_dist)
     total_time_val = float(total_time)
     avg_segment_speed = float(total_dist / (total_time + eps))
-    
+
     if speed_max > eps:
         hist, _ = np.histogram(speed, bins=10, range=(0, speed_max + eps))
         hist = hist / (hist.sum() + eps)
@@ -409,14 +418,14 @@ def compute_segment_stats(features: np.ndarray) -> np.ndarray:
         speed_entropy = float(-np.sum(hist * np.log(hist + eps)))
     else:
         speed_entropy = 0.0
-    
+
     if N > 1:
         raw_accel = features[:, 3]
         sign_changes = np.sum(np.diff(np.sign(raw_accel)) != 0)
         accel_sign_changes = float(sign_changes / (N - 1))
     else:
         accel_sign_changes = 0.0
-    
+
     high_speed_mask = speed > 10.0
     max_sustained = 0
     current_run = 0
@@ -427,7 +436,7 @@ def compute_segment_stats(features: np.ndarray) -> np.ndarray:
         else:
             current_run = 0
     max_sustained_speed = float(max_sustained / N)
-    
+
     stats = np.array([
         speed_mean, speed_std, speed_max, speed_cv,
         accel_mean, accel_std, accel_max,
@@ -439,10 +448,11 @@ def compute_segment_stats(features: np.ndarray) -> np.ndarray:
         accel_sign_changes,
         max_sustained_speed
     ], dtype=np.float32)
-    
+
     stats = np.nan_to_num(stats, nan=0.0, posinf=0.0, neginf=0.0)
-    
+
     return stats
+
 
 def normalize_sequence_length(features: np.ndarray, target_length: int = 50) -> np.ndarray:
     """统一序列长度"""
@@ -456,18 +466,19 @@ def normalize_sequence_length(features: np.ndarray, target_length: int = 50) -> 
         padding = np.zeros((target_length - len(features), feature_dim), dtype=np.float32)
         return np.vstack([features, padding])
 
-def predict_with_model(traj_features: np.ndarray, segment_stats: np.ndarray, 
-                      traj_features_21d: np.ndarray, weather_features: np.ndarray,
-                      model_id: str) -> tuple:
+
+def predict_with_model(traj_features: np.ndarray, segment_stats: np.ndarray,
+                       traj_features_21d: np.ndarray, weather_features: np.ndarray,
+                       model_id: str) -> tuple:
     """使用指定模型进行预测"""
     print(f"🔍 使用模型: {model_id}")
     print(f"📊 可用的模型: {list(predictors.keys())}")
-    
+
     if model_id not in predictors:
         raise HTTPException(status_code=400, detail=f"模型 {model_id} 未加载或不存在")
-    
+
     predictor = predictors[model_id]
-    
+
     if model_id == 'exp1':
         print(f"🧪 Exp1: 使用9维特征")
         pred_labels, confidences = predictor.predict(traj_features, segment_stats)
@@ -483,11 +494,19 @@ def predict_with_model(traj_features: np.ndarray, segment_stats: np.ndarray,
         pred_label, confidence = predictor.predict(traj_features_21d, weather_features, segment_stats)
         print(f"✅ {model_id} 预测结果: {pred_label}, 置信度: {confidence}")
         return pred_label, float(confidence)
-    
+
     return None, None
 
+
+# 增加及更新修复的地方：增加了 scene 参数，并处理了 JSON 序列化
 @router.post("/predict", response_model=TrajectoryPrediction)
-async def predict_trajectory(file: UploadFile = File(...), modelId: str = Form('exp1'),db: Session = Depends(get_db),current_user: User = Depends(get_current_user)):
+async def predict_trajectory(
+        file: UploadFile = File(...),
+        modelId: str = Form('exp1'),
+        scene: str = Form('unknown'),  # 👈 新增：接收从前端传来的 scene
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
     model = modelId  # 将接收到的 modelId 赋值给内部逻辑使用的 model 变量
     """上传GPS文件并预测交通方式"""
     if not predictors:
@@ -495,7 +514,7 @@ async def predict_trajectory(file: UploadFile = File(...), modelId: str = Form('
         load_predictors()
     try:
         content = await file.read()
-        
+
         if file.filename.endswith('.csv'):
             df = pd.read_csv(io.StringIO(content.decode('utf-8')))
         elif file.filename.endswith('.json'):
@@ -505,27 +524,27 @@ async def predict_trajectory(file: UploadFile = File(...), modelId: str = Form('
             df = load_plt_file(content)
         else:
             raise HTTPException(status_code=400, detail="不支持的文件格式，请上传CSV、JSON或PLT")
-        
+
         required_columns = ['latitude', 'longitude', 'timestamp']
         for col in required_columns:
             if col not in df.columns:
                 raise HTTPException(status_code=400, detail=f"缺少必需列: {col}")
-        
+
         df['timestamp'] = pd.to_datetime(df['timestamp'])
-        
+
         if len(df) < 10:
             raise HTTPException(status_code=400, detail="轨迹点太少，至少需要10个点")
-        
+
         features, df_with_stats, segment_stats = compute_trajectory_features(df)
-        
+
         features_normalized = normalize_sequence_length(features, 50)
-        
+
         features_21d = compute_trajectory_features_21d(df)
         features_21d_normalized = normalize_sequence_length(features_21d, 50)
-        
+
         weather_features = compute_weather_features(df)
         weather_features_normalized = normalize_sequence_length(weather_features, 50)
-        
+
         if model in predictors:
             predicted_mode, confidence = predict_with_model(
                 features_normalized, segment_stats,
@@ -536,7 +555,7 @@ async def predict_trajectory(file: UploadFile = File(...), modelId: str = Form('
             speed = features_normalized[:, 2].mean()
             max_speed = features_normalized[:, 2].max()
             avg_speed = features_normalized[:, 2].mean()
-            
+
             if max_speed > 50:
                 predicted_mode, confidence = "airplane", 0.95
             elif max_speed > 30:
@@ -551,9 +570,6 @@ async def predict_trajectory(file: UploadFile = File(...), modelId: str = Form('
                 predicted_mode, confidence = "bike", 0.80
             else:
                 predicted_mode, confidence = "walk", 0.78
-            
-            # if model != 'exp1':
-            #  # predicted_mode = f"{predicted_mode} (规则预测)"
 
         mode_mapping = {
             'Walk': 'walk',
@@ -565,14 +581,14 @@ async def predict_trajectory(file: UploadFile = File(...), modelId: str = Form('
             'Airplane': 'airplane'
         }
         predicted_mode = mode_mapping.get(predicted_mode, predicted_mode.lower())
-        
+
         total_distance = df_with_stats['distance'].sum()
         total_time = df_with_stats['time_diff'].sum()
         avg_speed = total_distance / (total_time + 1e-6)
         max_speed = df_with_stats['speed'].max()
-        
+
         trajectory_id = f"traj_{hash(file.filename) % 1000000}"
-        
+
         points = [
             TrajectoryPoint(
                 lat=row['latitude'],
@@ -582,7 +598,7 @@ async def predict_trajectory(file: UploadFile = File(...), modelId: str = Form('
             )
             for _, row in df_with_stats.iterrows()
         ]
-        
+
         stats = TrajectoryStats(
             distance=float(total_distance),
             duration=float(total_time),
@@ -590,13 +606,20 @@ async def predict_trajectory(file: UploadFile = File(...), modelId: str = Form('
             max_speed=float(max_speed)
         )
 
+        # 👇 重点修复 500 Error 的核心代码：将 Pydantic 转换为可被 json.dumps 解析的 dict
+        points_data = [p.dict() for p in points] if points else []
+        points_json = json.dumps(points_data)
+
+        # 实例化数据库记录，存入 scene 和 序列化后的 points_json
         new_history = TrajectoryHistory(
             user_id=current_user.id,
             trajectory_id=trajectory_id,
             model_id=modelId,
             predicted_mode=predicted_mode,
             confidence=float(confidence),
-            distance=float(total_distance)
+            distance=float(total_distance),
+            scene=scene,  # 👈 保存所在场景
+            points=points_json  # 👈 安全保存地图坐标
         )
         db.add(new_history)
         db.commit()
@@ -608,10 +631,11 @@ async def predict_trajectory(file: UploadFile = File(...), modelId: str = Form('
             points=points,
             stats=stats
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
+        db.rollback()
         raise HTTPException(status_code=500, detail=f"预测失败: {str(e)}")
 
 
@@ -624,9 +648,7 @@ async def get_transport_modes():
 
 
 import asyncio
-import json
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 
 
 class ReportRequest(BaseModel):
@@ -699,3 +721,14 @@ async def get_prediction_history(
     ).order_by(TrajectoryHistory.created_at.desc()).all()
 
     return records
+
+
+# 通过 ID 拉取指定的单条历史记录用于前端时空还原
+@router.get("/history/{record_id}")
+async def get_history_by_id(record_id: int, db: Session = Depends(get_db),
+                            current_user: User = Depends(get_current_user)):
+    record = db.query(TrajectoryHistory).filter(TrajectoryHistory.id == record_id,
+                                                TrajectoryHistory.user_id == current_user.id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+    return record
