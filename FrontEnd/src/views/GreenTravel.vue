@@ -1,104 +1,121 @@
 <template>
-  <div class="green-container">
-    <el-row :gutter="20" class="full-height">
+  <div class="cyber-battle-station">
+    
+    <div class="side-panel left-panel">
       
-      <el-col :span="14" class="full-height">
-        <div class="panel dark-panel map-panel">
-          <div class="panel-header">
-            <div class="header-left">
-              <el-icon><Compass /></el-icon> 跨城轨迹泛化识别与真实路网映射
-            </div>
-            <div class="header-actions">
-              <el-tag size="small" type="success" effect="dark">驱动引擎: Exp1 纯轨迹基线模型</el-tag>
-            </div>
+      <div class="cyber-card header-card">
+        <div class="cyber-title-box">
+          <h2 class="neon-text-green">个人低碳出行泛化验证控制台</h2>
+        </div>
+        <div class="sys-status blink-status-green"></div>
+      </div>
+
+      <div class="cyber-card content-card flex-col">
+        <div class="module-box">
+          <div class="module-header">
+            <span class="bracket">[</span> <span class="neon-text-green-sub">01</span> <span class="bracket">]</span> 历史轨迹泛化验证
           </div>
-          <div class="panel-content map-wrapper" v-loading="isAnalyzing" element-loading-text="历史数据追溯与渲染中..." element-loading-background="rgba(11, 13, 18, 0.8)">
-            <div ref="mapContainer" class="leaflet-map"></div>
-            
-            <div class="map-legend">
-              <div class="legend-item"><span class="line green"></span> 绿色出行 (公交/地铁/骑行/步行)</div>
-              <div class="legend-item"><span class="line red"></span> 高碳出行 (私家车/出租车)</div>
+          <el-upload 
+            class="neon-upload-area green-border" 
+            drag 
+            action="#" 
+            :auto-upload="false" 
+            :show-file-list="false" 
+            :on-change="handleFileUpload"
+            :disabled="isAnalyzing"
+          >
+            <div class="upload-content">
+              <el-icon class="upload-icon green-icon"><UploadFilled /></el-icon>
+              <div class="upload-text">推入轨迹矩阵进行碳核算</div>
+              <div class="upload-sub">CSV / PLT (自动调用预测)</div>
+            </div>
+          </el-upload>
+        </div>
+
+        <div class="module-box" :class="{ 'disabled-mask': !hasData }">
+          <div class="module-header">
+            <span class="bracket">[</span> <span class="neon-text-green-sub">02</span> <span class="bracket">]</span> 减排量化核算指标
+          </div>
+          <div class="carbon-grid">
+            <div class="carbon-item">
+              <div class="item-icon green-icon"><el-icon><Guide /></el-icon></div>
+              <div class="item-data">
+                <div class="val text-green">{{ stats.greenDistance }} <span class="unit">km</span></div>
+                <div class="label">识别绿色里程</div>
+              </div>
+            </div>
+            <div class="carbon-item">
+              <div class="item-icon blue-icon"><el-icon><WindPower /></el-icon></div>
+              <div class="item-data">
+                <div class="val text-blue">{{ stats.co2Saved }} <span class="unit">kg</span></div>
+                <div class="label">累计减少 CO₂</div>
+              </div>
             </div>
           </div>
         </div>
-      </el-col>
 
-      <el-col :span="10" class="full-height">
-        <div class="panel dark-panel control-panel">
-          <div class="panel-header">
-            <el-icon><Bicycle /></el-icon> 个人低碳出行看板
+        <div class="module-box flex-1" :class="{ 'disabled-mask': !hasData }">
+          <div class="module-header">
+            <span class="bracket">[</span> <span class="neon-text-green-sub">03</span> <span class="bracket">]</span> 模态锁定与环境效益
           </div>
-          <div class="panel-content flex-col">
-            
-            <div class="section-box">
-              <div class="box-title">1. 上传历史轨迹进行泛化验证</div>
-              <el-upload
-                class="trajectory-upload"
-                drag
-                action="#"
-                :auto-upload="false"
-                :show-file-list="false"
-                :on-change="handleFileUpload"
-                :disabled="isAnalyzing"
-              >
-                <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
-                <div class="el-upload__text">拖拽轨迹文件到此处，或 <em>点击上传</em></div>
-                <template #tip>
-                  <div class="el-upload__tip text-center">支持 .csv, .plt 格式 (系统将自动调用后端预测)</div>
-                </template>
-              </el-upload>
-            </div>
-
-            <div class="section-box" :class="{ 'blur-mask': !hasData }">
-              <div class="box-title">2. 减排量化核算 (基于真实识别结果)</div>
-              <div class="carbon-dashboard">
-                <div class="carbon-card">
-                  <div class="icon-wrap text-green"><el-icon><Guide /></el-icon></div>
-                  <div class="data-wrap">
-                    <div class="val text-green">{{ stats.greenDistance }} <span class="unit">km</span></div>
-                    <div class="label">识别绿色里程</div>
-                  </div>
-                </div>
-                <div class="carbon-card">
-                  <div class="icon-wrap text-blue"><el-icon><WindPower /></el-icon></div>
-                  <div class="data-wrap">
-                    <div class="val text-blue">{{ stats.co2Saved }} <span class="unit">kg</span></div>
-                    <div class="label">累计减少 CO₂</div>
-                  </div>
-                </div>
-                <div class="carbon-card tree-card">
-                  <div class="icon-wrap text-green"><el-icon><Sunny /></el-icon></div>
-                  <div class="data-wrap">
-                    <div class="val text-green">{{ stats.treesPlanted }} <span class="unit">棵</span></div>
-                    <div class="label">相当于种树</div>
-                  </div>
-                </div>
+          <div class="metrics-grid">
+            <div class="metric-card">
+              <div class="metric-val" :style="{ color: getModeColor(currentMode), textShadow: `0 0 15px ${getModeColor(currentMode)}` }">
+                {{ currentMode }}
               </div>
+              <div class="metric-label">本次出行判定</div>
             </div>
-
-            <div class="section-box report-box flex-1" :class="{ 'blur-mask': !hasData }">
-              <div class="box-title ai-title" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                <div><el-icon><Tickets /></el-icon> 星火 AI 专属表扬信</div>
-                <el-button type="success" size="small" @click="exportToPDF" :disabled="!aiReport || isGeneratingReport" style="background: #10b981; border: none; font-weight: bold;">
-                  📸 生成分享海报 (PDF)
-                </el-button>
-              </div>
-              <div class="ai-content" ref="scrollBox">
-                <div v-if="!aiReport && !isGeneratingReport" class="empty-text">等待模型分析完成...</div>
-                <div v-if="isGeneratingReport && !aiReport" class="empty-text" style="color: #4A90E2; animation: pulse 1s infinite;">
-                  星火大模型正在为你定制文案...
-                </div>
-                <div v-else-if="aiReport" class="typing-text">
-                  <span v-html="formattedReport"></span>
-                  <span v-if="isGeneratingReport" class="typing-cursor">|</span>
-                </div>
-              </div>
+            <div class="metric-card tree-highlight">
+              <div class="metric-val text-green">{{ stats.treesPlanted }}<span class="unit">棵</span></div>
+              <div class="metric-label">相当于种树</div>
             </div>
-
           </div>
         </div>
-      </el-col>
-    </el-row>
+      </div>
+    </div>
+
+    <div class="center-panel">
+      <div class="map-frame green-frame" v-loading="isAnalyzing" element-loading-text="时空特征提取与神经推理中..." element-loading-background="rgba(2, 11, 24, 0.85)">
+        <div ref="mapContainer" class="leaflet-map"></div>
+        
+        <div class="frame-corner top-left green-line"></div>
+        <div class="frame-corner top-right green-line"></div>
+        <div class="frame-corner bottom-left green-line"></div>
+        <div class="frame-corner bottom-right green-line"></div>
+
+        <div class="map-legend">
+          <div class="legend-item"><span class="line green-glow"></span> 绿色出行 (公交/地铁/骑行/步行)</div>
+          <div class="legend-item"><span class="line red-glow"></span> 高碳出行 (私家车/出租车)</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="side-panel right-panel">
+      <div class="cyber-card ai-card green-border">
+        <div class="ai-header green-bg-soft">
+          <div class="ai-title">
+            <el-icon class="pulse-icon-green"><Tickets /></el-icon> 星火 AI 专属表扬信
+          </div>
+          <el-button type="success" size="small" class="neon-btn-green" @click="exportToPDF" :disabled="!aiReport || isGeneratingReport">
+            📸 分享海报
+          </el-button>
+        </div>
+        
+        <div class="ai-body" ref="scrollBox">
+          <div v-if="!aiReport && !isGeneratingReport" class="ai-placeholder blink-text">
+            [ 等待数据流注入计算环境效益 ]
+          </div>
+          <div v-if="isGeneratingReport && !aiReport" class="ai-processing green-text">
+            <div class="spinner green-spinner"></div>
+            正在定制你的环保文案...
+          </div>
+          <div v-else-if="aiReport" class="ai-stream-text">
+            <span v-html="formattedReport"></span>
+            <span v-if="isGeneratingReport" class="type-cursor green-cursor"></span>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <div class="pdf-export-wrapper">
       <div id="green-pdf-poster" class="pdf-poster">
@@ -136,6 +153,7 @@
         </div>
       </div>
     </div>
+
   </div>
 </template>
 
@@ -176,9 +194,9 @@ const stats = reactive({
 const formattedReport = computed(() => {
   if (!aiReport.value) return ''
   return aiReport.value
-    .replace(/### (.*?)(?:\n|$)/g, '<h3 style="color: #4A90E2; margin: 12px 0 8px; font-size: 16px;">$1</h3>')
-    .replace(/## (.*?)(?:\n|$)/g, '<h2 style="color: #333; margin: 16px 0 10px; font-size: 18px; border-bottom: 1px solid #eee; padding-bottom: 5px;">$1</h2>')
-    .replace(/\*\*(.*?)\*\*/g, '<strong style="color: #67C23A;">$1</strong>')
+    .replace(/### (.*?)(?:\n|$)/g, '<h3 style="color: #39FF14; margin: 12px 0 8px; font-size: 16px;">▌ $1</h3>')
+    .replace(/## (.*?)(?:\n|$)/g, '<h2 style="color: #E2E8F0; margin: 16px 0 10px; font-size: 18px; border-bottom: 1px solid rgba(57, 255, 20, 0.2); padding-bottom: 5px;">$1</h2>')
+    .replace(/\*\*(.*?)\*\*/g, '<strong style="color: #39FF14;">$1</strong>')
     .replace(/\n/g, '<br/>')
 })
 
@@ -191,7 +209,6 @@ const handleFileUpload = async (uploadFile: any) => {
   aiReport.value = '';
   
   try {
-    // 重点修改：向后端发送 scene = 'green'
     const response = await trajectoryApi.predict(file, 'exp1', 'green'); 
     const result = response as any; 
     
@@ -220,7 +237,7 @@ const handleFileUpload = async (uploadFile: any) => {
     }
 
     generateAIReport(calcGreenDist, calcCo2, calcTrees, currentMode.value);
-    ElMessage.success(`模型解析完毕！真实判定为：${currentMode.value}`);
+    ElMessage.success(`绿色出行核算完毕！`);
 
   } catch (error) {
     ElMessage.error('模型推理失败，请检查服务状态');
@@ -229,7 +246,6 @@ const handleFileUpload = async (uploadFile: any) => {
   }
 }
 
-// 核心时空穿梭功能：根据 ID 还原页面
 const restoreHistoryData = async (id: string) => {
   isAnalyzing.value = true;
   hasData.value = false;
@@ -251,17 +267,15 @@ const restoreHistoryData = async (id: string) => {
     stats.treesPlanted = calcTrees;
     hasData.value = true;
 
-    // 重新在地图上绘制坐标！
     if (record.points && record.points !== '[]') {
       const pts = typeof record.points === 'string' ? JSON.parse(record.points) : record.points;
       renderLeafletTrajectory(pts, isGreen);
     }
 
-    // 再次触发大模型生成当年情境的报告
     generateAIReport(calcGreenDist, calcCo2, calcTrees, currentMode.value);
-    ElMessage.success(`时空档案已还原！当时判定为：${currentMode.value}`);
+    ElMessage.success(`时空档案还原成功！`);
   } catch (error) {
-    ElMessage.error('无法读取历史档案数据，文件可能已损坏');
+    ElMessage.error('无法读取历史档案数据');
   } finally {
     isAnalyzing.value = false;
   }
@@ -278,54 +292,36 @@ const generateAIReport = async (dist: string, co2: string, trees: string, modeNa
   
   try {
     await trajectoryApi.streamReport(
-      {
-        model_id: 'exp1',
-        mode: modeName,
-        confidence: '95.0', // 绿色出行场景使用默认高置信度即可
-        scene: 'green',
-        distance: dist,
-        co2: co2
-      },
-      // onMessage 回调：接收源源不断的文字流
+      { model_id: 'exp1', mode: modeName, confidence: '95.0', scene: 'green', distance: dist, co2: co2 },
       (text) => {
         aiReport.value = text;
         nextTick(() => { if (scrollBox.value) scrollBox.value.scrollTop = scrollBox.value.scrollHeight })
       },
-      // onDone 回调
-      () => {
-        isGeneratingReport.value = false;
-      },
-      // onError 回调
-      (error) => {
-        console.error(error);
-        aiReport.value = `**生成文案失败**\n请检查网络连接或后端服务状态。`;
-        isGeneratingReport.value = false;
-      }
+      () => { isGeneratingReport.value = false; },
+      (error) => { console.error(error); isGeneratingReport.value = false; }
     );
-  } catch (error) {
-    aiReport.value = `**生成文案失败**\n请检查网络连接。`;
-    isGeneratingReport.value = false;
-  }
+  } catch (error) { isGeneratingReport.value = false; }
 }
 
 const exportToPDF = () => {
   const element = document.getElementById('green-pdf-poster')
   if (!element) return
   const opt = {
-    margin: 0, filename: `${userName.value}的绿色出行认证.pdf`,
+    margin: 0,
+    filename: `${userName.value}的绿色出行认证.pdf`,
     image: { type: 'jpeg' as const, quality: 1.0 },
     html2canvas: { scale: 3, useCORS: true, backgroundColor: '#f0f4f8' },
     jsPDF: { unit: 'px' as const, format: [800, 1000] as [number, number], orientation: 'portrait' as const }
-  }
-  ElMessage.success('正在为您生成专属纪念海报，请稍候...')
+  };
+  ElMessage.success('正在为您生成专属纪念海报...')
   html2pdf().set(opt).from(element).save()
 }
 
 const initLeafletMap = () => {
   if (!mapContainer.value) return
-  map = L.map(mapContainer.value).setView([39.9042, 116.4074], 12)
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OSM', maxZoom: 19, className: 'dark-map-tiles' 
+  map = L.map(mapContainer.value, { zoomControl: false }).setView([39.9042, 116.4074], 12)
+  L.tileLayer('http://webrd01.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
+    attribution: '© AutoNavi', maxZoom: 19 
   }).addTo(map)
 }
 
@@ -334,97 +330,156 @@ const renderLeafletTrajectory = (points: any[], isGreen: boolean) => {
   if (currentPolyline) map.removeLayer(currentPolyline)
   markers.forEach(m => map!.removeLayer(m))
   markers = []
-
-  const latLngs = points.map(p => {
-    const lat = p.lat || p.latitude || p.y || (Array.isArray(p) ? p[1] : undefined);
-    const lng = p.lng || p.lon || p.longitude || p.x || (Array.isArray(p) ? p[0] : undefined);
-    return [lat, lng];
-  }).filter(p => p[0] !== undefined && p[1] !== undefined) as [number, number][];
-
+  const latLngs = points.map(p => [p.lat || p.latitude, p.lng || p.longitude]).filter(p => p[0] && p[1]) as [number, number][];
   if (latLngs.length === 0) return;
-
-  const lineColor = isGreen ? '#67C23A' : '#F56C6C';
-  currentPolyline = L.polyline(latLngs, { color: lineColor, weight: 5, opacity: 0.85, lineCap: 'round', lineJoin: 'round'}).addTo(map);
-
-  const startPoint = latLngs[0] as L.LatLngExpression;
-  const endPoint = latLngs[latLngs.length - 1] as L.LatLngExpression;
-  const startMarker = L.circleMarker(startPoint, { radius: 7, fillColor: '#52C41A', color: '#fff', weight: 2, fillOpacity: 1 }).addTo(map);
-  const endMarker = L.marker(endPoint, {
-    icon: L.divIcon({ className: 'custom-end-marker', html: '<div style="width: 14px; height: 14px; background: #F5222D; border: 2px solid #fff; border-radius: 2px; box-shadow: 0 0 5px rgba(0,0,0,0.5);"></div>', iconSize: [14, 14], iconAnchor: [7, 7] }),
+  const lineColor = isGreen ? '#67C23A' : '#FF4D4F';
+  currentPolyline = L.polyline(latLngs, { color: lineColor, weight: 6, opacity: 0.85, lineCap: 'round', lineJoin: 'round'}).addTo(map);
+  const startMarker = L.circleMarker(latLngs[0] as L.LatLngExpression, { radius: 6, fillColor: '#67C23A', color: '#fff', weight: 2, fillOpacity: 1 }).addTo(map);
+  const endMarker = L.marker(latLngs[latLngs.length - 1] as L.LatLngExpression, {
+    icon: L.divIcon({ className: 'custom-end-marker', html: `<div style="width: 12px; height: 12px; background: ${lineColor}; border: 2px solid #fff; border-radius: 2px;"></div>`, iconSize: [12, 12], iconAnchor: [6, 6] })
   }).addTo(map);
-
   markers.push(startMarker, endMarker);
   map.fitBounds(currentPolyline.getBounds(), { padding: [50, 50], animate: true, duration: 1 });
 }
 
+const getModeColor = (mode: string) => {
+  if (['私家车', '出租车', 'CAR', 'TAXI'].includes(mode)) return '#FF3366';
+  return '#39FF14';
+}
+
 onMounted(() => { 
   nextTick(() => { initLeafletMap() }) 
-  // 检查是否是从历史记录穿越回来的
-  if (route.query.id) {
-    restoreHistoryData(route.query.id as string)
-  }
+  if (route.query.id) restoreHistoryData(route.query.id as string)
 })
 onUnmounted(() => { if (map) { map.remove(); map = null } })
 </script>
 
 <style scoped>
-.green-container { height: calc(100vh - 70px); padding: 20px; box-sizing: border-box; }
-.full-height { height: 100%; }
-.panel { border-radius: 12px; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
-.dark-panel { background: rgba(26, 31, 46, 0.5); border: 1px solid rgba(255, 255, 255, 0.05); }
-.panel-header { padding: 16px 20px; font-size: 16px; font-weight: 600; color: #e5eaf3; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; align-items: center; justify-content: space-between;}
-.header-left { display: flex; align-items: center; gap: 8px;}
-.panel-content { padding: 20px; flex: 1; overflow-y: auto; position: relative;}
+/* ================= 全局三栏严格物理布局 ================= */
+.cyber-battle-station {
+  display: flex;
+  width: 100%;
+  height: calc(100vh - 64px);
+  background: #020B16;
+  padding: 16px;
+  gap: 16px;
+  box-sizing: border-box;
+  font-family: 'Helvetica Neue', Helvetica, 'Microsoft YaHei', sans-serif;
+}
+
+.side-panel { display: flex; flex-direction: column; gap: 16px; flex-shrink: 0; }
+.left-panel { width: 340px; }
+.right-panel { width: 420px; }
+.center-panel { flex: 1; display: flex; position: relative; }
+
+/* 通用卡片 */
+.cyber-card {
+  background: rgba(4, 18, 38, 0.7);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(57, 255, 20, 0.2);
+  border-radius: 8px;
+  box-shadow: 0 0 15px rgba(57, 255, 20, 0.05);
+  display: flex; flex-direction: column;
+}
+
+.header-card { padding: 16px 20px; }
+.neon-text-green { margin: 0; font-size: 20px; font-weight: 800; color: #39FF14; text-shadow: 0 0 10px rgba(57, 255, 20, 0.4); }
+.neon-text-green-sub { color: #39FF14; font-weight: bold; }
+.sub-title { font-size: 11px; color: #94a3b8; margin-top: 4px; }
+.sys-status { width: 10px; height: 10px; border-radius: 50%; background: #39FF14; box-shadow: 0 0 10px #39FF14; }
+.blink-status-green { animation: breathe-green 2s infinite; }
+
+.content-card { padding: 20px; flex: 1; overflow-y: auto; }
 .flex-col { display: flex; flex-direction: column; gap: 20px; }
 .flex-1 { flex: 1; }
-.map-wrapper { padding: 0; background: #0b0d12; position: relative; }
-.leaflet-map { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
-:deep(.dark-map-tiles) { filter: brightness(0.7) invert(1) contrast(1.2) hue-rotate(200deg); }
-:deep(.custom-end-marker) { background: transparent; border: none; }
-.map-legend { position: absolute; bottom: 20px; right: 20px; background: rgba(0,0,0,0.7); padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(4px); z-index: 1000;}
-.legend-item { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #e5eaf3; margin-bottom: 8px;}
-.line { width: 20px; height: 4px; border-radius: 2px; }
-.line.green { background: #67C23A; box-shadow: 0 0 5px #67C23A;}
-.line.red { background: #F56C6C; box-shadow: 0 0 5px #F56C6C;}
-.section-box { background: rgba(0,0,0,0.2); border-radius: 8px; padding: 16px; border: 1px solid rgba(255,255,255,0.03); transition: all 0.3s;}
-.box-title { font-size: 14px; color: #a3a6ad; margin-bottom: 16px; font-weight: 500; display: flex; align-items: center;}
-.blur-mask { opacity: 0.3; pointer-events: none; filter: blur(2px); }
-:deep(.el-upload-dragger) { background: rgba(255,255,255,0.02); border-color: rgba(255,255,255,0.1); transition: all 0.3s; padding: 20px;}
-:deep(.el-upload-dragger:hover) { border-color: #67C23A; background: rgba(103, 194, 58, 0.05);}
-.text-center { text-align: center; margin-top: 10px; }
-.carbon-dashboard { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
-.carbon-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; padding: 16px 12px; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center;}
-.icon-wrap { font-size: 24px; }
-.data-wrap .val { font-size: 24px; font-weight: bold; font-family: monospace; }
-.data-wrap .unit { font-size: 12px; margin-left: 2px;}
-.data-wrap .label { font-size: 12px; color: #909399; margin-top: 4px;}
-.text-green { color: #67C23A; }
-.text-blue { color: #4A90E2; }
-.tree-card { background: rgba(103, 194, 58, 0.05); border-color: rgba(103, 194, 58, 0.2);}
-.report-box { border-color: rgba(74, 144, 226, 0.3); background: rgba(74, 144, 226, 0.05); display: flex; flex-direction: column;}
-.ai-title { color: #4A90E2; }
-.ai-content { flex: 1; font-size: 14px; line-height: 1.8; color: #e5eaf3; background: rgba(0,0,0,0.3); padding: 16px; border-radius: 6px; border-left: 3px solid #4A90E2; overflow-y: auto; scrollbar-width: thin;}
-.empty-text { color: #909399; font-style: italic; text-align: center; margin-top: 20px;}
-.typing-cursor { display: inline-block; width: 8px; height: 14px; background-color: #4A90E2; vertical-align: middle; margin-left: 4px; animation: blink 1s step-end infinite;}
-@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
-@keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
 
-.pdf-export-wrapper { position: absolute; top: -9999px; left: -9999px; z-index: -1; }
-.pdf-poster { width: 800px; min-height: 1000px; background: linear-gradient(135deg, #f0fdf4 0%, #e0f2fe 100%); padding: 60px; font-family: 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', sans-serif; color: #334155; box-sizing: border-box; position: relative; overflow: hidden; }
-.pdf-poster::before { content: ''; position: absolute; top: -100px; right: -100px; width: 300px; height: 300px; background: rgba(56, 189, 248, 0.2); border-radius: 50%; filter: blur(50px); }
-.poster-header { border-bottom: 2px solid #cbd5e1; padding-bottom: 20px; margin-bottom: 40px; }
-.poster-title { font-size: 38px; font-weight: 800; color: #0f172a; margin-bottom: 10px; letter-spacing: 2px;}
-.poster-subtitle { font-size: 18px; color: #64748b; display: flex; justify-content: space-between; align-items: flex-end;}
-.poster-subtitle strong { color: #10b981; font-size: 22px; margin-left: 5px; }
-.poster-stats { display: flex; justify-content: space-between; gap: 20px; margin-bottom: 40px; }
-.stat-box { flex: 1; background: #ffffff; padding: 30px 20px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); text-align: center; border-top: 5px solid #38bdf8; }
-.stat-box:nth-child(2) { border-color: #10b981; }
-.stat-value { font-size: 36px; font-weight: bold; color: #0ea5e9; font-family: monospace; line-height: 1.2;}
-.stat-value small { font-size: 18px; }
-.stat-label { font-size: 16px; color: #64748b; margin-top: 10px; }
-.poster-ai-section { background: #ffffff; padding: 40px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); position: relative; }
-.ai-badge { position: absolute; top: -15px; left: 40px; background: #E6A23C; color: white; padding: 5px 15px; border-radius: 20px; font-weight: bold; font-size: 14px; }
-.pdf-ai-text { font-size: 18px; line-height: 2; color: #334155; }
-.poster-footer { margin-top: 60px; text-align: center; color: #94a3b8; font-size: 14px; position: relative; }
-.watermark { font-size: 60px; font-weight: 900; color: rgba(0,0,0,0.03); position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); white-space: nowrap; pointer-events: none; }
+.module-header { font-size: 13px; color: #cdd9e5; margin-bottom: 16px; }
+.bracket { color: #888; font-family: monospace; }
+.disabled-mask { opacity: 0.3; pointer-events: none; filter: grayscale(1); transition: 0.3s; }
+
+/* 拖拽上传 */
+:deep(.el-upload-dragger) {
+  background: rgba(57, 255, 20, 0.02) !important;
+  border: 1px dashed rgba(57, 255, 20, 0.3) !important;
+  border-radius: 8px; padding: 24px 0;
+}
+:deep(.el-upload-dragger:hover) { border-color: #39FF14 !important; background: rgba(57, 255, 20, 0.05) !important; }
+.green-icon { color: #39FF14; }
+.upload-icon { font-size: 36px; margin-bottom: 12px; }
+.upload-text { font-size: 14px; color: #fff; font-weight: 500; }
+.upload-sub { font-size: 12px; color: #8892b0; margin-top: 4px; }
+
+/* 减排指标 */
+.carbon-grid { display: flex; flex-direction: column; gap: 12px; }
+.carbon-item {
+  display: flex; align-items: center; gap: 16px;
+  background: rgba(0, 0, 0, 0.3); padding: 12px 16px; border-radius: 6px;
+}
+.item-icon { font-size: 24px; }
+.blue-icon { color: #00F0FF; }
+.item-data .val { font-size: 22px; font-weight: bold; font-family: monospace; }
+.item-data .label { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+.unit { font-size: 12px; margin-left: 2px; }
+.text-green { color: #39FF14; }
+.text-blue { color: #00F0FF; }
+
+/* 特征看板 */
+.metrics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.metric-card {
+  background: rgba(0, 0, 0, 0.4); border: 1px solid rgba(57, 255, 20, 0.15);
+  border-radius: 8px; padding: 20px 10px; text-align: center;
+}
+.tree-highlight { border-color: #39FF14; background: rgba(57, 255, 20, 0.05); }
+.metric-val { font-size: 24px; font-weight: bold; font-family: monospace; }
+.metric-label { font-size: 11px; color: #8892b0; margin-top: 10px; }
+
+/* ================= 中间：地图区域 ================= */
+.map-frame {
+  flex: 1; position: relative; border-radius: 12px;
+  border: 2px solid rgba(57, 255, 20, 0.1);
+  overflow: hidden;
+}
+.leaflet-map { width: 100%; height: 100%; background: #fff; z-index: 1; }
+
+/* 地图图例 */
+.map-legend {
+  position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+  background: rgba(2, 11, 22, 0.85); padding: 12px 24px; border-radius: 30px;
+  border: 1px solid rgba(57, 255, 20, 0.3); z-index: 1000; display: flex; gap: 24px;
+}
+.legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #fff; }
+.line { width: 16px; height: 4px; border-radius: 2px; }
+.green-glow { background: #39FF14; box-shadow: 0 0 8px #39FF14; }
+.red-glow { background: #FF3366; box-shadow: 0 0 8px #FF3366; }
+
+/* 边角装饰 */
+.frame-corner { position: absolute; width: 20px; height: 20px; border: 2px solid transparent; z-index: 10; }
+.green-line { border-color: #39FF14; }
+.top-left { top: 0; left: 0; border-right: none; border-bottom: none; }
+.top-right { top: 0; right: 0; border-left: none; border-bottom: none; }
+.bottom-left { bottom: 0; left: 0; border-right: none; border-top: none; }
+.bottom-right { bottom: 0; right: 0; border-left: none; border-top: none; }
+
+/* ================= 右侧：AI 报告 ================= */
+.ai-header {
+  padding: 16px 20px; border-bottom: 1px solid rgba(57, 255, 20, 0.2);
+  display: flex; justify-content: space-between; align-items: center;
+}
+.green-bg-soft { background: linear-gradient(90deg, rgba(57, 255, 20, 0.1), transparent); }
+.ai-title { font-size: 16px; font-weight: bold; color: #39FF14; display: flex; align-items: center; gap: 8px; }
+.neon-btn-green { background: transparent !important; border: 1px solid #39FF14 !important; color: #39FF14 !important; font-weight: bold;}
+.neon-btn-green:hover:not(:disabled) { background: #39FF14 !important; color: #020B16 !important; }
+
+.ai-body { padding: 24px; flex: 1; overflow-y: auto; }
+.ai-placeholder { text-align: center; color: #8892b0; margin-top: 40px; font-style: italic; }
+.ai-processing { display: flex; flex-direction: column; align-items: center; gap: 16px; margin-top: 40px; }
+.green-spinner { border-top-color: #39FF14; }
+
+.ai-stream-text { color: #e2e8f0; line-height: 1.8; font-size: 14.5px; }
+.green-cursor { display: inline-block; width: 8px; height: 16px; background: #39FF14; margin-left: 6px; animation: blink 1s infinite; }
+
+@keyframes breathe-green { 0%, 100% { opacity: 1; box-shadow: 0 0 10px #39FF14; } 50% { opacity: 0.6; box-shadow: 0 0 20px #39FF14; } }
+@keyframes blink { 50% { opacity: 0; } }
+
+.pdf-export-wrapper { position: absolute; top: -9999px; left: -9999px; }
 </style>
