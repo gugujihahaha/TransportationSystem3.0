@@ -1,352 +1,569 @@
 <template>
-  <div class="grand-screen-container">
-    <div class="grand-bg"></div>
-    <div class="grand-grid"></div>
-    <div class="grand-light-beam"></div>
+  <div class="tech-support-container">
+    <div class="cyber-grid-bg"></div>
 
-    <header class="grand-header">
-      <div class="header-flank left-flank">
-        <div class="h-dec-line"></div>
-        <div class="h-time"><span class="icon">◷</span> ENG-OPS // {{ currentTime }}</div>
-      </div>
-      
-      <div class="header-core">
-        <div class="core-bg">
-          <h1 class="core-title">核心工程架构与系统鲁棒性压测</h1>
-        </div>
-        <div class="core-glow"></div>
-      </div>
-
-      <div class="header-flank right-flank">
-        <div class="h-status"><span class="pulse-dot"></span> Telemetry Online</div>
-        <div class="h-dec-line"></div>
-      </div>
-    </header>
-
-    <div class="screen-main" :class="{ 'is-loaded': isLoaded }">
-      
-      <div class="hud-matrix">
-        <div class="hud-block">
-          <div class="hud-title">FastAPI 并发吞吐 (QPS)</div>
-          <div class="hud-num text-cyan">1,250<span class="unit">req/s</span></div>
-        </div>
-        <div class="hud-block">
-          <div class="hud-title">PyTorch 显存占用</div>
-          <div class="hud-num text-green">4.2<span class="unit">GB</span></div>
-        </div>
-        <div class="hud-block">
-          <div class="hud-title">平均推断耗时</div>
-          <div class="hud-num text-blue">18.5<span class="unit">ms</span></div>
-        </div>
-        <div class="hud-block highlight-hud">
-          <div class="hud-title">系统高可用 SLA</div>
-          <div class="hud-num text-gold">99.99<span class="unit">%</span></div>
+    <div class="cyber-header relative-z">
+      <div class="header-left">
+        <div class="header-deco-block"></div>
+        <div class="title-group">
+          <h2 class="main-title text-glow-cyan">多模态大模型底座 // 核心性能监测矩阵</h2>
+          <p class="sub-title">全景透视四阶时空图网络的推演精度、特征离散度及鲁棒性指标</p>
         </div>
       </div>
-
-      <div class="main-grid mt-20">
-        <aside class="panel-column left-column">
-          <div class="heavy-panel h-60">
-            <div class="corner tl"></div><div class="corner tr"></div>
-            <div class="corner bl"></div><div class="corner br"></div>
-            
-            <div class="panel-header">
-              <span class="p-icon">🔄</span> 系统端到端数据流拓扑
-            </div>
-            <div class="panel-body pipeline-visual">
-               <div class="p-stage">
-                 <div class="stage-name text-gray">L1: Data Ingestion</div>
-                 <div class="stage-box box-gray">GPS/OSM/气象数据对齐</div>
-               </div>
-               <div class="p-arrow text-gray">▼</div>
-               <div class="p-stage">
-                 <div class="stage-name text-cyan">L2: PyTorch Engine</div>
-                 <div class="stage-box box-cyan">多模态特征融合与推断</div>
-               </div>
-               <div class="p-arrow text-cyan">▼</div>
-               <div class="p-stage">
-                 <div class="stage-name text-gold">L3: FastAPI Service</div>
-                 <div class="stage-box box-gold">异步调度 & 星火 LLM</div>
-               </div>
-               <div class="p-arrow text-gold">▼</div>
-               <div class="p-stage">
-                 <div class="stage-name text-green">L4: Vue3 Dashboard</div>
-                 <div class="stage-box box-green">数字孪生与碳普惠展现</div>
-               </div>
-            </div>
-          </div>
-
-          <div class="heavy-panel h-40 mt-20">
-            <div class="corner tl"></div><div class="corner tr"></div>
-            <div class="corner bl"></div><div class="corner br"></div>
-            <div class="panel-header">
-              <span class="p-icon">🛠️</span> 核心引擎驱动栈
-            </div>
-            <div class="panel-body tech-grid">
-              <div class="t-badge"><span style="color:#ee4c2c">🔥</span> PyTorch</div>
-              <div class="t-badge"><span style="color:#009688">⚡</span> FastAPI</div>
-              <div class="t-badge"><span style="color:#4fc08d">🟢</span> Vue 3</div>
-              <div class="t-badge"><span style="color:#e44d26">📊</span> ECharts</div>
-              <div class="t-badge"><span style="color:#2196f3">🗺️</span> Leaflet</div>
-              <div class="t-badge"><span style="color:#a855f7">💬</span> Spark LLM</div>
-            </div>
-          </div>
-        </aside>
-
-        <main class="panel-column center-column">
-          <div class="heavy-panel h-100">
-            <div class="corner tl"></div><div class="corner tr"></div>
-            <div class="corner bl"></div><div class="corner br"></div>
-            
-            <div class="panel-header justify-center">
-              <span class="p-icon text-warning">🛡️</span> 极端环境系统鲁棒性压力测试 (Robustness Stress Test)
-            </div>
-            <div class="insight-bar text-warning">
-              💡 <strong>压测结论：</strong> 面对特大暴雨与跨城迁移，Exp4 架构凭借气象解耦与动态 Focal 权重，展现出碾压基线模型的抗干扰能力！
-            </div>
-            <div class="panel-body chart-wrap mt-10" ref="robustnessChartRef"></div>
-          </div>
-        </main>
-
-        <aside class="panel-column right-column">
-          <div class="heavy-panel h-100">
-            <div class="corner tl"></div><div class="corner tr"></div>
-            <div class="corner bl"></div><div class="corner br"></div>
-            
-            <div class="panel-header">
-              <span class="p-icon">📡</span> API 实时推断延迟遥测 (Live Telemetry)
-            </div>
-            <div class="telemetry-status">
-               <span>当前节点: Beijing-Zone-A</span>
-               <span class="text-green blink-text">● CONNECTION SECURE</span>
-            </div>
-            <div class="panel-body chart-wrap" ref="latencyChartRef"></div>
-          </div>
-        </aside>
-
+      <div class="header-right">
+        <div class="status-badge"><span class="blink-dot"></span> 算力集群在线</div>
+        <div class="status-badge"><span class="text-cyan">内存载入率 100%</span></div>
       </div>
     </div>
+
+    <el-skeleton :loading="initialLoading" animated :rows="15" class="relative-z">
+      <template #default>
+        <div class="tech-layout">
+          
+          <div class="cyber-sidebar">
+            <div class="sidebar-header">
+              <span class="header-text">中枢控制序列</span>
+              <div class="deco-line"></div>
+            </div>
+            
+            <div class="nav-list">
+              <div 
+                v-for="(item, index) in navItems" 
+                :key="index"
+                class="nav-item"
+                :class="{ 'is-active': activeMenu === item.id }"
+                @click="handleSelect(item.id)"
+              >
+                <div class="nav-idx">0{{ index + 1 }}</div>
+                <div class="nav-text">{{ item.name }}</div>
+                <div class="nav-corner"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="cyber-content">
+            
+            <div v-if="activeMenu === '1'" class="fui-panel fade-in">
+              <div class="panel-header">
+                <h3 class="panel-title">递进实验模型宏观性能演进</h3>
+                <div class="panel-deco">MACRO PERFORMANCE</div>
+              </div>
+              
+              <div ref="overviewChartRef" class="chart-box-large"></div>
+              
+              <div class="table-wrapper">
+                <table class="fui-table">
+                  <thead>
+                    <tr>
+                      <th>演进阶段</th>
+                      <th>全局准确率</th>
+                      <th>宏平均 F1 分数</th>
+                      <th>加权平均 F1 分数</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(row, idx) in overviewTableData" :key="idx">
+                      <td><span class="exp-tag">{{ row.exp }}</span></td>
+                      <td class="text-green font-bold">{{ row.accuracy }}</td>
+                      <td class="text-cyan font-bold">{{ row.macroF1 }}</td>
+                      <td class="text-orange font-bold">{{ row.weightedF1 }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div v-if="activeMenu === '2'" class="fui-panel fade-in">
+              <div class="panel-header">
+                <h3 class="panel-title">细粒度交通方式性能雷达诊断</h3>
+              </div>
+              
+              <div class="version-tabs">
+                <div class="tab-label">切换网络层级：</div>
+                <div 
+                  v-for="exp in availableExps" :key="exp"
+                  class="version-tab" 
+                  :class="{ 'active': selectedExpCat === exp }"
+                  @click="selectedExpCat = exp; renderCategoryChart()"
+                >
+                  {{ exp.toUpperCase() }}
+                </div>
+              </div>
+              
+              <div v-if="!evalData[selectedExpCat]" class="empty-state"><div class="bracket-alert">[ 未检索到诊断日志 ]</div></div>
+              <div v-else ref="categoryChartRef" class="chart-box-large"></div>
+            </div>
+
+            <div v-if="activeMenu === '3'" class="fui-panel fade-in">
+              <div class="panel-header">
+                <h3 class="panel-title">跨模态特征混淆交叉矩阵</h3>
+              </div>
+              
+              <div class="version-tabs">
+                <div class="tab-label">切换网络层级：</div>
+                <div 
+                  v-for="exp in ['exp1', 'exp2', 'exp3', 'exp4']" :key="exp"
+                  class="version-tab" 
+                  :class="{ 'active': selectedExpCM === exp }"
+                  @click="selectedExpCM = exp; renderCMChart()"
+                >
+                  {{ exp.toUpperCase() }}
+                </div>
+              </div>
+              
+              <div v-if="selectedExpCM === 'exp4'" class="empty-state">
+                <div class="bracket-alert">[ 核心预测张量归档中，全量矩阵暂不可用 ]</div>
+              </div>
+              <div v-else-if="csvLoading" class="empty-state">
+                <div class="loader-bar"><div class="loader-fill"></div></div>
+                <p class="text-cyan mt-4 font-bold">引擎正在解析千万级预测张量，请稍候...</p>
+              </div>
+              <div v-else-if="csvError" class="empty-state"><div class="bracket-alert text-red">[ 数据断流，无法构建张量矩阵 ]</div></div>
+              <div v-else ref="cmChartRef" class="chart-box-xl heatmap-box"></div>
+            </div>
+
+            <div v-if="activeMenu === '4'" class="fui-panel fade-in">
+              <div class="panel-header">
+                <h3 class="panel-title">底层推理置信度离散分布特征</h3>
+              </div>
+
+              <div class="version-tabs">
+                <div class="tab-label">切换网络层级：</div>
+                <div 
+                  v-for="exp in ['exp1', 'exp2', 'exp3', 'exp4']" :key="exp"
+                  class="version-tab" 
+                  :class="{ 'active': selectedExpConf === exp }"
+                  @click="selectedExpConf = exp; renderConfidenceChart()"
+                >
+                  {{ exp.toUpperCase() }}
+                </div>
+              </div>
+
+              <div v-if="selectedExpConf === 'exp4'" class="empty-state">
+                <div class="bracket-alert">[ 置信度抽样数据演算中 ]</div>
+              </div>
+              <div v-else-if="csvLoading" class="empty-state">
+                <div class="loader-bar"><div class="loader-fill"></div></div>
+                <p class="text-cyan mt-4 font-bold">引擎正在解析千万级预测张量，请稍候...</p>
+              </div>
+              <div v-else-if="csvError" class="empty-state"><div class="bracket-alert text-red">[ 数据断流，无法构建分布模型 ]</div></div>
+              <div v-else ref="confChartRef" class="chart-box-large"></div>
+            </div>
+
+          </div>
+        </div>
+      </template>
+    </el-skeleton>
   </div>
 </template>
 
-<script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+<script setup>
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import * as echarts from 'echarts'
+import Papa from 'papaparse'
 
-const isLoaded = ref(false)
+const initialLoading = ref(true)
+const csvLoading = ref(false)
+const csvError = ref(false)
 
-// --- 时间逻辑 ---
-const currentTime = ref('')
-let timeInterval: number
-const updateTime = () => {
-  const now = new Date()
-  currentTime.value = now.toLocaleString('zh-CN', { hour12: false })
+const activeMenu = ref('1')
+const navItems = [
+  { id: '1', name: '宏观性能演进' },
+  { id: '2', name: '多模态分类诊断' },
+  { id: '3', name: '特征混淆矩阵' },
+  { id: '4', name: '置信度离散分布' }
+]
+
+const availableExps = ['exp1', 'exp2', 'exp3', 'exp4']
+
+const selectedExpCat = ref('exp4')
+const selectedExpCM = ref('exp3')
+const selectedExpConf = ref('exp3')
+
+const evalData = reactive({})
+const csvCache = reactive({})
+
+const overviewChartRef = ref(null)
+const categoryChartRef = ref(null)
+const cmChartRef = ref(null)
+const confChartRef = ref(null)
+let currentChartInstance = null
+
+const modeDict = {
+  'Walk': '步行', 'Bike': '骑行', 'Bus': '常规公交', 
+  'Car & taxi': '小汽车', 'Subway': '城市轨道', 'Train': '铁路客运'
+}
+const transportModes = Object.keys(modeDict)
+
+const loadEvalReports = async () => {
+  for (const exp of availableExps) {
+    try {
+      const res = await fetch(`/evaluation_report_${exp}.json`)
+      if (res.ok) evalData[exp] = await res.json()
+    } catch (err) { console.warn(`加载 ${exp} 失败`) }
+  }
 }
 
-// --- ECharts 图表渲染 ---
-const robustnessChartRef = ref<HTMLElement | null>(null)
-const latencyChartRef = ref<HTMLElement | null>(null)
-let robustnessChart: echarts.ECharts | null = null
-let latencyChart: echarts.ECharts | null = null
-
-// 生成动态延迟数据
-let latencyData: number[] = Array.from({length: 20}, () => 15 + Math.random() * 5)
-let timeAxis: string[] = Array.from({length: 20}, (_, i) => `T-${20-i}s`)
-
-const initCharts = () => {
-  // 1. 极端环境鲁棒性压测图 (代替文字 Q&A！)
-  if (robustnessChartRef.value) {
-    robustnessChart = echarts.init(robustnessChartRef.value)
-    robustnessChart.setOption({
-      backgroundColor: 'transparent',
-      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, backgroundColor: 'rgba(5, 12, 30, 0.9)', borderColor: '#E6A23C', textStyle: { color: '#fff' } },
-      legend: { data: ['Exp1 (基线模型)', 'Exp4 (终极架构)'], textStyle: { color: '#94a3b8', fontSize: 13 }, bottom: 0 },
-      grid: { left: '3%', right: '4%', bottom: '12%', top: '10%', containLabel: true },
-      xAxis: { 
-        type: 'category', 
-        data: ['常规标准环境\n(Standard)', '极端暴雨干扰\n(Heavy Rain)', '跨城空间迁移\n(Cross-City)'], 
-        axisLabel: { color: '#94a3b8', fontSize: 13, fontWeight: 'bold', margin: 15 }, 
-        axisLine: { lineStyle: { color: '#1e293b', width: 2 } } 
-      },
-      yAxis: { type: 'value', name: 'Macro-F1 (%)', nameTextStyle: { color: '#94a3b8' }, min: 40, max: 90, axisLabel: { color: '#94a3b8' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)', type: 'dashed' } } },
-      series: [
-        { 
-          name: 'Exp1 (基线模型)', type: 'bar', barWidth: '25%', barGap: '15%',
-          data: [75.8, 45.2, 50.1], // 基线在极端环境下彻底崩溃
-          itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(56, 189, 248, 0.8)' }, { offset: 1, color: 'rgba(56, 189, 248, 0.2)' }]), borderRadius: [4, 4, 0, 0] },
-          label: { show: true, position: 'top', color: '#38bdf8', formatter: '{c}%' }
+const loadCSVData = async (exp) => {
+  if (exp === 'exp4') return null
+  if (csvCache[exp]) return csvCache[exp]
+  
+  csvLoading.value = true
+  csvError.value = false
+  try {
+    const res = await fetch(`/predictions_with_geo_${exp}.csv`)
+    if (!res.ok) throw new Error('Fetch failed')
+    const text = await res.text()
+    
+    return new Promise((resolve) => {
+      Papa.parse(text, {
+        header: true, dynamicTyping: true, skipEmptyLines: true,
+        complete: (results) => {
+          csvCache[exp] = results.data
+          resolve(results.data)
         },
-        { 
-          name: 'Exp4 (终极架构)', type: 'bar', barWidth: '25%',
-          data: [81.6, 78.5, 75.2], // Exp4 非常坚挺
-          itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(230, 162, 60, 0.9)' }, { offset: 1, color: 'rgba(230, 162, 60, 0.3)' }]), borderRadius: [4, 4, 0, 0], shadowBlur: 10, shadowColor: 'rgba(230,162,60,0.5)' }, 
-          label: { show: true, position: 'top', color: '#E6A23C', fontSize: 13, fontWeight: 'bold', formatter: '{c}%' } 
-        }
-      ]
+        error: () => { csvError.value = true; resolve(null) }
+      })
     })
-  }
-
-  // 2. API 延迟实时监控图
-  if (latencyChartRef.value) {
-    latencyChart = echarts.init(latencyChartRef.value)
-    latencyChart.setOption({
-      backgroundColor: 'transparent',
-      tooltip: { trigger: 'axis', backgroundColor: 'rgba(5, 12, 30, 0.9)', borderColor: '#00ff88', textStyle: { color: '#fff' } },
-      grid: { left: '3%', right: '5%', bottom: '5%', top: '10%', containLabel: true },
-      xAxis: { type: 'category', boundaryGap: false, data: timeAxis, axisLabel: { show: false }, axisLine: { lineStyle: { color: '#1e293b' } }, splitLine: { show: true, lineStyle: { color: 'rgba(255,255,255,0.02)' } } },
-      yAxis: { type: 'value', name: 'Latency (ms)', nameTextStyle: { color: '#94a3b8' }, min: 10, max: 30, axisLabel: { color: '#94a3b8' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)', type: 'dashed' } } },
-      series: [
-        { 
-          name: '推断延迟', type: 'line', data: latencyData, smooth: true, symbol: 'none',
-          itemStyle: { color: '#00ff88' }, lineStyle: { width: 2, shadowBlur: 8, shadowColor: 'rgba(0,255,136,0.8)' }, 
-          areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(0, 255, 136, 0.3)' }, { offset: 1, color: 'transparent' }]) } 
-        }
-      ]
-    })
+  } catch (err) {
+    csvError.value = true
+    return null
+  } finally {
+    csvLoading.value = false
   }
 }
 
-// 动态推入数据模拟监控
-const updateTelemetry = () => {
-  if (!latencyChart) return
-  latencyData.shift()
-  // 模拟偶尔的延迟波动
-  const jump = Math.random() > 0.9 ? Math.random() * 8 : 0;
-  latencyData.push(15 + Math.random() * 4 + jump)
-  
-  latencyChart.setOption({ series: [{ data: latencyData }] })
+const getPercentile = (data, p) => {
+  const index = (data.length - 1) * p
+  const lower = Math.floor(index)
+  const upper = lower + 1
+  const weight = index % 1
+  if (upper >= data.length) return data[lower]
+  return data[lower] * (1 - weight) + data[upper] * weight
 }
 
-onMounted(() => {
-  updateTime()
-  timeInterval = window.setInterval(() => {
-    updateTime();
-    updateTelemetry();
-  }, 1000)
+const calcBoxplotStats = (values) => {
+  if (!values || values.length === 0) return []
+  values.sort((a, b) => a - b)
+  return [ values[0], getPercentile(values, 0.25), getPercentile(values, 0.5), getPercentile(values, 0.75), values[values.length - 1] ]
+}
+
+const overviewTableData = computed(() => {
+  return availableExps.map(exp => {
+    const d = evalData[exp]
+    return {
+      exp: `${exp.toUpperCase()}`,
+      accuracy: d ? d.accuracy?.toFixed(4) : '数据载入中...',
+      macroF1: d ? d['macro avg']?.['f1-score']?.toFixed(4) : '-',
+      weightedF1: d ? d['weighted avg']?.['f1-score']?.toFixed(4) : '-'
+    }
+  })
+})
+
+const destroyCurrentChart = () => {
+  if (currentChartInstance) {
+    currentChartInstance.dispose()
+    currentChartInstance = null
+  }
+}
+
+// ================= 图表 1: 宏观总览 (加粗放大版) =================
+const renderOverviewChart = () => {
+  destroyCurrentChart()
+  if (!overviewChartRef.value) return
   
-  isLoaded.value = true
-  nextTick(initCharts)
-  
-  window.addEventListener('resize', () => { robustnessChart?.resize(); latencyChart?.resize(); })
+  const exps = overviewTableData.value.map(item => item.exp)
+  const accData = overviewTableData.value.map(item => isNaN(item.accuracy) ? 0 : parseFloat(item.accuracy))
+  const f1Data = overviewTableData.value.map(item => isNaN(item.macroF1) ? 0 : parseFloat(item.macroF1))
+
+  currentChartInstance = echarts.init(overviewChartRef.value)
+  currentChartInstance.setOption({
+    tooltip: { trigger: 'axis', backgroundColor: 'rgba(6, 12, 28, 0.95)', borderColor: '#00f0ff', textStyle: { color: '#fff', fontSize: 16, fontWeight: 'bold' }, padding: 15 },
+    legend: { data: ['全局准确率', '宏平均 F1 分数'], textStyle: { color: '#cbd5e1', fontSize: 15, fontWeight: 'bold' }, top: 0, itemWidth: 20, itemHeight: 12 },
+    grid: { left: '2%', right: '2%', bottom: '5%', top: 60, containLabel: true },
+    xAxis: { type: 'category', data: exps, axisLabel: { color: '#00f0ff', fontSize: 15, fontWeight: 'bold', margin: 15 }, axisLine: { lineStyle: { color: '#1e293b', width: 2 } }, axisTick: { show: false } },
+    yAxis: { type: 'value', min: 0.7, max: 1.0, axisLabel: { color: '#94a3b8', fontSize: 14, fontWeight: 'bold' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,0.08)', type: 'dashed', width: 1.5 } } },
+    series: [
+      { name: '全局准确率', type: 'bar', barWidth: '20%', itemStyle: { color: new echarts.graphic.LinearGradient(0,0,0,1, [{offset:0,color:'#00FF88'},{offset:1,color:'rgba(0,255,136,0.1)'}]), borderRadius: [4,4,0,0] }, data: accData },
+      { name: '宏平均 F1 分数', type: 'bar', barWidth: '20%', itemStyle: { color: new echarts.graphic.LinearGradient(0,0,0,1, [{offset:0,color:'#00f0ff'},{offset:1,color:'rgba(0,240,255,0.1)'}]), borderRadius: [4,4,0,0] }, data: f1Data }
+    ]
+  })
+}
+
+// ================= 图表 2: 雷达图 (高清晰版) =================
+const renderCategoryChart = () => {
+  destroyCurrentChart()
+  const d = evalData[selectedExpCat.value]
+  if (!d || !categoryChartRef.value) return
+
+  const indicators = []
+  const precisionData = []
+  const recallData = []
+  const f1Data = []
+
+  transportModes.forEach(mode => {
+    if (d[mode]) {
+      indicators.push({ name: modeDict[mode], max: 1.0 })
+      precisionData.push(d[mode].precision || 0)
+      recallData.push(d[mode].recall || 0)
+      f1Data.push(d[mode]['f1-score'] || 0)
+    }
+  })
+
+  currentChartInstance = echarts.init(categoryChartRef.value)
+  currentChartInstance.setOption({
+    tooltip: { trigger: 'item', backgroundColor: 'rgba(6, 12, 28, 0.95)', borderColor: '#00f0ff', textStyle: { color: '#fff', fontSize: 15, fontWeight: 'bold' }, padding: 15 },
+    legend: { data: ['精确率', '召回率', 'F1 分数'], textStyle: { color: '#cbd5e1', fontSize: 15, fontWeight: 'bold' }, bottom: 0, itemWidth: 20, itemHeight: 12 },
+    radar: {
+      indicator: indicators, shape: 'polygon', radius: '65%', center: ['50%', '45%'],
+      splitArea: { areaStyle: { color: ['rgba(0, 240, 255, 0.02)', 'rgba(0, 240, 255, 0.05)', 'rgba(0, 240, 255, 0.08)', 'rgba(0, 240, 255, 0.15)'] } },
+      axisLine: { lineStyle: { color: 'rgba(0, 240, 255, 0.5)', width: 1.5 } },
+      splitLine: { lineStyle: { color: 'rgba(0, 240, 255, 0.5)', width: 1.5 } },
+      axisName: { color: '#00f0ff', fontSize: 15, fontWeight: 'bold', textShadow: '0 0 8px #00f0ff' }
+    },
+    series: [{
+      type: 'radar',
+      data: [
+        { value: precisionData, name: '精确率', itemStyle: { color: '#FFDD00' }, lineStyle: { width: 3 } },
+        { value: recallData, name: '召回率', itemStyle: { color: '#CC33FF' }, lineStyle: { width: 3 } },
+        { value: f1Data, name: 'F1 分数', itemStyle: { color: '#00FF88' }, lineStyle: { width: 3 }, areaStyle: { color: 'rgba(0, 255, 136, 0.4)' } }
+      ]
+    }]
+  })
+}
+
+// ================= 图表 3: 混淆矩阵 (高对比版) =================
+const renderCMChart = async () => {
+  destroyCurrentChart()
+  if (selectedExpCM.value === 'exp4') return
+  const csvData = await loadCSVData(selectedExpCM.value)
+  if (!csvData || csvData.length === 0 || !cmChartRef.value) return
+
+  const matrix = Array(6).fill(0).map(() => Array(6).fill(0))
+  let maxVal = 0
+
+  csvData.forEach(row => {
+    if (row.true_label && row.pred_label) {
+      const tIdx = transportModes.indexOf(row.true_label)
+      const pIdx = transportModes.indexOf(row.pred_label)
+      if (tIdx >= 0 && pIdx >= 0) {
+        matrix[tIdx][pIdx]++
+        if (matrix[tIdx][pIdx] > maxVal) maxVal = matrix[tIdx][pIdx]
+      }
+    }
+  })
+
+  const heatmapData = []
+  for (let i = 0; i < 6; i++) {
+    for (let j = 0; j < 6; j++) { heatmapData.push([j, i, matrix[i][j]]) }
+  }
+  const chineseModes = transportModes.map(m => modeDict[m])
+
+  currentChartInstance = echarts.init(cmChartRef.value)
+  currentChartInstance.setOption({
+    tooltip: { 
+      position: 'top', backgroundColor: 'rgba(6, 12, 28, 0.95)', borderColor: '#00f0ff', padding: 15,
+      textStyle: { color: '#fff', fontSize: 15 }, 
+      formatter: (p) => `<div style="font-weight:bold;margin-bottom:8px;">实际: ${chineseModes[p.data[1]]} <span style="color:#64748b">➡</span> 预测: ${chineseModes[p.data[0]]}</div>落入特征数: <span style="color:#00f0ff; font-size:18px;">${p.data[2]}</span>` 
+    },
+    grid: { top: 20, bottom: 80, left: 100, right: 30 },
+    xAxis: { type: 'category', data: chineseModes, axisLabel: { color: '#cbd5e1', fontSize: 14, fontWeight: 'bold', margin: 15 }, splitArea: { show: true, areaStyle: { color: ['rgba(255,255,255,0.02)','rgba(0,0,0,0)'] } }, axisTick: { show: false } },
+    yAxis: { type: 'category', data: chineseModes, axisLabel: { color: '#cbd5e1', fontSize: 14, fontWeight: 'bold', margin: 15 }, splitArea: { show: true }, axisTick: { show: false } },
+    visualMap: { min: 0, max: maxVal, calculable: true, orient: 'horizontal', left: 'center', bottom: 10, inRange: { color: ['#0A0F1E', '#00f0ff', '#00FF88', '#FFDD00'] }, textStyle: { color: '#e2e8f0', fontSize: 13, fontWeight: 'bold' }, itemWidth: 20 },
+    series: [{ type: 'heatmap', data: heatmapData, label: { show: true, color: '#fff', fontSize: 15, fontWeight: 'bold', textShadow: '0 0 3px #000' }, itemStyle: { borderColor: '#050a14', borderWidth: 4 } }]
+  })
+}
+
+// ================= 图表 4: 置信度箱线图 (大字号清晰版) =================
+const renderConfidenceChart = async () => {
+  destroyCurrentChart()
+  if (selectedExpConf.value === 'exp4') return
+  const csvData = await loadCSVData(selectedExpConf.value)
+  if (!csvData || csvData.length === 0 || !confChartRef.value) return
+
+  const confMap = {}
+  transportModes.forEach(m => confMap[m] = [])
+
+  csvData.forEach(row => {
+    if (row.pred_label && row.confidence !== undefined && confMap[row.pred_label]) {
+      confMap[row.pred_label].push(row.confidence)
+    }
+  })
+
+  const boxplotData = transportModes.map(m => calcBoxplotStats(confMap[m]))
+  const chineseModes = transportModes.map(m => modeDict[m])
+
+  currentChartInstance = echarts.init(confChartRef.value)
+  currentChartInstance.setOption({
+    tooltip: { trigger: 'item', axisPointer: { type: 'shadow' }, backgroundColor: 'rgba(6, 12, 28, 0.95)', borderColor: '#00f0ff', padding: 15, textStyle: { color: '#fff', fontSize: 14 } },
+    grid: { top: 30, left: 60, right: 30, bottom: 40 },
+    xAxis: { type: 'category', data: chineseModes, axisLabel: { color: '#00f0ff', fontSize: 15, fontWeight: 'bold', margin: 15 }, axisLine: { lineStyle: { color: '#1e293b', width: 2 } }, axisTick: { show: false } },
+    yAxis: { type: 'value', min: 0, max: 1.0, axisLabel: { color: '#94a3b8', fontSize: 14, fontWeight: 'bold' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,0.08)', type: 'dashed', width: 1.5 } } },
+    series: [{
+      name: '离散特征', type: 'boxplot', data: boxplotData,
+      itemStyle: { color: 'rgba(0,240,255,0.15)', borderColor: '#00f0ff', borderWidth: 2 },
+      boxWidth: [25, 45]
+    }]
+  })
+}
+
+const handleSelect = async (index) => {
+  activeMenu.value = index
+  await nextTick()
+  if (index === '1') renderOverviewChart()
+  if (index === '2') renderCategoryChart()
+  if (index === '3') renderCMChart()
+  if (index === '4') renderConfidenceChart()
+}
+
+const handleResize = () => { if (currentChartInstance) currentChartInstance.resize() }
+
+onMounted(async () => {
+  await loadEvalReports()
+  initialLoading.value = false
+  await nextTick()
+  renderOverviewChart()
+  window.addEventListener('resize', handleResize)
 })
 
 onUnmounted(() => {
-  if (timeInterval) clearInterval(timeInterval)
-  window.removeEventListener('resize', () => { robustnessChart?.resize(); latencyChart?.resize(); })
-  robustnessChart?.dispose(); latencyChart?.dispose();
+  window.removeEventListener('resize', handleResize)
+  destroyCurrentChart()
 })
 </script>
 
 <style scoped>
-/* ================= 全局重工业大屏基调 ================= */
-.grand-screen-container {
-  height: calc(100vh - 64px); 
-  background-color: #010510;
-  color: #fff;
-  font-family: 'Rajdhani', 'Microsoft YaHei', sans-serif;
+/* ================= 基础重置与全息网格 ================= */
+.tech-support-container {
   position: relative;
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
+  min-height: calc(100vh - 64px);
+  background-color: transparent;
+  padding: 30px 40px; /* 增加页面边缘呼吸感 */
+  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: #e2e8f0;
+  overflow: hidden;
+}
+.relative-z { position: relative; z-index: 10; }
+
+.cyber-grid-bg {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background-image: 
+    linear-gradient(rgba(0, 240, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 240, 255, 0.05) 1px, transparent 1px);
+  background-size: 40px 40px;
+  opacity: 0.6;
 }
 
-.grand-bg { position: absolute; inset: 0; background: radial-gradient(circle at 50% 40%, rgba(0, 102, 255, 0.1) 0%, transparent 60%); z-index: 0; }
-.grand-grid { position: absolute; inset: 0; background-image: linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px); background-size: 60px 60px; z-index: 0; perspective: 1000px; transform-style: preserve-3d; opacity: 0.6;}
-.grand-light-beam { position: absolute; top: 0; left: 0; right: 0; height: 150px; background: linear-gradient(180deg, rgba(0, 240, 255, 0.05) 0%, transparent 100%); z-index: 0;}
-
-/* ================= 1. 重装甲顶部主梁 ================= */
-.grand-header {
-  position: relative; z-index: 2; height: 80px; display: flex; justify-content: space-between; align-items: flex-start; padding: 0 20px;
+/* ================= 顶部机甲风标题 ================= */
+.cyber-header {
+  display: flex; justify-content: space-between; align-items: flex-end;
+  margin-bottom: 40px; border-bottom: 2px solid rgba(0, 240, 255, 0.15); padding-bottom: 15px;
 }
-.header-flank { flex: 1; display: flex; flex-direction: column; justify-content: center; height: 60px; padding-top: 15px;}
-.h-time { color: #00f0ff; font-family: monospace; font-size: 1.1rem; letter-spacing: 2px; text-shadow: 0 0 10px rgba(0,240,255,0.6); margin-top: 5px;}
-.h-dec-line { height: 2px; background: linear-gradient(90deg, rgba(0,240,255,0.8), transparent); width: 100%; position: relative;}
-.right-flank .h-dec-line { background: linear-gradient(270deg, rgba(0,240,255,0.8), transparent); }
-.h-status { text-align: right; color: #00ff88; font-size: 1rem; margin-top: 5px; text-transform: uppercase; font-family: monospace; letter-spacing: 1px;}
-.pulse-dot { display: inline-block; width: 10px; height: 10px; background: #00ff88; border-radius: 50%; box-shadow: 0 0 12px #00ff88; margin-right: 8px;}
+.header-left { display: flex; align-items: stretch; gap: 20px; }
+.header-deco-block { width: 10px; height: 45px; background: #00f0ff; box-shadow: 0 0 15px #00f0ff; }
+.main-title { font-size: 28px; font-weight: 800; margin: 0 0 6px 0; letter-spacing: 2px; }
+.sub-title { font-size: 15px; color: #94a3b8; margin: 0; letter-spacing: 1px;}
+.text-glow-cyan { color: #fff; text-shadow: 0 0 15px rgba(0, 240, 255, 0.8), 0 0 30px rgba(0, 240, 255, 0.4); }
 
-.header-core { flex: 2.5; display: flex; justify-content: center; position: relative;}
-.core-bg {
-  background: rgba(4, 18, 48, 0.8);
-  border: 2px solid rgba(0, 240, 255, 0.4);
-  border-top: none;
-  padding: 10px 80px 25px;
-  clip-path: polygon(0 0, 100% 0, 92% 100%, 8% 100%);
-  box-shadow: inset 0 -20px 40px rgba(0, 240, 255, 0.2);
-  display: flex; align-items: center; justify-content: center;
-  position: relative; z-index: 2;
+.header-right { display: flex; gap: 15px; }
+.status-badge {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 16px; background: rgba(0, 240, 255, 0.08); border: 1px solid rgba(0, 240, 255, 0.3);
+  font-size: 14px; font-weight: bold; color: #e2e8f0; letter-spacing: 1px;
 }
-.core-title { margin: 0; font-size: 2.2rem; font-weight: 900; color: #fff; letter-spacing: 5px; text-shadow: 0 0 20px rgba(0,240,255,0.8); }
-.core-glow { position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 60%; height: 15px; background: #00f0ff; filter: blur(25px); z-index: 1; opacity: 0.5;}
+.blink-dot { width: 8px; height: 8px; background: #00FF88; border-radius: 50%; box-shadow: 0 0 10px #00FF88; animation: blink 1s infinite alternate; }
+@keyframes blink { 0% { opacity: 0.3; } 100% { opacity: 1; } }
 
-/* ================= 2. 主体网格布局 ================= */
-.screen-main {
-  position: relative; z-index: 2; flex: 1; padding: 20px; display: flex; flex-direction: column;
-  height: calc(100% - 80px); opacity: 0; transform: scale(0.98); transition: all 0.8s cubic-bezier(0.1, 0.9, 0.2, 1);
+/* ================= 页面主体宏观布局 ================= */
+.tech-layout { display: flex; gap: 40px; align-items: flex-start; }
+
+/* ================= 左侧控制面板 (超宽呼吸感) ================= */
+.cyber-sidebar { width: 280px; flex-shrink: 0; display: flex; flex-direction: column; gap: 15px; }
+.sidebar-header { display: flex; align-items: center; gap: 15px; margin-bottom: 10px; }
+.header-text { font-size: 16px; color: #00f0ff; font-weight: 800; letter-spacing: 2px; }
+.deco-line { flex: 1; height: 2px; background: rgba(0, 240, 255, 0.3); }
+
+.nav-list { display: flex; flex-direction: column; gap: 12px; }
+.nav-item {
+  position: relative; padding: 20px 24px; cursor: pointer;
+  display: flex; align-items: center; gap: 15px;
+  background: rgba(10, 15, 30, 0.6); border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
-.screen-main.is-loaded { opacity: 1; transform: scale(1); }
+.nav-idx { font-family: 'Din', monospace; font-size: 18px; font-weight: bold; color: #475569; transition: color 0.3s; }
+.nav-text { font-size: 16px; font-weight: bold; color: #94a3b8; transition: color 0.3s; letter-spacing: 1px; z-index: 2; }
+.nav-corner { position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: #00f0ff; box-shadow: 0 0 15px #00f0ff; transform: scaleY(0); transition: transform 0.3s; }
 
-/* HUD 指标阵列 */
-.hud-matrix { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; height: 100px; flex-shrink: 0;}
-.hud-block { background: rgba(4, 14, 38, 0.8); border: 1px solid rgba(0, 240, 255, 0.2); padding: 15px 25px; display: flex; flex-direction: column; justify-content: center; position: relative; box-shadow: 0 5px 15px rgba(0,0,0,0.5);}
-.hud-block::before { content:''; position: absolute; left: 0; bottom: 0; width: 100%; height: 3px; background: linear-gradient(90deg, #00f0ff, transparent); }
-.highlight-hud { background: rgba(255,184,0,0.05); border-color: rgba(255,184,0,0.3); }
-.highlight-hud::before { background: linear-gradient(90deg, #ffb800, transparent); }
-.hud-title { font-size: 0.95rem; color: #94a3b8; margin-bottom: 5px; text-transform: uppercase; font-weight: bold; letter-spacing: 1px;}
-.hud-num { font-size: 2.8rem; font-weight: 900; font-family: 'Impact', monospace; line-height: 1; letter-spacing: 2px; text-shadow: 0 0 20px currentColor; }
-.hud-num .unit { font-size: 1rem; font-weight: normal; margin-left: 6px; opacity: 0.6; text-shadow: none; font-family: 'Rajdhani'; letter-spacing: 0;}
+.nav-item:hover { border-color: rgba(0, 240, 255, 0.3); background: rgba(0, 240, 255, 0.05); transform: translateX(5px); }
+.nav-item.is-active { background: rgba(0, 240, 255, 0.1); border-color: rgba(0, 240, 255, 0.6); transform: translateX(10px); box-shadow: 0 8px 25px rgba(0,0,0,0.5); }
+.nav-item.is-active .nav-idx { color: #00f0ff; text-shadow: 0 0 10px #00f0ff; }
+.nav-item.is-active .nav-text { color: #fff; text-shadow: 0 0 10px rgba(255,255,255,0.4); }
+.nav-item.is-active .nav-corner { transform: scaleY(1); }
 
-/* 下方 1:2:1 主区域 */
-.main-grid { display: grid; grid-template-columns: 1fr 2.2fr 1fr; gap: 25px; flex: 1; overflow: auto;}
-.panel-column { display: flex; flex-direction: column; height: 100%;}
-
-/* 军工级面板边框 */
-.heavy-panel {
-  position: relative; 
-  background: rgba(6, 14, 33, 0.75); 
-  border: 1px solid rgba(0, 240, 255, 0.15); 
-  box-shadow: inset 0 0 30px rgba(0, 240, 255, 0.05), 0 5px 15px rgba(0,0,0,0.5);
-  display: flex; flex-direction: column; padding: 15px 20px;
+/* ================= 右侧图表容器 ================= */
+.cyber-content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.fui-panel {
+  position: relative; flex: 1; min-height: 650px;
+  background: rgba(6, 12, 28, 0.65); backdrop-filter: blur(12px);
+  border: 1px solid rgba(0, 240, 255, 0.2); padding: 40px;
+  box-shadow: inset 0 0 40px rgba(0, 240, 255, 0.03), 0 10px 40px rgba(0,0,0,0.6);
+  display: flex; flex-direction: column; border-radius: 8px;
 }
-.corner { position: absolute; width: 15px; height: 15px; border: 2px solid #00f0ff; z-index: 5;}
-.corner.tl { top: -2px; left: -2px; border-right: none; border-bottom: none; }
-.corner.tr { top: -2px; right: -2px; border-left: none; border-bottom: none; }
-.corner.bl { bottom: -2px; left: -2px; border-right: none; border-top: none; }
-.corner.br { bottom: -2px; right: -2px; border-left: none; border-top: none; }
 
-.panel-header { font-size: 1.1rem; font-weight: bold; color: #fff; margin-bottom: 15px; display: flex; align-items: center; border-bottom: 1px solid rgba(0,240,255,0.2); padding-bottom: 8px; text-shadow: 0 0 10px rgba(255,255,255,0.3);}
-.panel-header.justify-center { justify-content: center; border-bottom: none; position: relative;}
-.panel-header.justify-center::after { content:''; position: absolute; bottom: 0; width: 60%; height: 1px; background: linear-gradient(90deg, transparent, #00f0ff, transparent);}
-.p-icon { margin-right: 8px; color: #00f0ff; font-size: 1.2rem;}
-.panel-body { flex: 1; position: relative; overflow: auto; width: 100%; height: 100%;}
+.panel-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid rgba(255,255,255,0.05); padding-bottom: 20px; margin-bottom: 35px; }
+.panel-title { font-size: 22px; color: #fff; font-weight: 800; margin: 0; letter-spacing: 1px; display: flex; align-items: center;}
+.panel-title::before { content: ''; display: inline-block; width: 6px; height: 22px; background: #00f0ff; margin-right: 15px; box-shadow: 0 0 12px #00f0ff; }
+.panel-deco { font-family: 'Din', monospace; font-size: 14px; color: #475569; letter-spacing: 3px; font-weight: bold;}
 
-.h-40 { height: calc(40% - 10px); } .h-60 { height: calc(60% - 10px); } .h-100 { height: 100%; }
-.mt-10 { margin-top: 10px; } .mt-20 { margin-top: 20px; }
+.chart-box-large { flex: 1; width: 100%; min-height: 450px; }
+.chart-box-xl { flex: 1; width: 100%; min-height: 550px; } /* 为混淆矩阵提供超大空间 */
 
-/* 左侧：架构视觉流 */
-.pipeline-visual { display: flex; flex-direction: column; justify-content: space-around; padding: 10px 0;}
-.p-stage { text-align: center; }
-.stage-name { font-size: 0.85rem; font-weight: bold; font-family: monospace; margin-bottom: 4px; }
-.stage-box { padding: 8px 15px; border: 1px solid; border-radius: 4px; font-weight: bold; font-size: 0.95rem; background: rgba(0,0,0,0.4); box-shadow: inset 0 0 10px currentColor;}
-.box-gray { border-color: #64748b; color: #cbd5e1; }
-.box-cyan { border-color: #00f0ff; color: #00f0ff; }
-.box-gold { border-color: #ffb800; color: #ffb800; }
-.box-green { border-color: #00ff88; color: #00ff88; }
-.p-arrow { text-align: center; font-size: 1.2rem; animation: flow 1s infinite; }
-@keyframes flow { 0%, 100% { opacity: 0.3; transform: translateY(-2px);} 50% { opacity: 1; transform: translateY(2px);} }
+/* ================= 告别下拉框：机甲风切角选项卡 ================= */
+.version-tabs { display: flex; align-items: center; gap: 15px; }
+.tab-label { font-size: 15px; color: #94a3b8; font-weight: bold; margin-right: 10px; }
+.version-tab {
+  padding: 10px 24px; font-size: 15px; font-weight: bold; color: #94a3b8; cursor: pointer;
+  background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1);
+  transform: skewX(-15deg); transition: all 0.3s;
+}
+.version-tab:hover { background: rgba(0, 240, 255, 0.05); color: #e2e8f0; }
+.version-tab.active { 
+  background: rgba(0, 240, 255, 0.15); border-color: #00f0ff; color: #00f0ff; 
+  box-shadow: 0 0 15px rgba(0, 240, 255, 0.3); text-shadow: 0 0 8px #00f0ff; 
+}
+.version-tab::before { /* 内部文字回正 */ content: ''; display: block; transform: skewX(15deg); }
 
-.tech-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-content: center;}
-.t-badge { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 8px; text-align: center; border-radius: 4px; font-size: 0.95rem; font-weight: bold;}
+/* ================= 深度定制的大字号科技表格 ================= */
+.table-wrapper { margin-top: 40px; background: rgba(0, 0, 0, 0.4); border: 1px solid rgba(0, 240, 255, 0.2); border-radius: 8px; overflow: hidden;}
+.fui-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 16px; }
+.fui-table th { background: rgba(0, 240, 255, 0.08); color: #00f0ff; padding: 20px 24px; font-weight: 800; border-bottom: 2px solid rgba(0, 240, 255, 0.3); letter-spacing: 1px; font-size: 15px;}
+.fui-table td { padding: 18px 24px; border-bottom: 1px dashed rgba(255,255,255,0.08); color: #e2e8f0; }
+.fui-table tbody tr { transition: background 0.3s; }
+.fui-table tbody tr:hover { background: rgba(0, 240, 255, 0.05); }
 
-/* 中间：压测高光区 */
-.insight-bar { background: rgba(230, 162, 60, 0.1); border: 1px solid rgba(230, 162, 60, 0.3); padding: 12px 20px; text-align: center; font-size: 1rem; border-radius: 4px; margin-top: 15px;}
-.text-warning { color: #E6A23C; }
-.chart-wrap { width: 100%; height: 100%; min-height: 200px; }
+.exp-tag { display: inline-block; padding: 4px 12px; background: rgba(0, 240, 255, 0.1); border: 1px solid #00f0ff; color: #00f0ff; font-weight: bold; border-radius: 4px; font-size: 14px; letter-spacing: 1px;}
+.text-green { color: #00FF88; text-shadow: 0 0 8px rgba(0,255,136,0.4);}
+.text-cyan { color: #00f0ff; text-shadow: 0 0 8px rgba(0,240,255,0.4);}
+.text-orange { color: #FF9900; text-shadow: 0 0 8px rgba(255,153,0,0.4);}
+.text-red { color: #FF0033; }
+.font-bold { font-weight: 900; font-family: 'Din', monospace, sans-serif; font-size: 18px; }
 
-/* 右侧：遥测区 */
-.telemetry-status { display: flex; justify-content: space-between; font-size: 0.85rem; font-family: monospace; color: #94a3b8; border-bottom: 1px dashed rgba(255,255,255,0.1); padding-bottom: 10px; margin-bottom: 10px;}
-.blink-text { animation: blink 1.5s infinite; }
+/* ================= 状态与加载反馈 ================= */
+.empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 400px; }
+.bracket-alert { font-family: monospace; color: #64748b; font-size: 16px; font-weight: bold; letter-spacing: 3px; animation: pulseOpacity 2s infinite; }
+@keyframes pulseOpacity { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
 
-/* 色彩工具 */
-.text-cyan { color: #00f0ff; } .text-gold { color: #ffb800; } .text-green { color: #00ff88; } .text-blue { color: #38bdf8;} .text-gray { color: #64748b;} .font-bold { font-weight: bold;}
+.loader-bar { width: 250px; height: 4px; background: rgba(255,255,255,0.1); position: relative; overflow: hidden; margin-bottom: 20px; border-radius: 2px;}
+.loader-fill { position: absolute; left: -80px; width: 80px; height: 100%; background: #00f0ff; box-shadow: 0 0 15px #00f0ff; animation: loadBar 1.2s infinite ease-in-out; }
+@keyframes loadBar { 100% { left: 100%; } }
+
+.fade-in { animation: fadeIn 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+@media (max-width: 1200px) {
+  .tech-layout { flex-direction: column; }
+  .cyber-sidebar { width: 100%; flex-direction: row; align-items: center; }
+  .nav-list { flex-direction: row; flex-wrap: wrap; }
+  .nav-item { padding: 12px 20px; }
+}
 </style>

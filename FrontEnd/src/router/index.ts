@@ -29,6 +29,12 @@ const router = createRouter({
           meta: { title: 'TrafficRec 多模态数据大屏' }
         },
         {
+          path: 'insight',
+          name: 'insight',
+          component: () => import('../views/DataInsight.vue'),
+          meta: { title: '数据洞察分析' }
+        },
+        {
           path: 'history',
           name: 'history',
           component: () => import('../views/HistoryView.vue'),
@@ -50,15 +56,22 @@ const router = createRouter({
           path: 'tech-support',
           name: 'tech',
           component: () => import('../views/TechSupport.vue'),
-          meta: { title: '系统工程架构与防御沙盘' } // 名字顺便改得更霸气
+          meta: { title: '系统工程架构与防御沙盘' } 
         },
-        // 删除了原本在这里的 model-comparison 路由，因为已经融合进了 dashboard
         {
           path: 'user-center',
           name: 'userCenter',
           component: () => import('../views/UserCenterView.vue'),
           meta: { title: '个人中心' }
         },
+        // ========== 新增：区域交通详情页路由 ==========
+        {
+          path: 'region/:name',
+          name: 'RegionDetail',
+          component: () => import('../views/RegionDetail.vue'),
+          meta: { title: '区域交通详情' }
+        },
+        // ==============================================
         { path: 'verification/congestion', redirect: '/congestion-analysis' },
         { path: 'verification/green', redirect: '/green-travel' },
         { path: 'tech', redirect: '/tech-support' },

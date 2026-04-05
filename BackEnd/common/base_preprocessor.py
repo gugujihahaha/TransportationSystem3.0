@@ -662,3 +662,74 @@ def print_cleaned_stats(cleaned_path: str, data=None):
     for label in sorted(counts.keys()):
         pct = counts[label] / total * 100
         print(f"   {label:15s}: {counts[label]:5d} ({pct:5.1f}%)")
+
+# ========== 加载带地理信息的原始段（用于生成预测CSV） ==========
+def load_segments_with_geo(self, max_users=None, min_segment_length=10):
+    """
+    与 process_all_users 类似，但每个 segment 中增加 'geo_points' 字段，
+    包含 timestamp, latitude, longitude（原始未归一化）
+    """
+    users = self._get_all_users()
+    if max_users:
+        users = users[:max_users]
+
+    all_segments = []
+    for user_id in tqdm(users, desc="[加载地理信息]"):
+        labels = self._load_labels(user_id)
+        if labels.empty:
+            continue
+        trajectory_dir = os.path.join(self.geolife_root, f"Data/{user_id}/Trajectory")
+        if not os.path.exists(trajectory_dir):
+            continue
+        for traj_file in os.listdir(trajectory_dir):
+            if not traj_file.endswith('.plt'):
+                continue
+            traj_path = os.path.join(trajectory_dir, traj_file)
+            trajectory_id = traj_file.replace('.plt', '')
+            try:
+                trajectory = self._load_and_compute_features(traj_path)
+                if trajectory.empty or len(trajectory) < min_segment_length:
+                    continue
+                segments = self._segment_trajectory_with_geo(
+                    trajectory, labels, user_id, trajectory_id
+                )
+                all_segments.extend(segments)
+            except Exception as e:
+                warnings.warn(f"处理失败 {traj_path}: {e}")
+                continue
+    return all_segments
+
+def _segment_trajectory_with_geo(self, trajectory, labels, user_id, trajectory_id):
+    """与 _segment_trajectory 相同，但额外保存原始经纬度和时间"""
+    segments = []
+    for _, label_row in labels.iterrows():
+        start_time = label_row['Start Time']
+        end_time = label_row['End Time']
+        raw_mode = str(label_row['Transportation Mode']).lower().strip()
+        mode = self.label_mapping.get(raw_mode, raw_mode.capitalize())
+
+        mask = (trajectory['datetime'] >= start_time) & (trajectory['datetime'] <= end_time)
+        segment = trajectory[mask].copy()
+        if len(segment) < 10:
+            continue
+
+        # 提取地理点信息（原始经纬度和时间）
+        geo_points = segment[['datetime', 'latitude', 'longitude']].copy()
+        geo_points.rename(columns={'datetime': 'timestamp'}, inplace=True)
+        # 确保时间戳字符串格式
+        geo_points['timestamp'] = geo_points['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
+
+        segment_info = {
+            'user_id': user_id,
+            'trajectory_id': trajectory_id,
+            'segment_id': f"{user_id}_{trajectory_id}_{start_time.strftime('%Y%m%d%H%M%S')}",
+            'label': mode,
+            'start_time': start_time,
+            'end_time': end_time,
+            'length': len(segment),
+            'raw_points': segment.reset_index(drop=True),   # 含9维特征
+            'geo_points': geo_points,                       # 新增
+            'datetime_series': segment['datetime'].reset_index(drop=True)
+        }
+        segments.append(segment_info)
+    return segments
