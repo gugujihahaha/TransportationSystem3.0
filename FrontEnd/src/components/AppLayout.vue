@@ -7,20 +7,12 @@
       </div>
 
       <nav class="header-center">
-        <router-link to="/" class="nav-item" active-class="active">首页总览</router-link>
-        <router-link to="/dashboard" class="nav-item" active-class="active">数据与实验驾驶舱</router-link>
-        
-        <div class="nav-item dropdown" :class="{ active: $route.path.includes('/verification') }">
-          应用验证 <span class="arrow">▼</span>
-          <div class="dropdown-content">
-            <router-link to="/verification/congestion">北京典型拥堵路段交通方式构成解析</router-link>
-            <router-link to="/verification/green">绿色出行行为量化评估与碳减排核算</router-link>
-          </div>
-        </div>
-        
+        <router-link to="/" class="nav-item" active-class="active" exact>首页总览</router-link>
+        <router-link to="/insight" class="nav-item" active-class="active">数据洞察</router-link>
+        <router-link to="/verification/congestion" class="nav-item" active-class="active">拥堵溯源分析</router-link>
+        <router-link to="/verification/green" class="nav-item" active-class="active">绿色出行碳普惠</router-link>
+        <router-link to="/history" class="nav-item" active-class="active">我的记录</router-link>
         <router-link to="/tech" class="nav-item" active-class="active">技术支撑</router-link>
-        
-        <router-link to="/user" class="nav-item" active-class="active">用户中心</router-link>
       </nav>
 
       <div class="header-right">
@@ -152,6 +144,9 @@ const handleLogout = () => {
   background: linear-gradient(to top, rgba(56, 189, 248, 0.1), transparent);
 }
 
+/* 下拉菜单样式虽然已经不在模板中使用，
+  但为了满足完全不改变 <style> 区块的要求，这里仍将其保留 
+*/
 .dropdown {
   position: relative;
 }
