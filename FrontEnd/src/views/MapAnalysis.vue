@@ -2,12 +2,12 @@
   <div class="map-analysis">
     <div class="sidebar left-sidebar">
       <div class="sidebar-section">
-        <h3><span class="neon-line"></span> 数据矩阵链入</h3>
+        <h3><span class="neon-line"></span> 轨迹数据导入</h3>
         <TrajectoryUpload @upload="handleUpload" />
       </div>
 
       <div class="sidebar-section">
-        <h3><span class="neon-line"></span> 空间模态图例</h3>
+        <h3><span class="neon-line"></span> 交通模态图例</h3>
         <div class="mode-filters">
           <div
             v-for="mode in transportModes"
@@ -24,7 +24,7 @@
       </div>
 
       <div v-if="selectedTrajectory" class="sidebar-section">
-        <h3><span class="neon-line"></span> 模态特征向量</h3>
+        <h3><span class="neon-line"></span> 轨迹特征参数</h3>
         <div class="trajectory-details glass-panel">
           <div class="detail-item">
             <span class="detail-label">最终收敛分类：</span>
@@ -77,8 +77,8 @@
 
       <div v-if="selectedTrajectory" class="timeline-panel floating-island">
         <div class="timeline-header">
-          <h4><span class="neon-dot"></span> 轨迹时空流回溯</h4>
-          <el-button text class="cyber-btn" @click="showTimeline = !showTimeline">
+          <h4><span class="status-indicator"></span> 轨迹时空流回溯</h4>
+          <el-button text class="primary-action-btn" @click="showTimeline = !showTimeline">
             <el-icon><component :is="showTimeline ? ArrowDown : ArrowUp" /></el-icon>
           </el-button>
         </div>
@@ -117,7 +117,7 @@ const transportModes = computed(() => trajectoryStore.transportModes)
 const predictions = computed(() => trajectoryStore.predictions)
 const selectedTrajectory = computed(() => trajectoryStore.selectedTrajectory)
 
-const aiReportRef = ref<any>(null) // 获取 AI 报告组件的实例
+const aiReportRef = ref<any>(null) 
 const modeFilters = ref<Record<string, boolean>>({
   walk: true, bike: true, bus: true, car: true, subway: true, train: true, airplane: true,
 })
@@ -132,13 +132,11 @@ onMounted(() => {
   trajectoryStore.loadTransportModes()
 })
 
-// 核心联动：上传预测成功后，直接触发右侧 AI 报告的生成
 async function handleUpload(file: File, model: string) {
   try {
     await trajectoryStore.predictTrajectory(file, model)
-    ElMessage.success('预测完成，正在唤醒大模型感知...')
+    ElMessage.success('预测完成，正在生成分析报告...')
     
-    // 触发子组件的流式输出
     if (aiReportRef.value) {
       aiReportRef.value.generateReport()
     }
@@ -279,7 +277,7 @@ function formatTimelineTime(progress: number): string {
 }
 .timeline-header { display: flex; justify-content: space-between; align-items: center; }
 .timeline-header h4 { margin: 0; font-size: 14px; color: #e5e8eb; display: flex; align-items: center; gap: 8px; }
-.neon-dot { width: 8px; height: 8px; background: #00f0ff; border-radius: 50%; animation: pulse 2s infinite; }
+.status-indicator { width: 8px; height: 8px; background: #00f0ff; border-radius: 50%; animation: pulse 2s infinite; }
 @keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.5); opacity: 0.5; } }
 :deep(.el-slider__bar) { background: linear-gradient(90deg, #4a90e2, #00f0ff) !important; }
 :deep(.el-slider__button) { border: 2px solid #00f0ff !important; background: #050608 !important; }

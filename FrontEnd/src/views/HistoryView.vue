@@ -2,7 +2,7 @@
   <div class="fui-history-container">
     <PageHeader title="历史轨迹分析档案" subtitle="全量时空识别记录回溯与多模态审计结果查询">
       <template >
-        <button class="cyber-btn sync-btn" @click="refreshData" :disabled="loading">
+        <button class="primary-action-btn sync-btn" @click="refreshData" :disabled="loading">
           <span v-if="loading" class="loading-spinner"></span>
           <span v-else>🔄 同步最新数据流</span>
         </button>
@@ -18,7 +18,7 @@
       <div v-else-if="trajectoryStore.history.length === 0" class="status-box text-slate">
         <div class="empty-icon">📂</div>
         <p>暂无任何轨迹分析档案</p>
-        <button class="cyber-btn primary mt-4" @click="router.push('/dashboard')">前往发起在线预测</button>
+        <button class="primary-action-btn primary mt-4" @click="router.push('/dashboard')">前往发起在线预测</button>
       </div>
 
       <div v-else class="table-wrapper">
@@ -121,9 +121,8 @@ const formatDate = (dateString?: string) => {
   return isNaN(date.getTime()) ? '未知时间' : date.toLocaleString('zh-CN', { hour12: false })
 }
 
-// 智能跳转：带有 record.id 回溯对应场景
+// 回溯对应场景
 const goToDetail = (record: any) => {
-  // 根据后端的 scene 字段分发路由
   if (record.scene === 'green') {
     router.push({ path: '/green-travel', query: { id: record.id } })
   } else {
@@ -211,8 +210,8 @@ const getBadgeIcon = (mode: string) => {
 /* 按钮与底部分页 */
 .view-btn { background: rgba(0, 240, 255, 0.1); border: 1px solid #00f0ff; color: #00f0ff; padding: 6px 15px; border-radius: 4px; cursor: pointer; transition: 0.3s; }
 .view-btn:hover { background: #00f0ff; color: #000; }
-.cyber-btn.primary { background: rgba(0, 240, 255, 0.1); border: 1px solid #00f0ff; color: #00f0ff; padding: 10px 25px; border-radius: 4px; cursor: pointer; transition: 0.3s; }
-.cyber-btn.primary:hover { background: #00f0ff; color: #000; box-shadow: 0 0 15px #00f0ff; }
+.primary-action-btn.primary { background: rgba(0, 240, 255, 0.1); border: 1px solid #00f0ff; color: #00f0ff; padding: 10px 25px; border-radius: 4px; cursor: pointer; transition: 0.3s; }
+.primary-action-btn.primary:hover { background: #00f0ff; color: #000; box-shadow: 0 0 15px #00f0ff; }
 
 .pagination-controls { display: flex; justify-content: space-between; align-items: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid rgba(0, 240, 255, 0.1); }
 .btn-group { display: flex; gap: 10px; }

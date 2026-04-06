@@ -319,7 +319,6 @@ onUnmounted(() => {
 }
 
 /* ================= 具体组件样式 ================= */
-/* 核心指标 */
 .metrics-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

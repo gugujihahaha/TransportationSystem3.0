@@ -1,4 +1,3 @@
-// 把原来的 http://localhost:8000 删掉，直接用 /api 触发代理
 const BASE_URL = '/api/auth';
 
 export const authApi = {

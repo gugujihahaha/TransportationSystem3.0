@@ -38,11 +38,11 @@
           </div>
         </div>
 
-        <button class="cyber-btn history-btn" @click="router.push('/history')">
+        <button class="primary-action-btn history-btn" @click="router.push('/history')">
           <span>📂 查阅完整历史档案</span>
         </button>
 
-        <button class="cyber-btn edit-btn" @click="handleLogout">
+        <button class="primary-action-btn edit-btn" @click="handleLogout">
           <span>安全退出登录</span>
         </button>
       </aside>
@@ -262,9 +262,7 @@ const option = {
         name: '当前真实记录',
         // 数据点颜色（高亮青色）
         itemStyle: { color: '#00f0ff' },
-        // 连接线的颜色和发光效果
         lineStyle: { width: 2, color: '#00f0ff', shadowBlur: 15, shadowColor: '#00f0ff' },
-        // 内部填充区域的颜色（带透明度的青色）
         areaStyle: { color: 'rgba(0, 240, 255, 0.3)' }
       }]
     }]
@@ -272,7 +270,6 @@ const option = {
   chartInstance.value.setOption(option)
 }
 
-// 监听 history 数据的变化，重新渲染雷达图
 watch(() => trajectoryStore.history, () => {
   if (totalRecords.value > 0) {
     setTimeout(initRadarChart, 100)

@@ -205,7 +205,7 @@ const translateMode = (mode: string) => {
   return map[mode.toLowerCase()] || mode;
 }
 
-// ================= 核心：环境效益评估计算逻辑 =================
+// ================= 环境效益评估计算逻辑 =================
 const evaluateEnvironmentalImpact = (mode: string, distanceKm: number) => {
   const lowerMode = mode.toLowerCase();
   const cnMode = translateMode(mode);

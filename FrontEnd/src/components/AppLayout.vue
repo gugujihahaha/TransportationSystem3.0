@@ -45,7 +45,6 @@ const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 
-// 当前路径，用于高亮菜单
 const currentPath = computed(() => route.path)
 
 // 动态系统时间
@@ -140,11 +139,10 @@ onUnmounted(() => clearInterval(timer))
 .header-nav {
   flex: 1;
   display: flex;
-  /* 菜单整体靠中 */
-  justify-content: center; 
+  justify-content: flex-end; 
   align-items: center;
-  gap: 8px;
-  padding-right: 30px; /* 和最右侧状态区留出呼吸空间 */
+  gap: 16px;
+  padding-right: 80px; 
 }
 .nav-item {
   position: relative;

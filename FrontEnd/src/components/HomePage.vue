@@ -421,9 +421,9 @@ onUnmounted(() => {
 .chart-container { flex: 1; min-height: 180px; width: 100%; }
 .relative-box { position: relative; flex: 1; display: flex; flex-direction: column; }
 
-/* 地图卡片 - 增加高度以填充底部空白 */
+/* 地图卡片 */
 .map-card {
-  height: 540px;  /* 原380px，增大以填充空缺 */
+  height: 540px; 
   grid-row: span 2;
   padding: 10px;
   animation: borderGlow 4s infinite alternate;

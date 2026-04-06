@@ -16,28 +16,28 @@ const router = createRouter({
       path: '/',
       component: AppLayout,
       children: [
-        // 1. 首页总览 (对应 HomeView.vue 那个 1500万+ 数据的宏观页)
+        // 1. 首页总览 
         {
           path: '',
           name: 'home',
           component: () => import('../views/HomeView.vue'),
           meta: { title: '首页总览' }
         },
-        // 2. 态势感知 (点击导航栏“态势感知”，直接渲染咱们写好的高颜值 HomePage.vue 图表大屏)
+        // 2. 态势感知 
         {
           path: 'dashboard',
           name: 'dashboard',
           component: () => import('../components/HomePage.vue'),
           meta: { title: 'TrafficRec 态势感知大屏' }
         },
-        // 3. 数据洞察 (预留路由，以防你加上按钮)
+        // 3. 数据洞察 
         {
           path: 'insight',
           name: 'insight',
           component: () => import('../views/DataInsight.vue'),
           meta: { title: '数据洞察分析' }
         },
-        // 4. 历史记录 (预留路由，以防你加上按钮)
+        // 4. 历史记录 
         {
           path: 'history',
           name: 'history',
@@ -72,7 +72,7 @@ const router = createRouter({
           component: () => import('../views/UserCenterView.vue'),
           meta: { title: '个人中心' }
         },
-        // 9. 区域详情 (由地图点击隐式跳转)
+        // 9. 区域详情 
         {
           path: 'region/:name',
           name: 'RegionDetail',

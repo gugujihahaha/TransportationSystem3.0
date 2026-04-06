@@ -44,7 +44,6 @@ export const trajectoryApi = {
     }
     return await response.json()
   },
-  // 新增一个根据 ID 获取单条记录的接口
   async getHistoryById(id: string) {
     const authStore = useAuthStore();
     const response = await fetch(`/api/trajectory/history/${id}`, {

@@ -2,11 +2,11 @@
   <div class="ai-report-container glass-card">
     <div class="report-header">
       <div class="title-wrapper">
-        <i class="el-icon-cpu neon-icon"></i>
+        <i class="el-icon-document"></i>
         <span class="title-text">TrafficRec 智能感知分析报告</span>
       </div>
       <div class="status-tag" :class="{ 'is-loading': loading }">
-        {{ loading ? 'AI 正在深度解构中...' : '深度学习引擎已就绪' }}
+        {{ loading ? '在生成洞察报告...' : '深度学习引擎已就绪' }}
       </div>
     </div>
 
@@ -28,7 +28,7 @@
         :loading="loading"
         @click="generateReport"
       >
-        {{ reportText ? '重新生成分析' : '生成 AI 绿色报告' }}
+        {{ reportText ? '重新生成分析' : '生成分析报告' }}
       </el-button>
     </div>
   </div>
@@ -42,7 +42,7 @@ const reportText = ref('');
 const loading = ref(false);
 const scrollContainer = ref<HTMLElement | null>(null);
 
-// 核心：流式接口调用
+// 流式接口调用
 const generateReport = async () => {
   if (loading.value) return;
   
@@ -50,15 +50,13 @@ const generateReport = async () => {
   loading.value = true;
 
   try {
-    // 使用 fetch 模拟 SSE 处理，以便更好地处理 Authorization Header
     const response = await fetch('/api/v1/experiment/streamReport', {
-      method: 'POST', // 或 GET，根据你后端接口定义
+      method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${localStorage.getItem('token')}` // 确保携带 Token
       },
       body: JSON.stringify({
-        // 传递当前实验 ID 或轨迹特征数据
         trajectoryId: 'current-task-001' 
       })
     });
@@ -73,7 +71,6 @@ const generateReport = async () => {
       if (done) break;
       
       const chunk = decoder.decode(value, { stream: true });
-      // 模拟打字机平滑感
       reportText.value += chunk;
 
       // 自动滚动到底部
@@ -96,7 +93,6 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* 2.0 风格核心变量 */
 :tep {
   --neon-cyan: #00f0ff;
   --tech-blue: #4A90E2;

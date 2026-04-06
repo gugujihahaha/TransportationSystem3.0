@@ -218,7 +218,7 @@ const switchEngine = async (key: string) => {
   if (!currentFile.value && !hasData.value) return 
   activeEngine.value = key
   if (!currentFile.value) {
-      ElMessage.warning('快照模式：更迭引擎需重新载入数据。');
+      ElMessage.warning('更迭引擎需重新载入数据。');
       return;
   }
   await executeAnalysis(key)
