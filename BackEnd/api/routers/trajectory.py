@@ -671,6 +671,7 @@ class ReportRequest(BaseModel):
     scene: str = "congestion"
     distance: str = "0"
     co2: str = "0"
+    extra: str = ""
 
 
 from datetime import datetime
@@ -729,31 +730,47 @@ async def generate_spark_stream(req: ReportRequest):
 
     # ========== 场景二：拥堵分析 ==========
     else:
-        model_context = ""
-        if req.model_id == 'exp1':
-            model_context = '本次推断仅依赖纯轨迹运动学特征（如速度、加速度）。缺乏真实路网映射，在区分公交与私家车等混流轨迹时存在局限。'
-        elif req.model_id == 'exp2':
-            model_context = '本次推断引入了 OSM 空间路网拓扑结构。成功匹配了车道级特征（如公交专用道），有效解决了复杂路网下的模态混淆。'
-        elif req.model_id == 'exp3':
-            model_context = '本次推断在路网基础上，深度解耦了气象环境因素。敏锐捕捉到了天气突变对车速特征造成的干扰。'
-        elif req.model_id == 'exp4':
-            model_context = '本次推断使用了最终的 Focal Loss 优化引擎。在融合多维时空特征的同时，克服了长尾数据分布不平衡的问题，达到最优推断精度。'
+        prompt = ""
 
-        prompt = f"""你是一位顶级的城市交通管理大数据研判专家。
-        当前任务：为一份交通系统监控报告撰写“智能研判深度溯源”结论。
-        输入数据：
-        - 驱动引擎：{req.model_id.upper()} 模型
-        - 引擎技术特性：{model_context}
-        - 溯源结果：发现该路段的主要交通流构成为【{req.mode}】
-        - 引擎置信度：{req.confidence}%
+        # ========== 场景一：多模型对比 ==========
+        if req.scene == "compare":
+            prompt = f"""请作为交通数据分析师，针对当前上传的这条具体轨迹，分析四个不同阶段实验模型的识别结果和置信度差异。
 
-        输出要求（严格按以下Markdown格式输出）：
-        ### 🧭 时空特征推导
-        结合{req.model_id.upper()}模型的技术特性（务必体现上述提供给你的“引擎技术特性”），专业且严谨地分析为什么会识别出【{req.mode}】。
-        ### 🚦 智能管控建议
-        基于识别出的交通流，给出一条针对性的城市拥堵治理建议。
+        【该轨迹在各模型的推断数据】
+        {req.extra}
 
-        语气：干练、专业、有科技感，像一份政府内参报告。总字数控制在 350 字左右。"""
+        分析要求：
+        1. 直奔主题：对比这四个模型对**这条特定轨迹**的识别结果是否一致。
+        2. 聚焦置信度：重点剖析**置信度的变化趋势**。结合各实验的特征（Exp1仅运动学，Exp2加路网，Exp3/Exp4加天气和FocalLoss优化），解释为什么随着特征变多，模型对该轨迹的判断更笃定（置信度上升），或者发生了翻转？
+        3. 结论精简：总结多模态数据对识别这段轨迹的具体价值。字数控制在 200-300 字，通俗易懂，拒绝长篇大论和空洞套话。"""
+
+        # ========== 场景二：拥堵贡献评估 ==========
+        elif req.scene == "congestion":
+            model_context = ""
+            if req.model_id == 'exp1':
+                model_context = '本次推断仅依赖纯轨迹运动学特征（如速度、加速度），缺乏真实路网映射。'
+            elif req.model_id == 'exp2':
+                model_context = '本次推断引入了 OSM 空间路网拓扑结构，成功匹配了车道级特征。'
+            elif req.model_id == 'exp3':
+                model_context = '本次推断在路网基础上，深度解耦了气象环境因素，捕捉了天气突变对车速特征的干扰。'
+            elif req.model_id == 'exp4':
+                model_context = '本次推断使用了最终的 Focal Loss 优化引擎，融合多维时空特征并克服了长尾数据分布不平衡问题。'
+
+            geo_context = f"\n- 额外信息：{req.extra}" if req.extra else "\n- 额外信息：未途经已知常发拥堵路段。"
+
+            prompt = f"""根据以下真实数据，写一段 200-300 字的专业分析报告。报告要包含三部分：① 本次识别出的出行方式、置信度以及驱动引擎的特性；② 如果经过历史常发拥堵路段，请指出并专业分析该模态的运动学特征对交通流造成的微观扰动；③ 给出一个具体、可执行的改进建议。
+
+        数据：
+        - 出行方式：{req.mode}
+        - 置信度：{req.confidence}%
+        - 使用引擎：{req.model_id.upper()} ({model_context}){geo_context}
+
+        要求：
+        1. 不要提其他实验模型，只针对当前使用的 {req.model_id.upper()} 模型特征进行分析。
+        2. 语气专业、简洁，不用 Markdown，不用套话。"""
+
+        else:
+            prompt = f"请作为交通算法专家，对当前上传的轨迹进行简要分析。识别出的出行方式为：{req.mode}，置信度：{req.confidence}%。"
 
     spark_api_key = "ZOawgFgAMWrgzoramwRS:BkjUHBXpuOrXCpVQfFtJ"
     spark_url = "https://spark-api-open.xf-yun.com/v1/chat/completions"
