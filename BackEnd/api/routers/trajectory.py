@@ -66,7 +66,7 @@ def load_osm_data():
 
         spatial_cache_path = Path(__file__).parent.parent.parent / "exp2" / "cache" / "spatial_data.pkl"
         if spatial_cache_path.exists():
-            print(f"📋 正在从缓存加载OSM数据: {spatial_cache_path}")
+            print(f" 正在从缓存加载OSM数据: {spatial_cache_path}")
             with open(spatial_cache_path, 'rb') as f:
                 osm_extractor = pickle.load(f)
 
@@ -81,7 +81,7 @@ def load_osm_data():
 
         osm_geojson_path = Path(__file__).parent.parent.parent / "data" / "exp2.geojson"
         if osm_geojson_path.exists():
-            print(f"📋 正在加载OSM数据: {osm_geojson_path}")
+            print(f" 正在加载OSM数据: {osm_geojson_path}")
 
             from exp2.src.data_preprocessing import OSMDataLoader
             osm_loader = OSMDataLoader(str(osm_geojson_path))

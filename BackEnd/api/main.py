@@ -38,13 +38,13 @@ async def startup_event():
     
     from api.routers.trajectory import load_predictors, load_weather_data, load_osm_data
     
-    print("\n📋 加载OSM数据...")
+    print("\n 加载OSM数据...")
     load_osm_data()
     
-    print("\n📋 加载天气数据...")
+    print("\n 加载天气数据...")
     load_weather_data()
     
-    print("\n📋 加载预测模型...")
+    print("\n 加载预测模型...")
     load_predictors()
     
     print("\n" + "=" * 60)

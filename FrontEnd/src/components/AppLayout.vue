@@ -137,7 +137,7 @@ onUnmounted(() => clearInterval(timer))
 .header-nav {
   flex: 1;
   display: flex;
-  justify-content: flex-end; 
+  justify-content: center; 
   align-items: center;
   gap: 16px;
   padding-right: 80px; 
