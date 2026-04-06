@@ -120,7 +120,6 @@ const generateAIReport = async () => {
   }
 }
 
-// 一键导出白底黑字高清 PDF
 const exportToPDF = () => {
   const element = document.getElementById('pdf-content')
   if (!element) return
@@ -129,27 +128,23 @@ const exportToPDF = () => {
     margin:       10,
     filename:     `交通智能分析报告_${new Date().getTime()}.pdf`,
     image:        { type: 'jpeg' as const, quality: 0.98 },
-    html2canvas:  { scale: 2, useCORS: true, backgroundColor: '#ffffff' }, // 强制底色为纯白
+    html2canvas:  { scale: 2, useCORS: true, backgroundColor: '#ffffff' }, 
     jsPDF:        { unit: 'mm' as const, format: 'a4' as const, orientation: 'portrait' as const }
   }
 
-  // 克隆节点进行样式魔改，防止影响页面上的深色UI
   const clone = element.cloneNode(true) as HTMLElement
   
-  // 1. 强制容器背景白、文字黑
   clone.style.backgroundColor = 'white'
   clone.style.color = 'black'
   clone.style.padding = '20px'
-  clone.style.height = 'auto' // 释放高度限制，打印全部内容
+  clone.style.height = 'auto'
   clone.style.overflow = 'visible'
   
-  // 2. 递归将所有内部标签文字变黑
   const allChildren = clone.querySelectorAll('*')
   allChildren.forEach((child: any) => {
     child.style.color = 'black'
   })
 
-  // 3. 移除导出时多余的光标，保持文档正式感
   const cursor = clone.querySelector('.typing-cursor')
   if (cursor) cursor.remove()
   

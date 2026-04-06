@@ -581,7 +581,6 @@ onUnmounted(() => {
 }
 .version-tab::before {  content: ''; display: block; transform: skewX(15deg); }
 
-/* ================= 大字号科技表格 ================= */
 .table-wrapper { margin-top: 40px; background: rgba(0, 0, 0, 0.4); border: 1px solid rgba(0, 240, 255, 0.2); border-radius: 8px; overflow: hidden;}
 .fui-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 16px; }
 .fui-table th { background: rgba(0, 240, 255, 0.08); color: #00f0ff; padding: 20px 24px; font-weight: 800; border-bottom: 2px solid rgba(0, 240, 255, 0.3); letter-spacing: 1px; font-size: 15px;}

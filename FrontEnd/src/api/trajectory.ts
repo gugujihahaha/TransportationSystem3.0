@@ -53,7 +53,6 @@ export const trajectoryApi = {
     if (!response.ok) throw new Error('获取失败');
     return await response.json();
   },
-  // 获取真实历史记录接口
   async getHistory() {
     const authStore = useAuthStore();
     const response = await fetch('/api/trajectory/history', {

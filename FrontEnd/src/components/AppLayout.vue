@@ -73,7 +73,7 @@ onUnmounted(() => clearInterval(timer))
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background-color: #050a19; /* 深海科技蓝底色 */
+  background-color: #050a19; 
   color: #e2e8f0;
   font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
   overflow: hidden;

@@ -42,7 +42,7 @@ defineProps({
 .cyber-box-wrapper {
   position: relative;
   width: 100%;
-  background: rgba(4, 11, 25, 0.65); /* 极深的深空蓝底色 */
+  background: rgba(4, 11, 25, 0.65);
   backdrop-filter: blur(10px);
   clip-path: polygon(0 15px, 15px 0, 100% 0, 100% calc(100% - 15px), calc(100% - 15px) 100%, 0 100%);
   padding: 20px;

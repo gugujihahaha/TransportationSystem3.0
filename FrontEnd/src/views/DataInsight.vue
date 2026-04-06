@@ -98,14 +98,13 @@ const charts = []
 
 const initialized = { '1': false, '2': false, '3': false, '4': false }
 
-// ✅ 顶级高级商务配色（低饱和、干净、高级、不廉价、不刺眼、大厂同款）
 const modeColors = {
-  'Walk': '#8dd1e1',       // 浅雾蓝（步行）
-  'Bike': '#6794c7',       // 雾霾蓝（骑行）
-  'Bus': '#a5d6a7',        // 薄荷绿（公交）
-  'Car & taxi': '#ef5350', // 柔红（私家车）
-  'Subway': '#9575cd',     // 淡紫（地铁）
-  'Train': '#f48fb1'       // 柔粉（火车）
+  'Walk': '#8dd1e1',      
+  'Bike': '#6794c7',      
+  'Bus': '#a5d6a7',       
+  'Car & taxi': '#ef5350',
+  'Subway': '#9575cd',    
+  'Train': '#f48fb1'      
 }
 
 const hasRoadData = computed(() => {
@@ -165,7 +164,7 @@ const initChart2 = () => {
   charts[1] = chart
 }
 
-// 图表3：天气（高级柔色）
+// 图表3：天气
 const initChart3 = () => {
   const chart = echarts.init(chart3Ref.value)
   const data = insightData.value.weather_impact

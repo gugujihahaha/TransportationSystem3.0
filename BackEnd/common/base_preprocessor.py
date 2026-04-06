@@ -733,3 +733,7 @@ def _segment_trajectory_with_geo(self, trajectory, labels, user_id, trajectory_i
         }
         segments.append(segment_info)
     return segments
+
+
+class BaseGeoLifeDataLoader:
+    pass

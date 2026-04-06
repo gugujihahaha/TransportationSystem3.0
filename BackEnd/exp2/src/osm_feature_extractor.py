@@ -171,7 +171,7 @@ class OsmSpatialExtractor:
 
             for i, coord in enumerate(coords):
                 node_id = f"{road_id}_node_{i}"
-                # 修复：转换 Decimal 为 float
+
                 lon, lat = self._convert_to_float(coord[0]), self._convert_to_float(coord[1])
 
                 self.graph.add_node(node_id,
@@ -213,10 +213,8 @@ class OsmSpatialExtractor:
                 continue
 
             if isinstance(coordinates[0], list):
-                # 修复：转换 Decimal 为 float
                 lon, lat = self._convert_to_float(coordinates[0][0]), self._convert_to_float(coordinates[0][1])
             else:
-                # 修复：转换 Decimal 为 float
                 lon, lat = self._convert_to_float(coordinates[0]), self._convert_to_float(coordinates[1])
 
             self.graph.add_node(poi_id,
@@ -500,9 +498,7 @@ class OsmSpatialExtractor:
                 if 'parking' in nearby_types:
                     poi_features[i, 2] = 1.0
 
-                # 最近 POI 距离（修复 Decimal 问题）
                 poi_coords_nearby = self.poi_coords[indices[i]]
-                # 确保 coords 和 poi_coords_nearby 都是 float64
                 dists = np.linalg.norm(
                     poi_coords_nearby.astype(np.float64) - coords[i:i+1].astype(np.float64),
                     axis=1
@@ -600,7 +596,6 @@ class OsmSpatialExtractor:
         self._cache_hits = 0
         self._cache_misses = 0
 
-    # ========== 保留原有接口 ==========
     def _link_roads_to_pois(self, max_distance: float = 100.0):
         """
         使用 KDTree 加速 POI 到最近道路节点的链接。

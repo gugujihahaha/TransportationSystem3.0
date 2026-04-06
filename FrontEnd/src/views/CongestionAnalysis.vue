@@ -100,7 +100,7 @@
           </div>
           <div v-if="isGeneratingReport && !aiReport" class="ai-processing">
             <div class="spinner"></div>
-            正在建立星火认知引擎链路...
+            正在建立认知引擎链路...
           </div>
           <div v-else-if="aiReport" class="ai-stream-text">
             <span v-html="formattedReport"></span>
@@ -200,7 +200,7 @@ const renderTrajectory = (points: any[], mode: string) => {
   if (latLngs.length === 0) return;
   const color = modeColors[mode.toLowerCase()] || '#4A90E2'
   currentPolyline = L.polyline(latLngs, { color: color, weight: 5, opacity: 0.85, lineCap: 'round', lineJoin: 'round'}).addTo(map);
-  // ✅ 修复报错：添加 as L.LatLngExpression
+  
   const startMarker = L.circleMarker(latLngs[0] as L.LatLngExpression, { radius: 6, fillColor: '#52C41A', color: '#fff', weight: 2, fillOpacity: 1 }).addTo(map);
   const endMarker = L.marker(latLngs[latLngs.length - 1] as L.LatLngExpression, {
     icon: L.divIcon({ className: 'custom-end-marker', html: '<div style="width: 12px; height: 12px; background: #F5222D; border: 2px solid #fff; border-radius: 2px;"></div>', iconSize: [12, 12], iconAnchor: [6, 6] })
@@ -332,14 +332,13 @@ onUnmounted(() => { if (map) { map.remove(); map = null } })
 </script>
 
 <style scoped>
-/* ================= 全局炫酷亮色框架 ================= */
 .cyber-battle-station {
   display: flex;
   width: 100%;
   height: calc(100vh - 64px);
-  background: #020B16; /* 深邃的暗夜蓝背景 */
+  background: #020B16; 
   padding: 16px;
-  gap: 16px; /* 三列之间的严格间距，绝不重叠 */
+  gap: 16px; 
   box-sizing: border-box;
   font-family: 'Helvetica Neue', Helvetica, 'Microsoft YaHei', sans-serif;
 }
