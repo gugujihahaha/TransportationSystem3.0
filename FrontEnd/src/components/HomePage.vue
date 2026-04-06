@@ -5,7 +5,7 @@
         <div class="dashboard-grid">
           
           <div class="glass-card fade-up card-delay-1">
-            <div class="card-title">交通方式识别构成（Exp4模型）</div>
+            <div class="card-title">交通方式识别构成</div>
             <div class="chart-wrapper relative-box">
               <div class="ring-center">
                 <div class="center-label">总样本</div>
@@ -24,7 +24,7 @@
                 <div class="legend-note">
                   <span class="highlight-text">数据说明：</span><br>
                   拥堵指数经归一化处理（0-1）。<br>
-                  <span class="sub-note" style="color: #FFD700;">👆 点击地图各行政区可查看详细交通档案</span>
+                  <span class="sub-note" style="color: #FFD700;">点击地图各行政区可查看详细交通档案</span>
                 </div>
               </div>
             </div>
@@ -35,9 +35,9 @@
             <div ref="chart3Ref" class="chart-container-line"></div>
             
             <div class="carbon-panel">
-              <div class="carbon-text">累计减碳 <span class="num-glow">{{ animatedCarbonKg.toFixed(1) }}</span> kg</div>
+              <div class="carbon-text">累计减碳<span class="num-glow">{{ animatedCarbonKg.toFixed(1) }}</span> kg</div>
               <div class="carbon-divider">≈</div>
-              <div class="carbon-text">种植 <span class="num-glow">{{ animatedCarbonTrees.toFixed(1) }}</span> 棵树</div>
+              <div class="carbon-text">种植<span class="num-glow">{{ animatedCarbonTrees.toFixed(1) }}</span> 棵树</div>
             </div>
           </div>
 
@@ -45,8 +45,6 @@
             <div class="card-title">常发拥堵路段年均拥堵时长排行</div>
             <div ref="chart4Ref" class="chart-container"></div>
           </div>
-
-          <div class="empty-placeholder"></div>
 
           <div class="glass-card fade-up card-delay-5">
             <div class="card-title">拥堵成因贡献度分析</div>
@@ -172,7 +170,7 @@ const initCharts = async () => {
   })
   charts.push(chart1)
 
-// --- 卡片2：高亮发光版全区热力地图 + GPS真实热力点透视 + 路由跳转 ---
+  // --- 卡片2：高亮发光版全区热力地图 + GPS真实热力点透视 + 路由跳转 ---
   const chart2 = echarts.init(chart2Ref.value)
   try {
     const geoRes = await fetch('https://geo.datav.aliyun.com/areas_v3/bound/110000_full.json')
@@ -181,7 +179,7 @@ const initCharts = async () => {
     
     const estimatedKeys = Object.keys(estimatedMapData)
 
-    // 1. 加载底层 GPS 小汽车网格热力图数据
+    // 加载底层 GPS 小汽车网格热力图数据
     let heatmapData = []
     try {
       const res = await fetch('/heatmap_grid.json')
@@ -190,10 +188,9 @@ const initCharts = async () => {
       console.warn('GPS热力图数据加载失败，继续渲染基础地图', e) 
     }
 
-    // 2. 动态构建 series 数组
+    // 动态构建 series 数组
     let seriesList = []
 
-    // 如果热力图数据存在，则先画底层热力图 (zlevel 0, 数组 index 0)
     if (heatmapData.length > 0) {
       seriesList.push({
         type: 'heatmap',
@@ -204,12 +201,11 @@ const initCharts = async () => {
         label: { show: false },
         emphasis: { disabled: true },
         tooltip: { show: false },
-        silent: true, // 鼠标事件穿透，交给上层的行政区地图处理
+        silent: true,
         zlevel: 0
       })
     }
 
-    // 将行政区地图追加在上层 (数组 index 将变为 1 或 0)
     seriesList.push({
       type: 'map', 
       map: 'BJ', 
@@ -235,7 +231,6 @@ const initCharts = async () => {
       data: Object.entries(data.map_heatmap).map(([name, value]) => ({ name, value }))
     })
 
-    // 3. 动态构建 visualMap 数组，防止热力图和行政区颜色互相污染
     let visualMapConfig = [
       {
         show: true,
@@ -251,36 +246,32 @@ const initCharts = async () => {
         bottom: 15,
         text: ['拥堵', '畅通'],
         textStyle: { color: '#e2e8f0', fontSize: 10, fontWeight: 'bold' },
-        seriesIndex: seriesList.length - 1 // 始终只作用于最后一个系列（即行政区地图）
+        seriesIndex: seriesList.length - 1
       }
     ]
 
-    // 如果启用了热力图，为它追加连续色带
     if (heatmapData.length > 0) {
       visualMapConfig.push({
-        show: false, // 隐藏热力图的刻度条
+        show: false,
         type: 'continuous',
         min: 0,
         max: 1,
-        seriesIndex: 0, // 仅作用于底层的热力图系列
+        seriesIndex: 0,
         inRange: {
-          // 经典的深冷到高热色带，增加视觉冲击
           color: ['#313695', '#4575b4', '#74add1', '#abd9e9', '#e0f3f8', '#ffffbf', '#fee090', '#fdae61', '#f46d43', '#d73027', '#a50026']
         }
       })
     }
 
-    // 4. 渲染图表
     chart2.setOption({
       backgroundColor: '#0A0E17', 
-      // 必须为热力图预留一个隐形的坐标系基座
       geo: {
         map: 'BJ',
         roam: true,
         zoom: 1.1,
         center: [116.405285, 40.003989],
         silent: true, 
-        itemStyle: { opacity: 0 } // 完全透明隐藏
+        itemStyle: { opacity: 0 }
       },
       tooltip: { 
         trigger: 'item', 
@@ -289,7 +280,6 @@ const initCharts = async () => {
         borderWidth: 1,
         textStyle: { color: '#fff' },
         formatter: (params) => {
-          // 仅当划过行政区地图时，展示 Tooltip 详细信息
           if (params.seriesType === 'map') {
             const val = params.value || 0
             const isEst = estimatedKeys.includes(params.name)
@@ -305,14 +295,11 @@ const initCharts = async () => {
       series: seriesList
     })
 
-    // ===== 地图点击事件：路由跳转 =====
     chart2.on('click', (params) => {
-      // 保险起见，再次判断点击的是行政区域块
       if (params.seriesType === 'map' && params.name) {
         router.push(`/region/${params.name}`)
       }
     })
-    // ===================================
 
   } catch (err) { console.warn('地图加载失败', err) }
   charts.push(chart2)
@@ -394,7 +381,6 @@ onUnmounted(() => {
   height: 100%; 
   box-sizing: border-box; 
   background: transparent; 
-  /* 更清晰稳重的系统黑体 */
   font-family: "PingFang SC", "Microsoft YaHei", sans-serif; 
 }
 
@@ -406,7 +392,7 @@ onUnmounted(() => {
   margin-bottom: 20px;
 }
 
-/* ================= 玻璃卡片 ================= */
+/* 玻璃卡片 */
 .glass-card {
   background: rgba(15, 25, 45, 0.6);
   backdrop-filter: blur(8px);
@@ -426,30 +412,33 @@ onUnmounted(() => {
 
 .card-title {
   font-size: 16px;
-  color: #e2e8f0; /* 调亮，保证清晰度 */
+  color: #e2e8f0;
   margin-bottom: 12px;
-  font-weight: 600; /* 加重字重使其稳重 */
+  font-weight: 600;
   letter-spacing: 0.5px;
 }
 
 .chart-container { flex: 1; min-height: 180px; width: 100%; }
 .relative-box { position: relative; flex: 1; display: flex; flex-direction: column; }
 
-/* ================= 地图高度及特效调整 ================= */
+/* 地图卡片 - 增加高度以填充底部空白 */
 .map-card {
-  height: 380px; 
-  grid-row: span 2; 
-  padding: 10px; 
-  animation: borderGlow 4s infinite alternate; 
+  height: 540px;  /* 原380px，增大以填充空缺 */
+  grid-row: span 2;
+  padding: 10px;
+  animation: borderGlow 4s infinite alternate;
 }
 .map-wrapper {
   border-radius: 8px;
   overflow: hidden;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 .map-canvas { 
-  height: 100%; 
-  width: 100%; 
-  cursor: pointer; /* 提示可点击 */
+  flex: 1;
+  width: 100%;
+  cursor: pointer;
 }
 
 @keyframes borderGlow {
@@ -472,11 +461,11 @@ onUnmounted(() => {
   font-size: 26px; 
   color: #38bdf8; 
   font-weight: bold; 
-  text-shadow: 0 0 8px rgba(56, 189, 248, 0.5); /* 阴影调弱变锐利 */
+  text-shadow: 0 0 8px rgba(56, 189, 248, 0.5);
   font-family: 'Din', 'Arial', sans-serif; 
 }
 
-/* ================= 图注文本说明 ================= */
+/* 图例 */
 .custom-legend {
   position: absolute;
   bottom: 10px;
@@ -505,7 +494,7 @@ onUnmounted(() => {
   margin-top: 4px;
 }
 
-/* ================= 折线图 + 碳减排 ================= */
+/* 折线图 + 碳减排 */
 .flex-col-card { display: flex; flex-direction: column; justify-content: space-between; }
 .chart-container-line { height: 160px; width: 100%; }
 .carbon-panel {
@@ -520,7 +509,7 @@ onUnmounted(() => {
 }
 .carbon-text { font-size: 13px; color: #e2e8f0; font-weight: 500;}
 .num-glow {
-  font-size: 26px;
+  font-size: 22px;
   font-weight: bold;
   color: #00FF88;
   text-shadow: 0 0 8px rgba(0, 255, 136, 0.4);
@@ -529,10 +518,7 @@ onUnmounted(() => {
 }
 .carbon-divider { font-size: 20px; color: #94a3b8; font-weight: bold; }
 
-/* 占位 */
-.empty-placeholder { display: none; }
-
-/* ================= 表格 ================= */
+/* 表格 */
 .table-card { margin-top: 20px; }
 .cyber-table {
   --el-table-bg-color: transparent;
@@ -545,7 +531,7 @@ onUnmounted(() => {
 :deep(.el-table tbody tr:hover > td) { background-color: rgba(56, 189, 248, 0.1) !important; }
 .highlight-ratio { color: #FF4500; font-weight: bold; font-size: 14px;}
 
-/* ================= 悬浮说明 ================= */
+/* 悬浮说明 */
 .data-source-trigger {
   position: fixed;
   bottom: 25px;
@@ -593,7 +579,7 @@ onUnmounted(() => {
   color: #0f192d;
 }
 
-/* ================= 动画特效 ================= */
+/* 动画 */
 .fade-up {
   opacity: 0;
   animation: fadeInUp 0.5s ease forwards;
@@ -611,6 +597,6 @@ onUnmounted(() => {
 
 @media (max-width: 1024px) {
   .dashboard-grid { grid-template-columns: 1fr; }
-  .map-card { grid-row: span 1; height: 350px; }
+  .map-card { height: 450px; grid-row: span 1; }
 }
 </style>

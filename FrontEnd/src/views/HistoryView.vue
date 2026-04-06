@@ -1,16 +1,13 @@
 <template>
   <div class="fui-history-container">
-    <div class="header-section">
-      <h2 class="main-title">
-        <span class="text-glow">历史轨迹分析档案</span>
-      </h2>
-      <p class="subtitle">全量时空识别记录回溯与多模态审计结果查询</p>
-      
-      <button class="cyber-btn sync-btn" @click="refreshData" :disabled="loading">
-        <span v-if="loading" class="loading-spinner"></span>
-        <span v-else>🔄 同步最新数据流</span>
-      </button>
-    </div>
+    <PageHeader title="历史轨迹分析档案" subtitle="全量时空识别记录回溯与多模态审计结果查询">
+      <template >
+        <button class="cyber-btn sync-btn" @click="refreshData" :disabled="loading">
+          <span v-if="loading" class="loading-spinner"></span>
+          <span v-else>🔄 同步最新数据流</span>
+        </button>
+      </template>
+    </PageHeader>
 
     <div class="content-panel panel-glass">
       <div v-if="loading" class="status-box text-cyan">
@@ -82,7 +79,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTrajectoryStore } from '@/stores/trajectory'
-
+import PageHeader from '@/components/PageHeader.vue'
 const router = useRouter()
 const trajectoryStore = useTrajectoryStore()
 

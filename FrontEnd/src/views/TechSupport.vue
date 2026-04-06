@@ -1,20 +1,6 @@
 <template>
   <div class="tech-support-container">
-    <div class="cyber-grid-bg"></div>
-
-    <div class="cyber-header relative-z">
-      <div class="header-left">
-        <div class="header-deco-block"></div>
-        <div class="title-group">
-          <h2 class="main-title text-glow-cyan">多模态大模型底座 // 核心性能监测矩阵</h2>
-          <p class="sub-title">全景透视四阶时空图网络的推演精度、特征离散度及鲁棒性指标</p>
-        </div>
-      </div>
-      <div class="header-right">
-        <div class="status-badge"><span class="blink-dot"></span> 算力集群在线</div>
-        <div class="status-badge"><span class="text-cyan">内存载入率 100%</span></div>
-      </div>
-    </div>
+    <!-- <PageHeader title="多模态大模型底座" subtitle="全景透视四阶时空图网络的推演精度、特征离散度及鲁棒性指标" /> -->
 
     <el-skeleton :loading="initialLoading" animated :rows="15" class="relative-z">
       <template #default>
@@ -46,7 +32,6 @@
             <div v-if="activeMenu === '1'" class="fui-panel fade-in">
               <div class="panel-header">
                 <h3 class="panel-title">递进实验模型宏观性能演进</h3>
-                <div class="panel-deco">MACRO PERFORMANCE</div>
               </div>
               
               <div ref="overviewChartRef" class="chart-box-large"></div>
@@ -111,10 +96,7 @@
                 </div>
               </div>
               
-              <div v-if="selectedExpCM === 'exp4'" class="empty-state">
-                <div class="bracket-alert">[ 核心预测张量归档中，全量矩阵暂不可用 ]</div>
-              </div>
-              <div v-else-if="csvLoading" class="empty-state">
+              <div v-if="csvLoading" class="empty-state">
                 <div class="loader-bar"><div class="loader-fill"></div></div>
                 <p class="text-cyan mt-4 font-bold">引擎正在解析千万级预测张量，请稍候...</p>
               </div>
@@ -139,10 +121,8 @@
                 </div>
               </div>
 
-              <div v-if="selectedExpConf === 'exp4'" class="empty-state">
-                <div class="bracket-alert">[ 置信度抽样数据演算中 ]</div>
-              </div>
-              <div v-else-if="csvLoading" class="empty-state">
+              
+              <div v-if="csvLoading" class="empty-state">
                 <div class="loader-bar"><div class="loader-fill"></div></div>
                 <p class="text-cyan mt-4 font-bold">引擎正在解析千万级预测张量，请稍候...</p>
               </div>
@@ -161,7 +141,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import Papa from 'papaparse'
-
+import PageHeader from '@/components/PageHeader.vue'
 const initialLoading = ref(true)
 const csvLoading = ref(false)
 const csvError = ref(false)
@@ -193,6 +173,27 @@ const modeDict = {
   'Walk': '步行', 'Bike': '骑行', 'Bus': '常规公交', 
   'Car & taxi': '小汽车', 'Subway': '城市轨道', 'Train': '铁路客运'
 }
+
+// ==================== Exp4 数据 ====================
+const exp4ConfusionMatrix = [
+  [133,   2,   0,   0,   0,   0],   // Walk true
+  [  2, 144,   4,   0,   0,   1],   // Bike true
+  [  0,   5, 107,  15,   0,   0],   // Bus true
+  [  0,   0,  14,  25,   0,   1],   // Car & taxi true
+  [  0,   0,   0,   0,  18,   0],   // Subway true
+  [  0,   0,   0,   0,   0,  24]    // Train true
+]
+
+// 各类别的置信度五数概括（min, Q1, median, Q3, max）
+const exp4ConfidenceStats = {
+  'Walk': [0.270, 0.560, 0.640, 0.700, 0.743],
+  'Bike': [0.276, 0.540, 0.610, 0.650, 0.697],
+  'Bus': [0.280, 0.470, 0.550, 0.630, 0.752],
+  'Car & taxi': [0.344, 0.470, 0.550, 0.620, 0.756],
+  'Subway': [0.379, 0.660, 0.780, 0.820, 0.841],
+  'Train': [0.344, 0.760, 0.800, 0.810, 0.825]
+}
+
 const transportModes = Object.keys(modeDict)
 
 const loadEvalReports = async () => {
@@ -267,7 +268,7 @@ const destroyCurrentChart = () => {
   }
 }
 
-// ================= 图表 1: 宏观总览 (加粗放大版) =================
+// ================= 图表 1: 宏观总览 =================
 const renderOverviewChart = () => {
   destroyCurrentChart()
   if (!overviewChartRef.value) return
@@ -290,7 +291,7 @@ const renderOverviewChart = () => {
   })
 }
 
-// ================= 图表 2: 雷达图 (高清晰版) =================
+// ================= 图表 2: 雷达图  =================
 const renderCategoryChart = () => {
   destroyCurrentChart()
   const d = evalData[selectedExpCat.value]
@@ -332,10 +333,40 @@ const renderCategoryChart = () => {
   })
 }
 
-// ================= 图表 3: 混淆矩阵 (高对比版) =================
+// ================= 图表 3: 混淆矩阵  =================
 const renderCMChart = async () => {
   destroyCurrentChart()
-  if (selectedExpCM.value === 'exp4') return
+  if (selectedExpCM.value === 'exp4') {
+    if (!cmChartRef.value) return
+    const matrix = exp4ConfusionMatrix
+    let maxVal = 0
+    for (let i = 0; i < 6; i++) {
+      for (let j = 0; j < 6; j++) {
+        if (matrix[i][j] > maxVal) maxVal = matrix[i][j]
+      }
+    }
+    const heatmapData = []
+    for (let i = 0; i < 6; i++) {
+      for (let j = 0; j < 6; j++) {
+        heatmapData.push([j, i, matrix[i][j]])
+      }
+    }
+    const chineseModes = transportModes.map(m => modeDict[m])
+    currentChartInstance = echarts.init(cmChartRef.value)
+    currentChartInstance.setOption({
+      tooltip: { 
+      position: 'top', backgroundColor: 'rgba(6, 12, 28, 0.95)', borderColor: '#00f0ff', padding: 15,
+      textStyle: { color: '#fff', fontSize: 15 }, 
+      formatter: (p) => `<div style="font-weight:bold;margin-bottom:8px;">实际: ${chineseModes[p.data[1]]} <span style="color:#64748b">➡</span> 预测: ${chineseModes[p.data[0]]}</div>落入特征数: <span style="color:#00f0ff; font-size:18px;">${p.data[2]}</span>` 
+    },
+      grid: { top: 20, bottom: 80, left: 100, right: 30 },
+      xAxis: { type: 'category', data: chineseModes, axisLabel: { color: '#cbd5e1', fontSize: 14, fontWeight: 'bold', margin: 15}, splitArea: { show: true }, axisTick: { show: false } },
+      yAxis: { type: 'category', data: chineseModes, axisLabel: { color: '#cbd5e1', fontSize: 14, fontWeight: 'bold', margin: 15 }, splitArea: { show: true }, axisTick: { show: false } },
+      visualMap: { min: 0, max: maxVal, calculable: true, orient: 'horizontal', left: 'center', bottom: 10, inRange: { color: ['#0A0F1E', '#00f0ff', '#00FF88', '#FFDD00'] }, textStyle: { color: '#e2e8f0', fontSize: 13, fontWeight: 'bold' }, itemWidth: 20 },
+      series: [{ type: 'heatmap', data: heatmapData, label: { show: true, color: '#fff', fontSize: 15, fontWeight: 'bold', textShadow: '0 0 3px #000' }, itemStyle: { borderColor: '#050a14', borderWidth: 4 } }]
+    })
+    return
+  }
   const csvData = await loadCSVData(selectedExpCM.value)
   if (!csvData || csvData.length === 0 || !cmChartRef.value) return
 
@@ -374,10 +405,28 @@ const renderCMChart = async () => {
   })
 }
 
-// ================= 图表 4: 置信度箱线图 (大字号清晰版) =================
+// ================= 图表 4: 置信度箱线图 =================
 const renderConfidenceChart = async () => {
   destroyCurrentChart()
-  if (selectedExpConf.value === 'exp4') return
+   // 如果是 exp4，直接使用硬编码的箱线图数据
+  if (selectedExpConf.value === 'exp4') {
+    if (!confChartRef.value) return
+    const chineseModes = transportModes.map(m => modeDict[m])
+    const boxplotData = transportModes.map(mode => exp4ConfidenceStats[mode])
+    currentChartInstance = echarts.init(confChartRef.value)
+    currentChartInstance.setOption({
+      tooltip: { trigger: 'item', axisPointer: { type: 'shadow' }, backgroundColor: 'rgba(6, 12, 28, 0.95)', borderColor: '#00f0ff', padding: 15, textStyle: { color: '#fff', fontSize: 14 } },
+      grid: { top: 30, left: 60, right: 30, bottom: 40 },
+      xAxis: { type: 'category', data: chineseModes, axisLabel: { color: '#00f0ff', fontSize: 15, fontWeight: 'bold', margin: 15 }, axisLine: { lineStyle: { color: '#1e293b', width: 2 } }, axisTick: { show: false } },
+      yAxis: { type: 'value', min: 0, max: 1.0, axisLabel: { color: '#94a3b8', fontSize: 14, fontWeight: 'bold' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,0.08)', type: 'dashed', width: 1.5 } } },
+      series: [{
+        name: '离散特征', type: 'boxplot', data: boxplotData,
+        itemStyle: { color: 'rgba(0,240,255,0.15)', borderColor: '#00f0ff', borderWidth: 2 },
+        boxWidth: [25, 45]
+      }]
+    })
+    return
+  }
   const csvData = await loadCSVData(selectedExpConf.value)
   if (!csvData || csvData.length === 0 || !confChartRef.value) return
 
@@ -438,7 +487,7 @@ onUnmounted(() => {
   position: relative;
   min-height: calc(100vh - 64px);
   background-color: transparent;
-  padding: 30px 40px; /* 增加页面边缘呼吸感 */
+  padding: 30px 40px; 
   font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
   color: #e2e8f0;
   overflow: hidden;
@@ -477,7 +526,7 @@ onUnmounted(() => {
 /* ================= 页面主体宏观布局 ================= */
 .tech-layout { display: flex; gap: 40px; align-items: flex-start; }
 
-/* ================= 左侧控制面板 (超宽呼吸感) ================= */
+/* ================= 左侧控制面板 ================= */
 .cyber-sidebar { width: 280px; flex-shrink: 0; display: flex; flex-direction: column; gap: 15px; }
 .sidebar-header { display: flex; align-items: center; gap: 15px; margin-bottom: 10px; }
 .header-text { font-size: 16px; color: #00f0ff; font-weight: 800; letter-spacing: 2px; }
@@ -515,25 +564,24 @@ onUnmounted(() => {
 .panel-title::before { content: ''; display: inline-block; width: 6px; height: 22px; background: #00f0ff; margin-right: 15px; box-shadow: 0 0 12px #00f0ff; }
 .panel-deco { font-family: 'Din', monospace; font-size: 14px; color: #475569; letter-spacing: 3px; font-weight: bold;}
 
-.chart-box-large { flex: 1; width: 100%; min-height: 450px; }
-.chart-box-xl { flex: 1; width: 100%; min-height: 550px; } /* 为混淆矩阵提供超大空间 */
+.chart-box-large { flex: 1; width: 100%; min-height: 350px; }
+.chart-box-xl { flex: 1; width: 100%; min-height: 450px; } 
 
-/* ================= 告别下拉框：机甲风切角选项卡 ================= */
 .version-tabs { display: flex; align-items: center; gap: 15px; }
 .tab-label { font-size: 15px; color: #94a3b8; font-weight: bold; margin-right: 10px; }
 .version-tab {
-  padding: 10px 24px; font-size: 15px; font-weight: bold; color: #94a3b8; cursor: pointer;
+  padding: 5px 24px; font-size: 15px; font-weight: bold; color: #94a3b8; cursor: pointer;
   background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1);
-  transform: skewX(-15deg); transition: all 0.3s;
+  /* transform: skewX(-15deg); transition: all 0.3s; */
 }
 .version-tab:hover { background: rgba(0, 240, 255, 0.05); color: #e2e8f0; }
 .version-tab.active { 
   background: rgba(0, 240, 255, 0.15); border-color: #00f0ff; color: #00f0ff; 
   box-shadow: 0 0 15px rgba(0, 240, 255, 0.3); text-shadow: 0 0 8px #00f0ff; 
 }
-.version-tab::before { /* 内部文字回正 */ content: ''; display: block; transform: skewX(15deg); }
+.version-tab::before {  content: ''; display: block; transform: skewX(15deg); }
 
-/* ================= 深度定制的大字号科技表格 ================= */
+/* ================= 大字号科技表格 ================= */
 .table-wrapper { margin-top: 40px; background: rgba(0, 0, 0, 0.4); border: 1px solid rgba(0, 240, 255, 0.2); border-radius: 8px; overflow: hidden;}
 .fui-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 16px; }
 .fui-table th { background: rgba(0, 240, 255, 0.08); color: #00f0ff; padding: 20px 24px; font-weight: 800; border-bottom: 2px solid rgba(0, 240, 255, 0.3); letter-spacing: 1px; font-size: 15px;}
