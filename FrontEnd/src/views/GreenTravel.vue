@@ -376,7 +376,6 @@ onUnmounted(() => { if (map) { map.remove(); map = null } })
 </script>
 
 <style scoped>
-/* ================= 全局三栏严格物理布局 ================= */
 .cyber-battle-station {
   display: flex;
   width: 100%;
@@ -454,7 +453,6 @@ onUnmounted(() => { if (map) { map.remove(); map = null } })
 .metric-val { color: #54d55ad7;font-size: 24px; font-weight: bold; font-family: monospace; }
 .metric-label { font-size: 11px; color: #8892b0; margin-top: 10px; }
 
-/* ================= 中间：地图区域 ================= */
 .map-frame {
   flex: 1; position: relative; border-radius: 12px;
   border: 2px solid rgba(57, 255, 20, 0.1);
@@ -481,7 +479,6 @@ onUnmounted(() => { if (map) { map.remove(); map = null } })
 .bottom-left { bottom: 0; left: 0; border-right: none; border-top: none; }
 .bottom-right { bottom: 0; right: 0; border-left: none; border-top: none; }
 
-/* ================= 右侧：AI 报告 ================= */
 .ai-header {
   padding: 16px 20px; border-bottom: 1px solid rgba(57, 255, 20, 0.2);
   display: flex; justify-content: space-between; align-items: center;

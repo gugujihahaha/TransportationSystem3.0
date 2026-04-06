@@ -482,7 +482,6 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* ================= 基础重置与全息网格 ================= */
 .tech-support-container {
   position: relative;
   min-height: calc(100vh - 64px);
@@ -503,7 +502,6 @@ onUnmounted(() => {
   opacity: 0.6;
 }
 
-/* ================= 顶部机甲风标题 ================= */
 .cyber-header {
   display: flex; justify-content: space-between; align-items: flex-end;
   margin-bottom: 40px; border-bottom: 2px solid rgba(0, 240, 255, 0.15); padding-bottom: 15px;
@@ -523,10 +521,8 @@ onUnmounted(() => {
 .blink-dot { width: 8px; height: 8px; background: #00FF88; border-radius: 50%; box-shadow: 0 0 10px #00FF88; animation: blink 1s infinite alternate; }
 @keyframes blink { 0% { opacity: 0.3; } 100% { opacity: 1; } }
 
-/* ================= 页面主体宏观布局 ================= */
 .tech-layout { display: flex; gap: 40px; align-items: flex-start; }
 
-/* ================= 左侧控制面板 ================= */
 .cyber-sidebar { width: 280px; flex-shrink: 0; display: flex; flex-direction: column; gap: 15px; }
 .sidebar-header { display: flex; align-items: center; gap: 15px; margin-bottom: 10px; }
 .header-text { font-size: 16px; color: #00f0ff; font-weight: 800; letter-spacing: 2px; }
@@ -549,7 +545,6 @@ onUnmounted(() => {
 .nav-item.is-active .nav-text { color: #fff; text-shadow: 0 0 10px rgba(255,255,255,0.4); }
 .nav-item.is-active .nav-corner { transform: scaleY(1); }
 
-/* ================= 右侧图表容器 ================= */
 .cyber-content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .fui-panel {
   position: relative; flex: 1; min-height: 650px;
@@ -595,7 +590,6 @@ onUnmounted(() => {
 .text-red { color: #FF0033; }
 .font-bold { font-weight: 900; font-family: 'Din', monospace, sans-serif; font-size: 18px; }
 
-/* ================= 状态与加载反馈 ================= */
 .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 400px; }
 .bracket-alert { font-family: monospace; color: #64748b; font-size: 16px; font-weight: bold; letter-spacing: 3px; animation: pulseOpacity 2s infinite; }
 @keyframes pulseOpacity { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }

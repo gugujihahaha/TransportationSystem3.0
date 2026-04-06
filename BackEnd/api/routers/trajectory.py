@@ -583,7 +583,7 @@ async def predict_trajectory(
 
             import random
             confidence = min(0.99, confidence + random.uniform(-0.03, 0.04))
-            print(f"💡 启用智能兜底推断 -> 模式: {predicted_mode}, 引擎: {model.upper()}, 置信度: {confidence:.2f}")
+            print(f"💡 基础规则推断 -> 模式: {predicted_mode}, 引擎: {model.upper()}, 置信度: {confidence:.2f}")
 
         mode_mapping = {
             'Walk': 'walk',

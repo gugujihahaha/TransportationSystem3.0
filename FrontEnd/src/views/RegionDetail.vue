@@ -206,7 +206,6 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* ================= 全局容器 ================= */
 .region-detail-container {
   min-height: calc(100vh - 64px);
   background-color: #0A0E17;
@@ -216,7 +215,6 @@ onUnmounted(() => {
   box-sizing: border-box;
 }
 
-/* ================= 面包屑导航 ================= */
 .breadcrumb-header {
   display: flex;
   align-items: center;
@@ -243,7 +241,6 @@ onUnmounted(() => {
   border-left: 2px solid #38bdf8;
 }
 
-/* ================= 状态提示 ================= */
 .status-container {
   display: flex;
   flex-direction: column;
@@ -265,7 +262,6 @@ onUnmounted(() => {
 @keyframes spin { to { transform: rotate(360deg); } }
 .empty-icon { font-size: 48px; margin-bottom: 16px; opacity: 0.8; }
 
-/* ================= 布局与毛玻璃卡片 ================= */
 .detail-content {
   display: flex;
   flex-direction: column;
@@ -317,7 +313,6 @@ onUnmounted(() => {
   border-radius: 2px;
 }
 
-/* ================= 具体组件样式 ================= */
 .metrics-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

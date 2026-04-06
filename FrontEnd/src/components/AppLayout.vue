@@ -68,7 +68,6 @@ onUnmounted(() => clearInterval(timer))
 </script>
 
 <style scoped>
-/* ================= 1. 全局布局容器 ================= */
 .app-container {
   height: 100vh;
   display: flex;
@@ -79,7 +78,6 @@ onUnmounted(() => clearInterval(timer))
   overflow: hidden;
 }
 
-/* ================= 2. 经典结构导航栏 ================= */
 .cyber-header {
   height: 72px;
   flex-shrink: 0;
@@ -230,7 +228,6 @@ onUnmounted(() => clearInterval(timer))
   font-family: 'Din', monospace, sans-serif;
 }
 
-/* ================= 3. 主内容路由视图区 ================= */
 .main-content {
   flex: 1;
   overflow-x: hidden;

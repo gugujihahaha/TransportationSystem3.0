@@ -77,7 +77,7 @@
 
       <div v-if="selectedTrajectory" class="timeline-panel floating-island">
         <div class="timeline-header">
-          <h4><span class="status-indicator"></span> 轨迹时空流回溯</h4>
+          <h4><span class="status-indicator"></span> 时空轨迹回溯</h4>
           <el-button text class="primary-action-btn" @click="showTimeline = !showTimeline">
             <el-icon><component :is="showTimeline ? ArrowDown : ArrowUp" /></el-icon>
           </el-button>
@@ -141,7 +141,7 @@ async function handleUpload(file: File, model: string) {
       aiReportRef.value.generateReport()
     }
   } catch (error) {
-    ElMessage.error('预测失败，请检查数据矩阵')
+    ElMessage.error('预测失败，请检查数据格式')
   }
 }
 

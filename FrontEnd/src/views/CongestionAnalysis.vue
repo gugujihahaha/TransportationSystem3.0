@@ -345,7 +345,6 @@ onUnmounted(() => { if (map) { map.remove(); map = null } })
 
 .disabled-mask { opacity: 0.3; pointer-events: none; transition: all 0.3s; filter: grayscale(1); }
 
-/* ================= 通用赛博卡片 ================= */
 .cyber-card {
   background: rgba(4, 18, 38, 0.7);
   backdrop-filter: blur(12px);
@@ -364,13 +363,11 @@ onUnmounted(() => { if (map) { map.remove(); map = null } })
 .neon-text-secondary { color: #00F0FF; font-weight: bold; text-shadow: 0 0 5px rgba(0, 240, 255, 0.4); }
 .text-neon-cyan { color: #00F0FF; text-shadow: 0 0 15px rgba(0, 240, 255, 0.6); }
 
-/* ================= 严格三栏布局控制 ================= */
 .side-panel { display: flex; flex-direction: column; gap: 16px; z-index: 10; }
 .left-panel { width: 340px; flex-shrink: 0; }
 .right-panel { width: 420px; flex-shrink: 0; }
 .center-panel { flex: 1; display: flex; position: relative; z-index: 5; } /* 地图区域撑满中间 */
 
-/* ================= 左侧：数据与控制台 ================= */
 .header-card { padding: 16px 20px; display: flex; flex-direction: row; justify-content: space-between; align-items: center; }
 .sub-title { font-size: 12px; color: #8892b0; margin-top: 4px; letter-spacing: 1px;}
 .sys-status { width: 10px; height: 10px; border-radius: 50%; background: #39FF14; box-shadow: 0 0 10px #39FF14; }
@@ -422,7 +419,6 @@ onUnmounted(() => { if (map) { map.remove(); map = null } })
 .unit { font-size: 14px; margin-left: 2px; }
 .metric-label { font-size: 12px; color: #8892b0; margin-top: 10px; }
 
-/* ================= 中间：高亮清透地图 ================= */
 .map-frame {
   flex: 1; position: relative; border-radius: 12px;
   border: 2px solid rgba(0, 240, 255, 0.5);
@@ -438,14 +434,13 @@ onUnmounted(() => { if (map) { map.remove(); map = null } })
 
 :deep(.custom-end-marker) { background: transparent; border: none; }
 
-/* 地图四个科幻边角装饰 */
 .frame-corner { position: absolute; width: 30px; height: 30px; border: 3px solid transparent; z-index: 10; pointer-events: none;}
 .top-left { top: 0; left: 0; border-top-color: #00F0FF; border-left-color: #00F0FF; border-radius: 12px 0 0 0;}
 .top-right { top: 0; right: 0; border-top-color: #00F0FF; border-right-color: #00F0FF; border-radius: 0 12px 0 0;}
 .bottom-left { bottom: 0; left: 0; border-bottom-color: #00F0FF; border-left-color: #00F0FF; border-radius: 0 0 0 12px;}
 .bottom-right { bottom: 0; right: 0; border-bottom-color: #00F0FF; border-right-color: #00F0FF; border-radius: 0 0 12px 0;}
 
-/* 底部发光图例 */
+/* 底部图例 */
 .map-legend {
   position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
   background: rgba(2, 11, 22, 0.85); backdrop-filter: blur(10px);
@@ -460,7 +455,6 @@ onUnmounted(() => { if (map) { map.remove(); map = null } })
 .green-glow { background: #39FF14; box-shadow: 0 0 8px #39FF14;}
 .blue-glow { background: #1890FF; box-shadow: 0 0 8px #1890FF;}
 
-/* ================= 右侧：AI 报告大屏 ================= */
 .ai-card { height: 100%; }
 .ai-header {
   padding: 16px 20px; border-bottom: 1px solid rgba(0, 240, 255, 0.3);
@@ -497,7 +491,6 @@ onUnmounted(() => { if (map) { map.remove(); map = null } })
 @keyframes breathe { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.6; transform: scale(1.1); } }
 @keyframes blink { 50% { opacity: 0; } }
 
-/* ================= 隐藏的 PDF 模板 ================= */
 .pdf-export-wrapper { position: absolute; top: -9999px; left: -9999px; z-index: -1; }
 .pdf-poster { width: 800px; min-height: 1000px; background: #ffffff; padding: 60px; font-family: 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', sans-serif; color: #334155; box-sizing: border-box; position: relative; overflow: hidden; border-top: 15px solid #2b3a4a; }
 .pdf-poster::after { content: ''; position: absolute; top: 0; right: 0; width: 300px; height: 150px; background-image: linear-gradient(rgba(74, 144, 226, 0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(74, 144, 226, 0.1) 1px, transparent 1px); background-size: 20px 20px; z-index: 0; }
