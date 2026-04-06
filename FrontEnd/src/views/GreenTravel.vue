@@ -117,39 +117,53 @@
       </div>
     </div>
 
-    <div class="pdf-export-wrapper">
+<div class="pdf-export-wrapper">
       <div id="green-pdf-poster" class="pdf-poster">
-        <div class="poster-header">
-          <div class="poster-title">🌱 个人低碳出行认证证书</div>
-          <div class="poster-subtitle">
-            <span>环保达人：<strong>{{ userName }}</strong></span>
-            <span>认证日期：{{ currentDate }}</span>
-          </div>
-        </div>
         
-        <div class="poster-stats">
-          <div class="stat-box">
-            <div class="stat-value">{{ currentMode }}</div>
-            <div class="stat-label">出行模态判定</div>
+        <div class="poster-inner-card">
+          <div class="poster-header">
+            <div class="tagline">CITY WALK & GREEN TRAVEL</div>
+            <div class="poster-title">低 碳 出 行 认 证</div>
+            <div class="poster-user-info">
+              <span class="user-name">@{{ userName }}</span>
+              <span class="date">{{ currentDate }}</span>
+            </div>
           </div>
-          <div class="stat-box">
-            <div class="stat-value">{{ stats.greenDistance }} <small>km</small></div>
-            <div class="stat-label">绿色里程</div>
+          
+          <div class="poster-stats-grid">
+            <div class="stat-item">
+              <div class="stat-icon">🎯</div>
+              <div class="stat-value">{{ currentMode }}</div>
+              <div class="stat-label">出行模态</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-icon">🌿</div>
+              <div class="stat-value">{{ stats.greenDistance }} <span class="unit">km</span></div>
+              <div class="stat-label">低碳里程</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-icon">🌍</div>
+              <div class="stat-value highlight">{{ stats.co2Saved }} <span class="unit">kg</span></div>
+              <div class="stat-label">减排成就</div>
+            </div>
           </div>
-          <div class="stat-box">
-            <div class="stat-value" style="color: #67C23A;">{{ stats.co2Saved }} <small>kg</small></div>
-            <div class="stat-label">碳排放减免</div>
-          </div>
-        </div>
 
-        <div class="poster-ai-section">
-          <div class="ai-badge">AI 专属寄语</div>
-          <div class="pdf-ai-text" v-html="formattedReport"></div>
-        </div>
+          <div class="poster-ai-section">
+            <div class="quote-mark left">“</div>
+            <div class="pdf-ai-text light-mode-text" v-html="formattedReport"></div>
+            <div class="quote-mark right">”</div>
+          </div>
 
-        <div class="poster-footer">
-          <p>由 TrafficRec 多模态深度学习系统 × 讯飞星火大模型 联合生成</p>
-          <div class="watermark">Keep Green, Keep Going!</div>
+          <div class="poster-footer">
+            <div class="qrcode-placeholder">
+              <div class="qr-box">🌱</div>
+              <div class="qr-text">扫码加入<br>绿色出行计划</div>
+            </div>
+            <div class="brand-info">
+              <p class="brand-name">TrafficRec 智能引擎</p>
+              <p class="powered-by">Powered by AI Multi-modal Analysis</p>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -332,7 +346,7 @@ const exportToPDF = () => {
     filename: `${userName.value}的绿色出行认证.pdf`,
     image: { type: 'jpeg' as const, quality: 1.0 },
     html2canvas: { scale: 3, useCORS: true, backgroundColor: '#f0f4f8' },
-    jsPDF: { unit: 'px' as const, format: [800, 1000] as [number, number], orientation: 'portrait' as const }
+    jsPDF: { unit: 'px' as const, format: [800, 1066] as [number, number], orientation: 'portrait' as const }
   };
   ElMessage.success('正在为您生成专属纪念海报...')
   html2pdf().set(opt).from(element).save()
@@ -499,5 +513,119 @@ onUnmounted(() => { if (map) { map.remove(); map = null } })
 @keyframes breathe-green { 0%, 100% { opacity: 1; box-shadow: 0 0 10px #a1dc96c1; } 50% { opacity: 0.6; box-shadow: 0 0 20px #a1dc96f4; } }
 @keyframes blink { 50% { opacity: 0; } }
 
-.pdf-export-wrapper { position: absolute; top: -9999px; left: -9999px; }
+.pdf-export-wrapper {
+  position: absolute; top: -9999px; left: -9999px; overflow: hidden;
+}
+
+.pdf-poster {
+  width: 800px;
+  min-height: 1066px; 
+  background: linear-gradient(135deg, #f2fbf5 0%, #dcf0e3 100%);
+  padding: 40px;
+  box-sizing: border-box;
+  font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+.poster-inner-card {
+  background: #ffffff;
+  border-radius: 24px;
+  padding: 50px 40px;
+  box-shadow: 0 20px 40px rgba(46, 125, 50, 0.08);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.poster-header {
+  text-align: center;
+  margin-bottom: 40px;
+}
+
+.tagline {
+  font-size: 15px;
+  color: #4caf50;
+  letter-spacing: 4px;
+  font-weight: bold;
+  margin-bottom: 12px;
+}
+
+.poster-title {
+  font-size: 42px;
+  font-weight: 900;
+  color: #1b5e20;
+  letter-spacing: 6px;
+  margin-bottom: 24px;
+}
+
+.poster-user-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 20px;
+  background: #f1f8f3;
+  padding: 10px 24px;
+  border-radius: 50px;
+  font-size: 16px;
+  color: #388e3c;
+}
+.user-name { font-weight: bold; }
+.date { opacity: 0.8; }
+
+.poster-stats-grid {
+  display: flex;
+  justify-content: space-between;
+  background: #fafdfb;
+  border: 1px solid #e8f5e9;
+  border-radius: 16px;
+  padding: 30px;
+  margin-bottom: 40px;
+}
+
+.stat-item {
+  text-align: center;
+  flex: 1;
+  position: relative;
+}
+.stat-item:not(:last-child)::after {
+  content: ''; position: absolute; right: 0; top: 15%; height: 70%; width: 1px; background: #e0e0e0;
+}
+.stat-icon { font-size: 28px; margin-bottom: 10px; }
+.stat-value { font-size: 36px; font-weight: 900; color: #2c3e50; margin-bottom: 6px; font-family: 'Din', monospace; }
+.stat-value.highlight { color: #4caf50; }
+.unit { font-size: 16px; font-weight: normal; }
+.stat-label { font-size: 14px; color: #7f8c8d; }
+
+.poster-ai-section {
+  flex: 1;
+  position: relative;
+  background: #f8fbf9;
+  padding: 40px;
+  border-radius: 16px;
+  margin-bottom: 40px;
+}
+
+.quote-mark {
+  position: absolute; font-size: 80px; color: #c8e6c9; font-family: serif; line-height: 1; opacity: 0.5;
+}
+.quote-mark.left { top: 10px; left: 20px; }
+.quote-mark.right { bottom: -20px; right: 20px; transform: rotate(180deg); }
+
+.pdf-ai-text {
+  font-size: 18px; line-height: 1.8; color: #455a64; text-align: justify; position: relative; z-index: 2;
+}
+
+/* ！！！重要：强制覆盖 formattedReport 里的暗黑模式内联样式 ！！！ */
+.light-mode-text :deep(h2) { color: #1b5e20 !important; border-bottom-color: #c8e6c9 !important; font-size: 22px !important; }
+.light-mode-text :deep(h3) { color: #2e7d32 !important; font-size: 18px !important; }
+.light-mode-text :deep(strong) { color: #4caf50 !important; }
+
+.poster-footer {
+  display: flex; justify-content: space-between; align-items: center;
+  border-top: 1px dashed #cfd8dc; padding-top: 30px;
+}
+.qrcode-placeholder { display: flex; align-items: center; gap: 12px; }
+.qr-box { width: 50px; height: 50px; background: #e8f5e9; border-radius: 8px; border: 2px solid #a5d6a7; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+.qr-text { font-size: 12px; color: #7f8c8d; line-height: 1.4; font-weight: bold;}
+.brand-info { text-align: right; }
+.brand-name { font-size: 18px; font-weight: bold; color: #2e7d32; margin: 0 0 4px 0; }
+.powered-by { font-size: 12px; color: #95a5a6; margin: 0; }
 </style>
