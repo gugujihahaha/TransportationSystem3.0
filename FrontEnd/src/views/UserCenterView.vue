@@ -101,16 +101,17 @@
           </div>
         </div>
 
-        <div class="archive-banner panel-glass" @click="router.push('/history')">
-          <div class="banner-content">
-            <div class="banner-icon text-cyan">📂</div>
-            <div class="banner-text">
-              <h3 class="banner-title">进入全量历史档案馆</h3>
-              <p>查阅、追溯并一键还原所有历史轨迹的 3D 地图与 AI 研判现场</p>
-            </div>
-            <div class="banner-arrow">→</div>
-          </div>
-        </div>
+<!-- 碳普惠入口卡片 -->
+<div class="carbon-entry-banner panel-glass" @click="router.push('/green-travel')">
+  <div class="banner-content">
+    <div class="banner-icon text-green">🌱</div>
+    <div class="banner-text">
+      <h3 class="banner-title">绿色出行碳普惠</h3>
+      <p>上传轨迹，核算碳减排，领取 AI 专属环保表扬信与海报</p>
+    </div>
+    <div class="banner-arrow">→</div>
+  </div>
+</div>
 
       </main>
     </div>

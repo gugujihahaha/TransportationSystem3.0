@@ -7,12 +7,9 @@
     </div>
 
     <div class="content-wrapper" :class="{ 'is-loaded': isLoaded }">
-      
-      <div class="research-header">
-        <h2>多源数据融合驱动的城市交通拥堵溯源与绿色出行评估</h2>
-        <p>基于轨迹-路网-天气多模态数据与递进式深度学习实验</p>
-      </div>
 
+        <!-- <PageHeader title="多源数据融合驱动的城市交通拥堵溯源与绿色出行评估" subtitle="基于轨迹-路网-天气多模态数据与递进式深度学习实验" /> -->
+      
       <div class="data-scale-bar">
         <div class="stat-item">
           <span class="stat-label">处理轨迹点</span>
@@ -49,7 +46,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import HomePage from '@/components/HomePage.vue'
-
+import PageHeader from '@/components/PageHeader.vue'
 // 控制首屏进场动画
 const isLoaded = ref(false)
 
