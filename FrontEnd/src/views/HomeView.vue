@@ -51,7 +51,6 @@ import PageHeader from '@/components/PageHeader.vue'
 const isLoaded = ref(false)
 
 onMounted(() => {
-  // 确保 DOM 渲染后触发过渡动画
   setTimeout(() => {
     isLoaded.value = true
   }, 50)

@@ -1,7 +1,7 @@
 <template>
   <div class="ai-report-container">
     <div class="panel-header">
-      <h3 class="panel-title">🧠 星火大模型智能分析报告</h3>
+      <h3 class="panel-title">大模型智能分析报告</h3>
       <div class="header-actions">
         <button @click="generateAIReport" class="btn-primary" :disabled="isGenerating">
           {{ isGenerating ? '引擎推理中...' : '生成最新分析' }}
@@ -68,19 +68,17 @@ const generateAIReport = async () => {
     2. 共享单车出行减少碳排放约 1,245 kg。
     请按“数据现状、成因剖析、调控建议”三个部分输出，使用Markdown格式。`
 
-    // 🚀 使用配置好的 Vite 代理请求星火大模型
     const response = await fetch('/spark-api/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        // 【关键】在这里换成你的星火 API 密码 (API Password)
         'Authorization': `Bearer ZOawgFgAMWrgzoramwRS:BkjUHBXpuOrXCpVQfFtJ` 
       },
       body: JSON.stringify({
-        model: 'lite', // 星火免费版模型
+        model: 'lite', 
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.7,
-        stream: true // 开启流式输出核心参数
+        stream: true 
       })
     })
 
@@ -122,7 +120,7 @@ const generateAIReport = async () => {
   }
 }
 
-// 核心：一键导出白底黑字高清 PDF
+// 一键导出白底黑字高清 PDF
 const exportToPDF = () => {
   const element = document.getElementById('pdf-content')
   if (!element) return

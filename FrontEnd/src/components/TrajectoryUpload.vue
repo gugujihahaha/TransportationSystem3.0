@@ -113,7 +113,7 @@ const emit = defineEmits<{
 
 const showFormatDialog = ref(false)
 const selectedModel = ref('exp1')
-const aiReportRef = ref(null) // 用于后续可能的主动触发报告生成
+const aiReportRef = ref(null) 
 
 const models = [
   { id: 'exp1', name: 'Exp1 (运动学特征基线)' },
@@ -143,12 +143,10 @@ function handleFileChange(file: any) {
   ElMessage.success('数据链接成功，正在传输至核心引擎...')
   emit('upload', file.raw, selectedModel.value)
   
-  // 提示：你可以在这里或者父组件中，通过调用 aiReportRef.value.generateReport() 来联动生成报告
 }
 </script>
 
 <style scoped>
-/* 定义核心视觉变量 */
 .trajectory-dashboard {
   --neon-cyan: #00f0ff;
   --tech-blue: #4A90E2;
@@ -340,7 +338,6 @@ function handleFileChange(file: any) {
 }
 
 /* --- 全局样式注入 (为了覆盖 body 下的 El-Dialog) --- */
-/* 注意：实际项目中建议将这段放在全局 css 中，或者保留在这里 */
 :global(.cyber-dialog) {
   background: rgba(10, 15, 30, 0.95) !important;
   border: 1px solid rgba(0, 240, 255, 0.3) !important;
