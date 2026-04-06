@@ -104,7 +104,6 @@ latitude,longitude,timestamp
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { UploadFilled } from '@element-plus/icons-vue'
-// 引入刚刚编写的 AI 分析组件
 import AIAnalysisReport from './AIAnalysisReport.vue'
 
 const emit = defineEmits<{
