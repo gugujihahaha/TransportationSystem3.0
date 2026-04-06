@@ -136,7 +136,7 @@ function handleFileChange(file: any) {
   }
 
   if (file.size > 10 * 1024 * 1024) {
-    ElMessage.error('传输超载：数据矩阵大小不能超过 10MB')
+    ElMessage.error('传输超载：文件大小不能超过 10MB')
     return
   }
 

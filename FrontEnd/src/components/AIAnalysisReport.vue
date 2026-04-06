@@ -6,13 +6,13 @@
         <span class="title-text">TrafficRec 智能感知分析报告</span>
       </div>
       <div class="status-tag" :class="{ 'is-loading': loading }">
-        {{ loading ? '在生成洞察报告...' : '深度学习引擎已就绪' }}
+        {{ loading ? '在生成洞察报告...' : '模型已就绪' }}
       </div>
     </div>
 
     <div class="report-content-wrapper" ref="scrollContainer">
       <div v-if="!reportText && !loading" class="empty-state">
-        <p>暂无分析数据，请上传轨迹以激活多模态感知引擎</p>
+        <p>暂无分析数据，请上传轨迹以开始分析</p>
       </div>
       
       <div v-else class="markdown-body ai-text-stream">
