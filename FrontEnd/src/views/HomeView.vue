@@ -158,18 +158,16 @@ onMounted(() => {
 .stat-value {
   font-size: 18px;
   font-weight: bold;
-  color: #38bdf8; /* 科技蓝 */
+  color: #38bdf8;
   font-family: 'Din', 'Rajdhani', monospace, 'Microsoft YaHei';
 }
 
-/* 分隔竖线 */
 .stat-divider {
   width: 1px;
   height: 30px;
   background-color: rgba(56, 189, 248, 0.2);
 }
 
-/* 响应式适配 */
 @media (max-width: 1024px) {
   .data-scale-bar {
     justify-content: center;

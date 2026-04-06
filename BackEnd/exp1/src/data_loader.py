@@ -6,7 +6,7 @@ GeoLife数据加载和预处理模块 (Robust and Enhanced Version)
 1. 鲁棒地处理 6 列或 7 列 GeoLife 文件。
 2. 强制清洗无效的经纬度坐标点。
 3. 轨迹特征（包括9维）计算已完全向量化，提高性能。
-4. 修复：新增 get_all_users 方法。
+4. 新增 get_all_users 方法。
 
 注意：已移除序列独立归一化，改为在 train_maso.py 中进行全局归一化。
 """

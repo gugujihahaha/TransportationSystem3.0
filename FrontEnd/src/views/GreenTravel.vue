@@ -327,7 +327,6 @@ const generateAIReport = async (dist: string, co2: string, trees: string, modeNa
 const exportToPDF = () => {
   const element = document.getElementById('green-pdf-poster')
   if (!element) return
-  // 修复了 TS 报错
   const opt = {
     margin: 0,
     filename: `${userName.value}的绿色出行认证.pdf`,

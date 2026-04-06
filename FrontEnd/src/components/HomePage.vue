@@ -170,7 +170,7 @@ const initCharts = async () => {
   })
   charts.push(chart1)
 
-  // --- 卡片2：高亮发光版全区热力地图 + GPS真实热力点透视 + 路由跳转 ---
+  // --- 卡片2：高亮发光版全区热力地图 + GPS热力点透视 + 路由跳转 ---
   const chart2 = echarts.init(chart2Ref.value)
   try {
     const geoRes = await fetch('https://geo.datav.aliyun.com/areas_v3/bound/110000_full.json')

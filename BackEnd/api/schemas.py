@@ -94,9 +94,6 @@ class TrainingResponse(BaseModel):
     status: str = Field(..., description="状态")
     message: str = Field(..., description="消息")
 
-# ==========================================
-# 🚀 以下为新增：Auth & User 相关 Schema
-# ==========================================
 
 class UserCreate(BaseModel):
     username: str = Field(..., description="用户名")
@@ -107,7 +104,7 @@ class UserResponse(BaseModel):
     username: str
 
     class Config:
-        from_attributes = True  # Pydantic V2 兼容 SQLAlchemy 对象的写法
+        from_attributes = True
 
 class Token(BaseModel):
     access_token: str

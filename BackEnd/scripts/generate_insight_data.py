@@ -79,9 +79,7 @@ insight_data = {
 
 # ==================== 3. 天气影响分析 ====================
 print("加载天气数据...")
-# 修复：将日期列作为普通列加载，不设索引
 weather_df = pd.read_csv(WEATHER_CSV)
-# 假设第一列是日期，列名可能是 'date', 'time', 'datetime' 等，尝试自动识别
 date_col = None
 for col in weather_df.columns:
     if 'date' in col.lower() or 'time' in col.lower():
@@ -90,7 +88,6 @@ for col in weather_df.columns:
 if date_col is None:
     raise ValueError("天气文件中未找到日期列，请检查列名")
 weather_df['date'] = pd.to_datetime(weather_df[date_col]).dt.date
-# 计算降雨标记（假设有 prcp 列）
 prcp_col = None
 for col in weather_df.columns:
     if 'prcp' in col.lower() or 'precip' in col.lower():
@@ -120,7 +117,6 @@ insight_data["weather_impact"] = weather_data
 print("计算拥堵时段分析...")
 car_ratio_by_hour = df.groupby('hour')['pred_label'].apply(lambda x: (x == 'Car & taxi').mean() * 100)
 car_ratio_by_hour = car_ratio_by_hour.round(2)
-# 确保所有小时 0-23 都有值
 all_hours = pd.Series(index=range(24), dtype=float)
 all_hours.update(car_ratio_by_hour)
 all_hours = all_hours.fillna(0)
@@ -129,7 +125,7 @@ insight_data["congestion_timing"] = {
     "car_ratio": all_hours.tolist()
 }
 
-# ==================== 5. 道路类型出行分析（需要 OSM 匹配）====================
+# ==================== 5. 道路类型出行分析====================
 print("加载 OSM 数据并匹配道路类型...")
 road_type_available = False
 try:
@@ -142,7 +138,6 @@ try:
         raise FileNotFoundError(f"OSM 文件不存在: {OSM_GEOJSON}")
 
     gdf = gpd.read_file(OSM_GEOJSON)
-    # 提取道路类型（highway 或 railway）
     if 'highway' in gdf.columns:
         gdf['road_type'] = gdf['highway'].fillna('unknown')
     elif 'railway' in gdf.columns:
@@ -183,7 +178,6 @@ try:
     road_mode_pct = road_mode_counts.div(road_mode_counts.sum(axis=1), axis=0) * 100
     road_mode_pct = road_mode_pct.round(2)
 
-    # 确保所有 MODES 都存在
     for mode in MODES:
         if mode not in road_mode_pct.columns:
             road_mode_pct[mode] = 0.0
@@ -197,7 +191,6 @@ try:
     print("道路类型匹配完成")
 except Exception as e:
     print(f"道路类型匹配失败（将使用占位数据）: {e}")
-    # 提供占位数据
     insight_data["road_type"] = {
         "categories": ["主干道", "次干道", "支路", "步行道"],
         "modes": MODES,

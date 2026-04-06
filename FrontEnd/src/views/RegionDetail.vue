@@ -96,7 +96,6 @@ import { useRoute } from 'vue-router'
 import * as echarts from 'echarts'
 
 const route = useRoute()
-// 从路由参数中获取区域名称，默认为"东城区"防止报错
 const regionName = ref(route.params.name || route.query.name || '东城区')
 
 const loading = ref(true)

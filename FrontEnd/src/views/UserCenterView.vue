@@ -53,7 +53,7 @@
           <div class="stat-card panel-glass">
             <div class="stat-icon text-green">🌿</div>
             <div class="stat-info">
-              <div class="stat-title">预估碳减排量 (基于真实里程)</div>
+              <div class="stat-title">预估碳减排量</div>
               <div class="stat-value text-green">{{ totalCarbonReduction }} <span class="unit">kg CO₂</span></div>
             </div>
           </div>
@@ -75,7 +75,7 @@
 
         <div class="chart-section">
           <div class="chart-container panel-glass radar-box">
-            <h3 class="panel-title">真实个人出行特征画像</h3>
+            <h3 class="panel-title">个人出行特征画像</h3>
             <div v-if="totalRecords === 0" class="empty-state text-cyan">
               [ 等待数据汇入... 请先前往数据舱进行轨迹预测 ]
             </div>
@@ -133,8 +133,6 @@ const isLoaded = ref(false)
 const radarChartRef = ref<HTMLElement | null>(null)
 const chartInstance = shallowRef<echarts.ECharts | null>(null)
 
-// --- 真实数据计算逻辑 ---
-
 // 1. 基础信息
 const userInitials = computed(() => (authStore.username ? authStore.username.charAt(0).toUpperCase() : 'U'))
 const totalRecords = computed(() => trajectoryStore.history.length)
@@ -148,13 +146,11 @@ const levelTitle = computed(() => {
 })
 const levelColor = computed(() => userLevel.value >= 5 ? 'bg-gold' : 'bg-green')
 
-// 精准匹配后端字段 predicted_mode，并统一转为小写处理
 const getRecordMode = (record: any): string => {
   if (!record) return 'unknown'
   return String(record.predicted_mode || record.pred_label || record.mode || 'unknown').toLowerCase()
 }
 
-// 3. 分类统计逻辑 (匹配小写，确保雷达图真实激活)
 const modeCounts = computed(() => {
   const counts = { 'Walk': 0, 'Bike': 0, 'Bus': 0, 'Subway': 0, 'Train': 0, 'Car & taxi': 0 }
   
@@ -183,7 +179,6 @@ const greenScore = computed(() => {
   return Math.round((green / totalRecords.value) * 100)
 })
 
-// 将计算逻辑改为“基于真实轨迹里程(distance)”的科学计算
 const totalCarbonReduction = computed(() => {
   let reduction = 0
   trajectoryStore.history.forEach(record => {
@@ -235,20 +230,17 @@ const option = {
       shape: 'polygon',
       radius: '65%',
       splitNumber: 4,
-      // 坐标轴文字颜色（改亮一点）
       axisName: { color: '#e5eaf3', fontSize: 13, fontWeight: 'bold' },
-      // 雷达图内部的网格线颜色（发光青色透明）
       splitLine: { 
         lineStyle: { 
           color: ['rgba(0, 240, 255, 0.1)', 'rgba(0, 240, 255, 0.2)', 'rgba(0, 240, 255, 0.4)', 'rgba(0, 240, 255, 0.6)'] 
         } 
       },
       splitArea: { show: false },
-      // 从中心射出的轴线颜色
       axisLine: { lineStyle: { color: 'rgba(0, 240, 255, 0.5)' } }
     },
     series: [{
-      name: '真实数据画像',
+      name: '数据画像',
       type: 'radar',
       data: [{
         value: [
@@ -259,8 +251,7 @@ const option = {
           modeCounts.value['Train'], 
           modeCounts.value['Car & taxi']
         ],
-        name: '当前真实记录',
-        // 数据点颜色（高亮青色）
+        name: '当前记录',
         itemStyle: { color: '#00f0ff' },
         lineStyle: { width: 2, color: '#00f0ff', shadowBlur: 15, shadowColor: '#00f0ff' },
         areaStyle: { color: 'rgba(0, 240, 255, 0.3)' }

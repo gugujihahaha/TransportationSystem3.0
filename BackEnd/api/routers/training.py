@@ -84,7 +84,7 @@ async def start_training(
         exp_name: str,
         request: TrainingRequest,
         background_tasks: BackgroundTasks,
-        current_user: User = Depends(get_current_user)  # 👈 接口加锁
+        current_user: User = Depends(get_current_user)
 ):
     """启动指定实验的训练"""
     if exp_name not in ["exp1", "exp2", "exp3", "exp4"]:
@@ -120,7 +120,7 @@ async def start_training(
 
 @router.get("/tasks")
 async def get_training_tasks(
-        current_user: User = Depends(get_current_user)  # 👈 接口加锁
+        current_user: User = Depends(get_current_user)
 ):
     """获取所有训练任务状态"""
     tasks_info = []
@@ -139,7 +139,7 @@ async def get_training_tasks(
 @router.get("/tasks/{task_id}")
 async def get_training_task(
         task_id: str,
-        current_user: User = Depends(get_current_user)  # 👈 接口加锁
+        current_user: User = Depends(get_current_user)
 ):
     """获取指定训练任务的状态"""
     if task_id not in training_tasks:
@@ -159,7 +159,7 @@ async def get_training_task(
 @router.delete("/tasks/{task_id}")
 async def cancel_training(
         task_id: str,
-        current_user: User = Depends(get_current_user)  # 👈 接口加锁
+        current_user: User = Depends(get_current_user)
 ):
     """取消训练任务"""
     if task_id not in training_tasks:

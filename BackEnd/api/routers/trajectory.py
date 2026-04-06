@@ -4,7 +4,7 @@ import io
 import sys
 from pathlib import Path
 from typing import List
-import json  # 用于序列化 points
+import json
 
 import yaml
 from pydantic import BaseModel
@@ -31,7 +31,6 @@ from api.schemas import (
 
 router = APIRouter()
 
-# 加载 DeepSeek 配置
 CONFIG_PATH = Path(__file__).parent.parent.parent / "config.yaml"
 with open(CONFIG_PATH, "r", encoding="utf-8") as f:
     config = yaml.safe_load(f)
@@ -186,7 +185,6 @@ def load_predictors():
         traceback.print_exc()
 
 
-# load_predictors()  # 在 main.py 的 startup 事件中调用
 
 def load_plt_file(content: bytes) -> pd.DataFrame:
     """加载 PLT 格式文件（Geolife 格式）"""
@@ -498,19 +496,18 @@ def predict_with_model(traj_features: np.ndarray, segment_stats: np.ndarray,
     return None, None
 
 
-# 增加及更新修复的地方：增加了 scene 参数，并处理了 JSON 序列化
 @router.post("/predict", response_model=TrajectoryPrediction)
 async def predict_trajectory(
         file: UploadFile = File(...),
         modelId: str = Form('exp1'),
-        scene: str = Form('unknown'),  # 👈 新增：接收从前端传来的 scene
+        scene: str = Form('unknown'),
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    model = modelId  # 将接收到的 modelId 赋值给内部逻辑使用的 model 变量
+    model = modelId
     """上传GPS文件并预测交通方式"""
     if not predictors:
-        print("⚠️ 正在紧急唤醒 PyTorch 真实模型...")
+        print("INFO: 正在初始化 PyTorch 预测模型...")
         load_predictors()
     try:
         content = await file.read()
@@ -623,7 +620,6 @@ async def predict_trajectory(
             max_speed=float(max_speed)
         )
 
-        # 👇 重点修复 500 Error 的核心代码：将 Pydantic 转换为可被 json.dumps 解析的 dict
         points_data = [p.dict() for p in points] if points else []
         points_json = json.dumps(points_data)
 
@@ -635,8 +631,8 @@ async def predict_trajectory(
             predicted_mode=predicted_mode,
             confidence=float(confidence),
             distance=float(total_distance),
-            scene=scene,  # 👈 保存所在场景
-            points=points_json  # 👈 安全保存地图坐标
+            scene=scene,
+            points=points_json
         )
         db.add(new_history)
         db.commit()
@@ -685,9 +681,9 @@ from datetime import datetime
 
 
 async def generate_spark_stream(req: ReportRequest):
-    """接入讯飞星火的流式生成器（小红书/朋友圈长文案爆发版 Prompt）"""
+    """接入讯飞星火的流式生成器"""
 
-    # ========== 场景一：绿色出行（百万博主级小红书/朋友圈长文案） ==========
+    # ========== 场景一：绿色出行 ==========
     if req.scene == "green":
         # 1. 获取当前时间，增加文案场景感
         hour = datetime.now().hour
@@ -700,7 +696,7 @@ async def generate_spark_stream(req: ReportRequest):
         else:
             time_str = "夜间"
 
-        # 2. 组装极具“人味”和“网感”的长篇 Prompt
+        # 2. 组装Prompt
         if float(req.distance) > 0:
             prompt = f"""你现在是一位拥有百万粉丝的小红书生活美学博主、资深朋友圈文案大师，深谙当下年轻人追求的“松弛感”和“情绪价值”。
             你的任务是为用户定制一篇【字数充沛（250-350字）、排版精美、直接用于生成海报分享到社交平台】的出行日记。完全禁止任何“好的”、“这是为您生成的文案”等AI口吻！直接输出正文！
@@ -731,7 +727,7 @@ async def generate_spark_stream(req: ReportRequest):
             5. 结尾立个Flag，下次天气好的时候，一定安排一次减碳的绿色出行。
             6. 排版要有呼吸感，带几个高级的 Emoji。"""
 
-    # ========== 场景二：拥堵分析（专业研判与引擎对比差异化） ==========
+    # ========== 场景二：拥堵分析 ==========
     else:
         model_context = ""
         if req.model_id == 'exp1':
@@ -759,7 +755,6 @@ async def generate_spark_stream(req: ReportRequest):
 
         语气：干练、专业、有科技感，像一份政府内参报告。总字数控制在 350 字左右。"""
 
-    # 星火 API 配置与请求执行
     spark_api_key = "ZOawgFgAMWrgzoramwRS:BkjUHBXpuOrXCpVQfFtJ"
     spark_url = "https://spark-api-open.xf-yun.com/v1/chat/completions"
 
@@ -776,7 +771,7 @@ async def generate_spark_stream(req: ReportRequest):
                         "model": "lite",
                         "messages": [{"role": "user", "content": prompt}],
                         "stream": True,
-                        "temperature": 0.85  # 调高温度，激发大模型的文案创作灵感
+                        "temperature": 0.85
                     }
             ) as response:
                 if response.status_code != 200:
@@ -802,7 +797,6 @@ async def generate_spark_stream(req: ReportRequest):
 
 @router.post("/generate_report_stream")
 async def generate_report_stream(req: ReportRequest, current_user: User = Depends(get_current_user)):
-    # 调用星火流式生成器
     return StreamingResponse(generate_spark_stream(req), media_type="text/event-stream")
 
 
@@ -820,7 +814,6 @@ async def get_prediction_history(
     return records
 
 
-# 通过 ID 拉取指定的单条历史记录用于前端时空还原
 @router.get("/history/{record_id}")
 async def get_history_by_id(record_id: int, db: Session = Depends(get_db),
                             current_user: User = Depends(get_current_user)):

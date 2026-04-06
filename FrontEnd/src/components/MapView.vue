@@ -25,7 +25,7 @@ const emit = defineEmits<{
 const mapContainer = ref<HTMLElement>()
 let map: L.Map | null = null
 let trajectoryLayers: L.Polyline[] = []
-let markers: L.Layer[] = [] // 必须是 Layer，解决 CircleMarker 报错
+let markers: L.Layer[] = [] 
 
 onMounted(() => {
   if (!mapContainer.value) return
@@ -54,7 +54,6 @@ function updateMap(trajectories: TrajectoryPrediction[]) {
   const allLatLngs: [number, number][] = [] // 用于计算全局视野
 
   trajectories.forEach((traj) => {
-    // 终极修复 1：彻底提取纯净的 [number, number] 元组，剔除 TrajectoryPoint 的多余属性
     const points: [number, number][] = traj.points.map(p => {
       const pt: [number, number] = [p.lat, p.lng]
       allLatLngs.push(pt)
@@ -97,7 +96,6 @@ function updateMap(trajectories: TrajectoryPrediction[]) {
 
     trajectoryLayers.push(polyline)
 
-    // 终极修复 2：严格判空，消除 undefined 报错
     if (traj.points.length > 0) {
       const startPoint = traj.points[0]
       const endPoint = traj.points[traj.points.length - 1]
@@ -114,7 +112,6 @@ function updateMap(trajectories: TrajectoryPrediction[]) {
           weight: 2,
         }).addTo(map!)
 
-        // 终极修复 3：严格声明二维元组类型，符合 Rectangle 期望的 Bounds
         const endBounds: [[number, number], [number, number]] = [endCoord, endCoord]
         const endMarker = L.rectangle(endBounds, {
           color: '#F5222D',
@@ -126,7 +123,6 @@ function updateMap(trajectories: TrajectoryPrediction[]) {
     }
   })
 
-  // 终极修复 4：直接使用纯净的 [number, number][] 计算包围盒
   if (allLatLngs.length > 0) {
     map.fitBounds(allLatLngs, { padding: [50, 50] })
   }
