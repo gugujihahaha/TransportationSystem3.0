@@ -21,7 +21,7 @@ export const trajectoryApi = {
     return await response.json();
   },
 
-  // 原生 fetch 改造的预测接口 
+  //预测接口 
   async predict(file: File, modelId: string, scene: string = 'unknown') {
     const authStore = useAuthStore(); 
     const formData = new FormData()
@@ -72,7 +72,7 @@ export const trajectoryApi = {
     return await response.json();
   },
 
-  // LLM 流式报告接口 (SSE)
+  // LLM 流式报告接口
   async streamReport(
     params: { 
       model_id: string; 

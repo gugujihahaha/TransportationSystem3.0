@@ -668,7 +668,7 @@ class ReportRequest(BaseModel):
     model_id: str
     mode: str
     confidence: str
-    scene: str = "congestion"
+    scene: str = "compare"
     distance: str = "0"
     co2: str = "0"
     extra: str = ""
@@ -686,7 +686,7 @@ async def generate_spark_stream(req: ReportRequest):
 
     # ========== 场景一：绿色出行 ==========
     if req.scene == "green":
-        # 1. 获取当前时间，增加文案场景感
+        # 获取当前时间
         hour = datetime.now().hour
         if hour < 9:
             time_str = "清晨"
@@ -697,7 +697,6 @@ async def generate_spark_stream(req: ReportRequest):
         else:
             time_str = "夜间"
 
-        # 2. 组装Prompt
         if float(req.distance) > 0:
             prompt = f"""你现在是一位拥有百万粉丝的小红书生活美学博主、资深朋友圈文案大师，深谙当下年轻人追求的“松弛感”和“情绪价值”。
             你的任务是为用户定制一篇【字数充沛（250-350字）、排版精美、直接用于生成海报分享到社交平台】的出行日记。完全禁止任何“好的”、“这是为您生成的文案”等AI口吻！直接输出正文！
@@ -714,11 +713,8 @@ async def generate_spark_stream(req: ReportRequest):
             3. 数据的文艺化解构：严禁像机器人一样播报数据！把 {req.distance} km 写成“丈量城市的刻度”或“与风交手的距离”，把减排 {req.co2} kg 包装成“顺手给发烧的地球贴了一片退热贴”、“为城市的肺叶做了一次微小贡献”。
             4. 情绪升华：文末拔高立意，谈谈对低碳的坚持，对生活的热爱，输出让人共鸣的治愈系金句。
             5. 排版美学：多用换行留白，制造呼吸感。精准点缀有质感的Emoji（如 🍃🎧🚲🎫☁️）。
-            6. 热门标签：结尾带上 4 个热门Hashtag（如 #Citywalk #低碳漫游指南 #我的治愈系碎片 #出门捕捉生活）。
-
-            字数一定要足够丰满（250字以上），必须写出细腻、有温度的长文，让人看完就有截图发小红书的冲动！"""
+            6. 热门标签：结尾带上 4 个热门Hashtag（如 #Citywalk #低碳漫游指南 #我的治愈系碎片 #出门捕捉生活）。"""
         else:
-            # 高碳排文案
             prompt = f"""你是一个充满人情味的朋友圈嘴替。用户本次出行被识别为【{req.mode}】（非低碳方式）。
             请写一段有意思的、带点自我调侃的随笔记录（约 150-200 字）：
             1. 没有任何AI前缀，直接输出正文。
@@ -728,49 +724,30 @@ async def generate_spark_stream(req: ReportRequest):
             5. 结尾立个Flag，下次天气好的时候，一定安排一次减碳的绿色出行。
             6. 排版要有呼吸感，带几个高级的 Emoji。"""
 
-    # ========== 场景二：拥堵分析 ==========
+    # ========== 场景二：多模型对比 ==========
+    elif req.scene == "compare" or req.mode == "多模型":
+        prompt = f"""[任务设定]
+    你是一名严谨的交通算法评测专家。请根据提供的实验原始数据，撰写一份客观的性能演进简报。
+
+    [原始推断流水数据]
+    {req.extra}
+
+    [强制性逻辑规则]
+    1. 趋势一致性：必须严格基于置信度数值进行描述。数值减小即为“退化/下降”，数值增加即为“优化/提升”，严禁违背数学事实。
+    2. 状态监测：若识别结果（Mode）发生变化，必须明确指出“识别翻转”及其具体的类别跳变。
+    3. 归因限制：
+       - EXP1 (Baseline): 仅代表基础时序特征。
+       - EXP2/3: 引入空间/环境特征。分析其带来的扰动（是消除了疑虑还是引入了噪声）。
+       - EXP4: 最终融合。若置信度并非最高，需指出模型在此特定样本上的泛化失效。
+
+    [输出格式控制]
+    - 语言风格：冷峻、去形容词化、学术化。
+    - 字数：200-300字。
+    - 严禁任何开场白或引导语（如“作为一名专家...”、“好的，为您生成...”），直接输出正文。"""
+
+    # ========== 默认场景 ==========
     else:
-        prompt = ""
-
-        # ========== 场景一：多模型对比 ==========
-        if req.scene == "compare":
-            prompt = f"""请作为交通数据分析师，针对当前上传的这条具体轨迹，分析四个不同阶段实验模型的识别结果和置信度差异。
-
-        【该轨迹在各模型的推断数据】
-        {req.extra}
-
-        分析要求：
-        1. 直奔主题：对比这四个模型对**这条特定轨迹**的识别结果是否一致。
-        2. 聚焦置信度：重点剖析**置信度的变化趋势**。结合各实验的特征（Exp1仅运动学，Exp2加路网，Exp3/Exp4加天气和FocalLoss优化），解释为什么随着特征变多，模型对该轨迹的判断更笃定（置信度上升），或者发生了翻转？
-        3. 结论精简：总结多模态数据对识别这段轨迹的具体价值。字数控制在 200-300 字，通俗易懂，拒绝长篇大论和空洞套话。"""
-
-        # ========== 场景二：拥堵贡献评估 ==========
-        elif req.scene == "congestion":
-            model_context = ""
-            if req.model_id == 'exp1':
-                model_context = '本次推断仅依赖纯轨迹运动学特征（如速度、加速度），缺乏真实路网映射。'
-            elif req.model_id == 'exp2':
-                model_context = '本次推断引入了 OSM 空间路网拓扑结构，成功匹配了车道级特征。'
-            elif req.model_id == 'exp3':
-                model_context = '本次推断在路网基础上，深度解耦了气象环境因素，捕捉了天气突变对车速特征的干扰。'
-            elif req.model_id == 'exp4':
-                model_context = '本次推断使用了最终的 Focal Loss 优化引擎，融合多维时空特征并克服了长尾数据分布不平衡问题。'
-
-            geo_context = f"\n- 额外信息：{req.extra}" if req.extra else "\n- 额外信息：未途经已知常发拥堵路段。"
-
-            prompt = f"""根据以下真实数据，写一段 200-300 字的专业分析报告。报告要包含三部分：① 本次识别出的出行方式、置信度以及驱动引擎的特性；② 如果经过历史常发拥堵路段，请指出并专业分析该模态的运动学特征对交通流造成的微观扰动；③ 给出一个具体、可执行的改进建议。
-
-        数据：
-        - 出行方式：{req.mode}
-        - 置信度：{req.confidence}%
-        - 使用引擎：{req.model_id.upper()} ({model_context}){geo_context}
-
-        要求：
-        1. 不要提其他实验模型，只针对当前使用的 {req.model_id.upper()} 模型特征进行分析。
-        2. 语气专业、简洁，不用 Markdown，不用套话。"""
-
-        else:
-            prompt = f"请作为交通算法专家，对当前上传的轨迹进行简要分析。识别出的出行方式为：{req.mode}，置信度：{req.confidence}%。"
+        prompt = f"请作为交通算法专家，对当前上传的轨迹进行简要分析。识别出的出行方式为：{req.mode}，置信度：{req.confidence}%。"
 
     spark_api_key = "ZOawgFgAMWrgzoramwRS:BkjUHBXpuOrXCpVQfFtJ"
     spark_url = "https://spark-api-open.xf-yun.com/v1/chat/completions"

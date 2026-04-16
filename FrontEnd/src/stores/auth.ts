@@ -5,7 +5,6 @@ export const useAuthStore = defineStore('auth', () => {
   const token = ref<string | null>(localStorage.getItem('token') || null);
   const username = ref<string | null>(localStorage.getItem('username') || null);
 
-  // 登录成功后保存状态
   const setAuth = (newToken: string, newUsername: string) => {
     token.value = newToken;
     username.value = newUsername;
@@ -13,7 +12,6 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.setItem('username', newUsername);
   };
 
-  // 退出登录，清空状态
   const logout = () => {
     token.value = null;
     username.value = null;
@@ -21,7 +19,6 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('username');
   };
 
-  // 检查是否已登录
   const isAuthenticated = () => {
     return token.value !== null && token.value !== '';
   };

@@ -219,7 +219,6 @@ const translateMode = (mode: string) => {
   return map[mode.toLowerCase()] || mode;
 }
 
-// ================= 环境效益评估计算逻辑 =================
 const evaluateEnvironmentalImpact = (mode: string, distanceKm: number) => {
   const lowerMode = mode.toLowerCase();
   const cnMode = translateMode(mode);
@@ -242,12 +241,10 @@ const evaluateEnvironmentalImpact = (mode: string, distanceKm: number) => {
   if (saved < 0 || !isGreen) saved = 0; 
   const calcCo2 = saved.toFixed(2);
 
-  // 相当于种树棵数 = 减排量 * 0.05
   const calcTrees = (saved * 0.05).toFixed(1);
 
   return { isGreen, calcGreenDist, calcCo2, calcTrees };
 }
-// =================================================================
 
 const handleFileUpload = async (uploadFile: any) => {
   const file = uploadFile.raw;

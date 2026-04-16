@@ -101,7 +101,6 @@ function updateMap(trajectories: TrajectoryPrediction[]) {
       const endPoint = traj.points[traj.points.length - 1]
 
       if (startPoint && endPoint) {
-        // 提取纯净坐标
         const startCoord: [number, number] = [startPoint.lat, startPoint.lng]
         const endCoord: [number, number] = [endPoint.lat, endPoint.lng]
 

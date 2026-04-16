@@ -4,7 +4,7 @@
     <div class="side-panel left-panel">
       <div class="cyber-card header-card">
         <div class="cyber-title-box">
-          <h2 class="neon-text-primary">出行方式识别与拥堵贡献评估</h2>
+          <h2 class="neon-text-primary">多源特征驱动的多模型性能对比</h2>
         </div>
         <div class="sys-status blink-status"></div>
       </div>
@@ -32,7 +32,7 @@
 
         <div class="module-box" :class="{ 'disabled-mask': !hasData && !currentFile }">
           <div class="module-header">
-            <span class="bracket">[</span> <span class="neon-text-secondary">02</span> <span class="bracket">]</span> 驱动引擎消融矩阵
+            <span class="bracket">[</span> <span class="neon-text-secondary">02</span> <span class="bracket">]</span> 多阶段验证模型组
           </div>
           <div class="engine-grid">
             <div v-for="(name, key) in engines" :key="key" 
@@ -66,14 +66,14 @@
     </div>
 
     <div class="center-panel">
-      <div class="map-frame" v-loading="isAnalyzing" element-loading-text="时空特征提取与神经推理中..." element-loading-background="rgba(2, 11, 24, 0.85)">
+      <div class="map-frame" v-loading="isAnalyzing" element-loading-text="时空特征提取与多模型推理中..." element-loading-background="rgba(2, 11, 24, 0.85)">
         <div ref="mapContainer" class="leaflet-map"></div>
         <div class="frame-corner top-left"></div>
         <div class="frame-corner top-right"></div>
         <div class="frame-corner bottom-left"></div>
         <div class="frame-corner bottom-right"></div>
         <div class="map-legend">
-          <div class="legend-item"><span class="line red-glow"></span> 拥堵源流 (私家车/网约车)</div>
+          <div class="legend-item"><span class="line red-glow"></span> 机动车 (私家车/出租车)</div>
           <div class="legend-item"><span class="line green-glow"></span> 公共交通 (公交/地铁)</div>
           <div class="legend-item"><span class="line blue-glow"></span> 慢行系统 (骑行/步行)</div>
         </div>
@@ -85,20 +85,16 @@
         <div class="info-card glass-card">
           <div class="info-icon">📊</div>
           <div class="info-content">
-            <div class="info-title">基于历史常发拥堵路段评估</div>
-            <div class="info-desc">本系统根据您的出行方式及历史拥堵数据，综合四大引擎评估本次出行对城市交通的潜在贡献。</div>
+            <div class="info-title">多模态特征融合效能评估</div>
+            <div class="info-desc">展示同一条轨迹在不同实验阶段模型下的识别差异，并由 AI 大模型解析特征引入带来的性能提升。</div>
           </div>
         </div>
 
         <div class="ai-header">
           <div class="ai-title">
-            <el-icon class="pulse-icon"><Tickets /></el-icon> AI 分析报告
+            <el-icon class="pulse-icon"><Tickets /></el-icon> 性能演进洞察报告
           </div>
-          <div class="header-actions" style="display: flex; gap: 10px; align-items: center;">
-            <el-radio-group v-model="reportScene" size="small" @change="generateReport" :disabled="!hasData || isGeneratingCompare">
-              <el-radio-button label="compare">横评</el-radio-button>
-              <el-radio-button label="congestion">拥堵</el-radio-button>
-            </el-radio-group>
+          <div class="header-actions">
             <el-button type="primary" size="small" class="neon-btn" @click="exportToPDF" :disabled="!hasData || isGeneratingCompare">导出简报</el-button>
           </div>
         </div>
@@ -106,18 +102,18 @@
         <div class="ai-body">
           <div v-if="isGeneratingCompare" class="ai-processing">
             <div class="spinner"></div>
-            正在生成AI深度洞察报告...
+            正在生成多模型深度横评报告...
           </div>
           <div v-else-if="compareReport" class="ai-stream-text" v-html="formatReportText(compareReport)"></div>
-          <div v-else class="ai-placeholder">暂无数据，请先上传轨迹</div>
+          <div v-else class="ai-placeholder">暂无数据，请先上传轨迹以启动对比评估</div>
         </div>
       </div>
     </div>
 
     <div class="pdf-export-wrapper">
-      <div id="congestion-pdf-report" class="pdf-poster">
+      <div id="compare-pdf-report" class="pdf-poster">
         <div class="poster-header">
-          <div class="poster-title">基于历史数据的出行拥堵贡献评估报告</div>
+          <div class="poster-title">多源数据融合交通识别模型对比简报</div>
           <div class="poster-subtitle">
             <span>系统研判员：<strong>{{ userName }}</strong></span>
             <span>生成日期：{{ currentDate }}</span>
@@ -126,15 +122,15 @@
         <div class="poster-stats">
           <div class="stat-box">
             <div class="stat-value" :style="{ color: getModeColor(currentMode) }">{{ currentMode }}</div>
-            <div class="stat-label">溯源交通流判定</div>
+            <div class="stat-label">基线引擎判定</div>
           </div>
           <div class="stat-box">
-            <div class="stat-value">{{ activeEngine.toUpperCase() }}</div>
-            <div class="stat-label">驱动推断引擎</div>
+            <div class="stat-value" style="color: #4A90E2;">{{ singleReports.exp4.mode || '--' }}</div>
+            <div class="stat-label">融合引擎判定(Exp4)</div>
           </div>
           <div class="stat-box">
-            <div class="stat-value" style="color: #67C23A;">{{ confidence }}<small>%</small></div>
-            <div class="stat-label">多模态置信度</div>
+            <div class="stat-value" style="color: #67C23A;">{{ singleReports.exp4.confidence || '0.0' }}<small>%</small></div>
+            <div class="stat-label">最终融合置信度</div>
           </div>
         </div>
         <div class="poster-ai-section">
@@ -163,65 +159,28 @@ import { trajectoryApi } from '../api/trajectory'
 import { useAuthStore } from '@/stores/auth'
 import html2pdf from 'html2pdf.js'
 
-const route = useRoute()
 const authStore = useAuthStore()
+const route = useRoute()
 const userName = computed(() => authStore.username || '交通系统研究员')
 const currentDate = new Date().toLocaleDateString()
 
 const hasData = ref(false)
 const isAnalyzing = ref(false)
-const isGeneratingReport = ref(false)   
 const isGeneratingCompare = ref(false)
 const currentFile = ref(null)
-const reportScene = ref('compare') 
 
 const singleReports = ref({
-  exp1: { mode: '', confidence: '', roadInfo: '', points: null },
-  exp2: { mode: '', confidence: '', roadInfo: '', points: null },
-  exp3: { mode: '', confidence: '', roadInfo: '', points: null },
-  exp4: { mode: '', confidence: '', roadInfo: '', points: null }
+  exp1: { mode: '', confidence: '', points: null },
+  exp2: { mode: '', confidence: '', points: null },
+  exp3: { mode: '', confidence: '', points: null },
+  exp4: { mode: '', confidence: '', points: null }
 })
 const compareReport = ref('')
 
-const activeEngine = ref('exp1')
+const activeEngine = ref('exp4')
 const currentMode = ref('--')
 const confidence = ref('0.0')
 const engines = { exp1: '纯轨迹基线模型', exp2: '+ OSM 路网拓扑增强', exp3: '+ 气象特征解耦', exp4: 'Focal Loss 终极优化' }
-
-const roadCoords = ref([])
-const loadRoadCoords = async () => {
-  try {
-    const res = await fetch('/congested_roads.json')
-    if (res.ok) {
-      roadCoords.value = await res.json()
-    }
-  } catch (e) { console.warn(e) }
-}
-
-const haversineDistance = (lat1, lon1, lat2, lon2) => {
-  const R = 6371000
-  const dLat = (lat2 - lat1) * Math.PI / 180
-  const dLon = (lon2 - lon1) * Math.PI / 180
-  const a = Math.sin(dLat/2)**2 + Math.cos(lat1 * Math.PI/180) * Math.cos(lat2 * Math.PI/180) * Math.sin(dLon/2)**2
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
-  return R * c
-}
-
-const findPassedRoads = (points) => {
-  if (!roadCoords.value.length) return []
-  const matched = []
-  for (const road of roadCoords.value) {
-    const isPassed = points.some(p => {
-      const lat = p.latitude ?? p.lat
-      const lng = p.longitude ?? p.lng
-      if (lat === undefined || lng === undefined) return false
-      const dist = haversineDistance(lat, lng, road.lat, road.lng)
-      return dist < 200
-    })
-    if (isPassed) matched.push(road.name)
-  }
-  return matched
-}
 
 const mapContainer = ref(null)
 let map = null
@@ -253,7 +212,7 @@ const renderTrajectory = (points, mode) => {
   
   currentPolyline = L.polyline(latLngs, { color, weight: 5, opacity: 0.85 }).addTo(map)
   const startMarker = L.circleMarker(latLngs[0], { radius: 6, fillColor: '#52C41A', color: '#fff', weight: 2, fillOpacity: 1 }).addTo(map)
-  const endMarker = L.marker(latLngs[latLngs.length-1], { icon: L.divIcon({ className: 'custom-end-marker', html: '<div style="width:12px;height:12px;background:#F5222D;border:2px solid #fff;border-radius:2px;"></div>', iconSize: [12,12], iconAnchor: [6,6] }) }).addTo(map)
+  const endMarker = L.marker(latLngs[latLngs.length-1], { icon: L.divIcon({ className: 'custom-end-marker', html: `<div style="width:12px;height:12px;background:${color};border:2px solid #fff;border-radius:2px;"></div>`, iconSize: [12,12], iconAnchor: [6,6] }) }).addTo(map)
   markers.push(startMarker, endMarker)
   map.fitBounds(currentPolyline.getBounds(), { padding: [50,50], animate: true, duration: 1 })
 }
@@ -261,48 +220,51 @@ const renderTrajectory = (points, mode) => {
 const executeAllModels = async () => {
   isAnalyzing.value = true
   hasData.value = false
-  isGeneratingReport.value = true
   compareReport.value = ''
+  
   for (const exp of ['exp1','exp2','exp3','exp4']) {
-    singleReports.value[exp] = { mode: '', confidence: '', roadInfo: '', points: null }
+    singleReports.value[exp] = { mode: '', confidence: '', points: null }
   }
 
   const models = ['exp1', 'exp2', 'exp3', 'exp4']
   
   for (const modelId of models) {
     try {
-      const res = await trajectoryApi.predict(currentFile.value, modelId, 'congestion')
-      const mode = translateMode(res.predicted_mode || 'unknown')
-      const conf = res.confidence ? (res.confidence * 100).toFixed(1) : '95.2'
-      let passedRoads = []
-      let points = null
-      if (res.points && res.points.length > 0) {
-        points = res.points
-        passedRoads = findPassedRoads(res.points)
+      const res = await trajectoryApi.predict(currentFile.value, modelId, 'compare')
+      
+      const data = res.data || res; 
+      
+      const rawConf = (data.confidence !== undefined && data.confidence !== null) ? data.confidence : 0;
+      const conf = (parseFloat(rawConf) * 100).toFixed(1);
+      
+      const pMode = translateMode(data.predicted_mode || 'unknown');
+      
+      singleReports.value[modelId] = { 
+        mode: pMode, 
+        confidence: conf, 
+        points: data.points || null 
       }
-      const roadInfo = passedRoads.length > 0 ? `途经拥堵路段：${passedRoads.join('、')}` : '未途经已知拥堵路段'
-      singleReports.value[modelId] = { mode, confidence: conf, roadInfo, points }
     } catch (e) {
-      singleReports.value[modelId] = { mode: '识别失败', confidence: '0', roadInfo: '无法获取', points: null }
+      console.error(`模型 ${modelId} 推断异常:`, e);
+      singleReports.value[modelId] = { mode: '推断失败', confidence: '0', points: null };
     }
   }
 
   hasData.value = true
-  ElMessage.success('四大模型数据流推断完成')
+  ElMessage.success('多模型性能对比推断完成')
 
   await generateReport()
 
-  const defaultPoints = singleReports.value.exp3?.points
+  const defaultPoints = singleReports.value.exp4?.points
   if (defaultPoints) {
-    const defaultMode = singleReports.value.exp3.mode
+    const defaultMode = singleReports.value.exp4.mode
     renderTrajectory(defaultPoints, defaultMode)
-    activeEngine.value = 'exp3' 
+    activeEngine.value = 'exp4' 
     currentMode.value = defaultMode
-    confidence.value = singleReports.value.exp3.confidence
+    confidence.value = singleReports.value.exp4.confidence
   }
   
   isAnalyzing.value = false
-  isGeneratingReport.value = false
 }
 
 const generateReport = async () => {
@@ -310,26 +272,13 @@ const generateReport = async () => {
   isGeneratingCompare.value = true
   compareReport.value = ''
   
-  let reqBody = {}
-  
-  if (reportScene.value === 'compare') {
-    let extra = ''
-    for (const key of ['exp1', 'exp2', 'exp3', 'exp4']) {
-       const r = singleReports.value[key]
-       if (r && r.mode) extra += `- ${key.toUpperCase()}: 识别为${r.mode}，置信度${r.confidence}%，${r.roadInfo}\n`
-    }
-    reqBody = { model_id: 'compare', mode: '多模型', confidence: '0', scene: 'compare', extra }
-  } else {
-    // 场景2：拥堵分析，只发当前选中的引擎的数据
-    const activeData = singleReports.value[activeEngine.value]
-    reqBody = { 
-      model_id: activeEngine.value, 
-      mode: activeData.mode, 
-      confidence: activeData.confidence, 
-      scene: 'congestion', 
-      extra: activeData.roadInfo 
-    }
+  let extra = ''
+  for (const key of ['exp1', 'exp2', 'exp3', 'exp4']) {
+      const r = singleReports.value[key]
+      if (r && r.mode) extra += `- ${key.toUpperCase()}: 识别为${r.mode}，置信度${r.confidence}%\n`
   }
+  
+  const reqBody = { model_id: 'compare', mode: '多模型', confidence: '0', scene: 'compare', extra }
   
   try {
     let fullText = ''
@@ -360,10 +309,6 @@ const switchEngine = async (key) => {
     currentMode.value = modelData.mode
     confidence.value = modelData.confidence
     ElMessage.info(`已切换至 ${key.toUpperCase()} 模型视图`)
-    
-    if (reportScene.value === 'congestion') {
-      generateReport()
-    }
   } else {
     ElMessage.warning(`${key.toUpperCase()} 模型无轨迹数据`)
   }
@@ -387,10 +332,10 @@ const formatReportText = (text) => {
 }
 
 const exportToPDF = () => {
-  const element = document.getElementById('congestion-pdf-report')
+  const element = document.getElementById('compare-pdf-report')
   if (!element) return
   const opt = {
-    margin: 0, filename: `拥堵评估综合报告_${new Date().getTime()}.pdf`,
+    margin: 0, filename: `多模型对比报告_${new Date().getTime()}.pdf`,
     image: { type: 'jpeg', quality: 1.0 },
     html2canvas: { scale: 3, useCORS: true, backgroundColor: '#ffffff' },
     jsPDF: { unit: 'px', format: [800, 1000], orientation: 'portrait' }
@@ -399,9 +344,52 @@ const exportToPDF = () => {
   html2pdf().set(opt).from(element).save()
 }
 
-onMounted(() => {
-  loadRoadCoords()
+onMounted(async () => {
   nextTick(() => { initMap() })
+
+  const recordId = route.query.id
+  if (recordId) {
+    try {
+      isAnalyzing.value = true
+      
+      const response = await fetch(`http://127.0.0.1:8000/api/trajectory/history/${recordId}`, {
+        headers: {
+          'Authorization': `Bearer ${authStore.token}`
+        }
+      })
+
+      if (response.ok) {
+        const dbRecord = await response.json()
+        
+        const pointsList = typeof dbRecord.points === 'string' ? JSON.parse(dbRecord.points) : dbRecord.points
+        const modeCN = translateMode(dbRecord.predicted_mode || 'unknown')
+        const confPercent = (dbRecord.confidence * 100).toFixed(1)
+
+        singleReports.value.exp4 = {
+          mode: modeCN,
+          confidence: confPercent,
+          points: pointsList
+        }
+
+        hasData.value = true
+        activeEngine.value = 'exp4'
+        currentMode.value = modeCN
+        confidence.value = confPercent
+
+        renderTrajectory(pointsList, modeCN)
+        ElMessage.success('历史档案调阅成功')
+
+        await generateReport()
+      } else {
+        ElMessage.error('调阅档案失败：服务器未找到该记录')
+      }
+    } catch (error) {
+      console.error('调阅异常:', error)
+      ElMessage.error('网络连接异常，无法调阅档案')
+    } finally {
+      isAnalyzing.value = false
+    }
+  }
 })
 
 onUnmounted(() => {
@@ -416,7 +404,7 @@ onUnmounted(() => {
 .flex-col { display: flex; flex-direction: column; gap: 20px; }
 .flex-1 { flex: 1; }
 
-.neon-text-primary { margin: 0; font-size: 22px; font-weight: 800; color: #00F0FF; text-shadow: 0 0 10px rgba(0, 240, 255, 0.6); }
+.neon-text-primary { margin: 0; font-size: 20px; font-weight: 800; color: #00F0FF; text-shadow: 0 0 10px rgba(0, 240, 255, 0.6); }
 .neon-text-secondary { color: #00F0FF; font-weight: bold; text-shadow: 0 0 5px rgba(0, 240, 255, 0.4); }
 .text-neon-cyan { color: #00F0FF; text-shadow: 0 0 15px rgba(0, 240, 255, 0.6); }
 
@@ -461,7 +449,6 @@ onUnmounted(() => {
 
 .map-frame { flex: 1; position: relative; border-radius: 12px; border: 2px solid rgba(0, 240, 255, 0.5); box-shadow: 0 0 30px rgba(0, 240, 255, 0.15), inset 0 0 30px rgba(0, 240, 255, 0.1); overflow: hidden;}
 .leaflet-map { width: 100%; height: 100%; background: #020B16; z-index: 1; }
-:deep(.custom-map-tiles) { filter: brightness(0.9) saturate(1.1); }
 :deep(.custom-end-marker) { background: transparent; border: none; }
 .frame-corner { position: absolute; width: 30px; height: 30px; border: 3px solid transparent; z-index: 10; pointer-events: none;}
 .top-left { top: 0; left: 0; border-top-color: #00F0FF; border-left-color: #00F0FF; border-radius: 12px 0 0 0;}
@@ -487,8 +474,6 @@ onUnmounted(() => {
 .pulse-icon { animation: breathe 2s infinite; }
 .neon-btn { background: transparent !important; border: 1px solid #00F0FF !important; color: #00F0FF !important; font-family: 'Consolas', monospace; transition: all 0.3s;}
 .neon-btn:hover:not(:disabled) { background: #00F0FF !important; color: #020B16 !important; box-shadow: 0 0 15px #00F0FF; }
-:deep(.el-radio-button__inner) { background: rgba(0,0,0,0.3); border-color: rgba(0, 240, 255, 0.3); color: #00F0FF; }
-:deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) { background: rgba(0, 240, 255, 0.2); color: #00F0FF; box-shadow: -1px 0 0 0 rgba(0, 240, 255, 0.3); }
 
 .ai-body { padding: 24px; flex: 1; overflow-y: auto; height: calc(100% - 140px); }
 .ai-body::-webkit-scrollbar { width: 4px; }

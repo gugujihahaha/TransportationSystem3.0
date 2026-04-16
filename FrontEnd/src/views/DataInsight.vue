@@ -1,7 +1,5 @@
 <template>
   <div class="data-insight-container">
-    
-    <!-- <PageHeader title="城市出行多维数据洞察" subtitle="深度挖掘城市交通脉络，从多时空维度分析出行规律与拥堵成因" /> -->
 
     <el-skeleton :loading="loading" animated :rows="15" class="skeleton-wrapper">
       <template #default>
@@ -26,7 +24,7 @@
                 <span class="menu-icon"></span> <span>天气影响分析</span>
               </el-menu-item>
               <el-menu-item index="4">
-                <span class="menu-icon"></span> <span>拥堵时段分析</span>
+                <span class="menu-icon"></span> <span>出行方式时段分布</span>
               </el-menu-item>
             </el-menu>
           </div>
@@ -67,10 +65,10 @@
             </div>
 
             <div v-show="activeMenu === '4'" class="chart-section fade-in">
-              <h3 class="section-title">全天拥堵时段演变分析</h3>
+              <h3 class="section-title">不同时段小汽车出行占比变化</h3>
               <div class="insight-alert">
                 <span class="icon"></span>
-                <span class="text">洞察：早晚高峰小汽车占比超过40%，与全市拥堵高发时段高度吻合。</span>
+                <span class="text">洞察：早高峰（7-9时）和晚高峰（17-19时）小汽车出行占比显著上升，与日常通勤规律一致。</span>
               </div>
               <div ref="chart4Ref" class="chart-box"></div>
             </div>
@@ -184,7 +182,6 @@ const initChart3 = () => {
   charts[2] = chart
 }
 
-// 图表4：拥堵时段
 const initChart4 = () => {
   const chart = echarts.init(chart4Ref.value)
   const data = insightData.value.congestion_timing
