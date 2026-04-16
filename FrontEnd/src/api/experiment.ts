@@ -4,12 +4,10 @@ import { useAuthStore } from '@/stores/auth'
 
 const API_BASE_URL = '/api'
 
-// 🚀 创建专属的 axios 实例
 const apiClient = axios.create({
   baseURL: API_BASE_URL
 })
 
-// 🚀 添加请求拦截器
 apiClient.interceptors.request.use((config) => {
   const authStore = useAuthStore()
   if (authStore.token) {

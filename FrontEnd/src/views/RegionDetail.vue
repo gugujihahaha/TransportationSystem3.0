@@ -2,17 +2,17 @@
   <div class="region-detail-container">
     <div class="breadcrumb-header">
       <router-link to="/" class="back-link">
-        <span class="back-arrow">←</span> 返回首页
+        <span class="back-arrow">←</span> 返回全局态势
       </router-link>
       <span class="separator">/</span>
-      <span class="current-page">区域详情</span>
+      <span class="current-page">区域多模态画像</span>
       <span class="separator">/</span>
       <span class="region-name">{{ regionName }}</span>
     </div>
 
     <div v-if="loading" class="status-container">
       <div class="loading-spinner"></div>
-      <p>数据加载中...</p>
+      <p>正在拉取区域多源融合数据...</p>
     </div>
     <div v-else-if="!regionData" class="status-container">
       <div class="empty-icon">📂</div>
@@ -22,34 +22,34 @@
     <div v-else class="detail-content fade-up">
       <div class="dashboard-row row-1">
         <div class="glass-card metrics-card">
-          <div class="card-title">核心交通指标</div>
+          <div class="card-title">区域出行核心特征</div>
           <div class="metrics-grid">
             <div class="metric-item">
-              <div class="metric-label">交通拥堵指数</div>
-              <div class="metric-value text-red">{{ regionData.index.toFixed(2) }}</div>
+              <div class="metric-label">区域轨迹覆盖量</div>
+              <div class="metric-value text-blue">{{ regionData.pointCount.toLocaleString() }}</div>
             </div>
             <div class="metric-item">
-              <div class="metric-label">平均车速 (km/h)</div>
-              <div class="metric-value text-green">{{ regionData.speed.toFixed(1) }}</div>
+              <div class="metric-label">绿色出行比例</div>
+              <div class="metric-value text-green">{{ (regionData.greenRatio * 100).toFixed(1) }}%</div>
             </div>
             <div class="metric-item">
-              <div class="metric-label">全市拥堵排名</div>
+              <div class="metric-label">全市低碳榜排名</div>
               <div class="metric-value text-orange">TOP {{ regionData.rank }}</div>
             </div>
           </div>
         </div>
 
         <div class="glass-card chart-card">
-          <div class="card-title">出行结构识别占比</div>
+          <div class="card-title">模型识别出行结构占比</div>
           <div ref="modeChartRef" class="chart-container"></div>
         </div>
       </div>
 
       <div class="dashboard-row row-2">
         <div class="glass-card table-card">
-          <div class="card-title">主要拥堵路段排行</div>
+          <div class="card-title">重点微循环网格 (高频绿色出行商圈)</div>
           <el-table 
-            :data="regionData.topRoads" 
+            :data="regionData.topGreenGrids" 
             style="width: 100%" 
             class="cyber-table"
             :row-style="{ background: 'transparent' }"
@@ -61,27 +61,27 @@
                 <span :class="['rank-badge', `rank-${scope.$index + 1}`]">{{ scope.$index + 1 }}</span>
               </template>
             </el-table-column>
-            <el-table-column prop="name" label="路段名称" />
-            <el-table-column prop="hours" label="年均拥堵时长(h)" align="right">
+            <el-table-column prop="name" label="网格/商圈名称" />
+            <el-table-column prop="ratio" label="绿色出行占比" align="right">
               <template #default="scope">
-                <span class="text-highlight">{{ scope.row.hours }}</span>
+                <span class="text-highlight" style="color: #00FF88;">{{ scope.row.ratio }}</span>
               </template>
             </el-table-column>
           </el-table>
         </div>
 
         <div class="glass-card chart-card">
-          <div class="card-title">近7天拥堵指数趋势</div>
+          <div class="card-title">近7天绿色出行比例趋势分析</div>
           <div ref="trendChartRef" class="chart-container"></div>
         </div>
       </div>
 
       <div class="dashboard-row row-3">
         <div class="glass-card suggestion-card">
-          <div class="card-title">AI 精细化治理建议</div>
+          <div class="card-title">基于多模态融合模型的低碳建设洞察</div>
           <div class="suggestion-content">
             <span class="quote-mark">“</span>
-            {{ regionData.suggestion }}
+            {{ regionData.insight }}
             <span class="quote-mark">”</span>
           </div>
         </div>
@@ -96,7 +96,7 @@ import { useRoute } from 'vue-router'
 import * as echarts from 'echarts'
 
 const route = useRoute()
-const regionName = ref(route.params.name || route.query.name || '东城区')
+const regionName = ref(route.params.name || route.query.name || '海淀区')
 
 const loading = ref(true)
 const regionData = ref(null)
@@ -105,14 +105,44 @@ const modeChartRef = ref(null)
 const trendChartRef = ref(null)
 const charts = []
 
-// 获取数据
+// 模拟各个区域的新版测试数据
+const mockRegionDatabase = {
+  '朝阳区': {
+    pointCount: 384500,
+    greenRatio: 0.38,
+    rank: 3,
+    modeDistribution: { '步行': 22, '骑行': 16, '公交': 25, '地铁': 20, '火车': 2, '小汽车': 15 },
+    topGreenGrids: [
+      { name: '三里屯-工人体育场', ratio: '62.4%' },
+      { name: '望京 SOHO 核心区', ratio: '58.1%' },
+      { name: '国贸 CBD', ratio: '54.3%' },
+      { name: '朝阳大悦城周边', ratio: '49.8%' }
+    ],
+    trend: [0.35, 0.36, 0.38, 0.37, 0.39, 0.41, 0.38],
+    insight: "Exp4 模型精准识别出该区域呈现极强的‘潮汐接驳’特征：早晚高峰存在大量‘骑行-地铁’多模态切换行为。建议在国贸及望京地铁站点周边 500 米范围扩容非机动车电子围栏，以承接庞大的共享单车接驳需求。"
+  },
+  '海淀区': {
+    pointCount: 425600,
+    greenRatio: 0.46,
+    rank: 1,
+    modeDistribution: { '步行': 25, '骑行': 21, '公交': 22, '地铁': 18, '火车': 1, '小汽车': 13 },
+    topGreenGrids: [
+      { name: '中关村软件园', ratio: '71.2%' },
+      { name: '五道口-清华科技园', ratio: '68.5%' },
+      { name: '人大-知春路沿线', ratio: '64.0%' },
+      { name: '西北旺区域', ratio: '58.7%' }
+    ],
+    trend: [0.42, 0.44, 0.46, 0.45, 0.47, 0.49, 0.46],
+    insight: "得益于高校与互联网园区的密集分布，该区常态化绿色出行比例领跑全市。Exp2 空间特征分析表明，园区内部步道及周边专用自行车道利用率极高，建议作为‘慢行系统友好型示范区’向全市推广。"
+  }
+}
+
 const loadData = async () => {
   try {
-    const res = await fetch('/region_data.json')
-    if (res.ok) {
-      const allData = await res.json()
-      regionData.value = allData[regionName.value] || null
-    }
+    // 真实项目中这里依然可以用 fetch 请求 /region_data.json
+    // 这里为了演示直接 fallback 到 mock 数据库
+    await new Promise(resolve => setTimeout(resolve, 600)) // 模拟网络延迟
+    regionData.value = mockRegionDatabase[regionName.value] || mockRegionDatabase['朝阳区']
   } catch (err) {
     console.error('加载区域详情数据失败:', err)
   } finally {
@@ -124,7 +154,6 @@ const loadData = async () => {
   }
 }
 
-// 初始化图表
 const initCharts = () => {
   if (!regionData.value) return
   const data = regionData.value
@@ -135,7 +164,7 @@ const initCharts = () => {
     const modeColors = { '步行': '#00FF88', '骑行': '#00FFFF', '公交': '#FFDD00', '地铁': '#CC33FF', '火车': '#FF6600', '小汽车': '#FF0033' }
     
     modeChart.setOption({
-      tooltip: { trigger: 'item', backgroundColor: 'rgba(10,14,23,0.9)', textStyle: { color: '#fff' } },
+      tooltip: { trigger: 'item', backgroundColor: 'rgba(10,14,23,0.9)', textStyle: { color: '#fff', fontWeight: 'bold' }, formatter: '{b}: {c}%' },
       legend: { orient: 'vertical', right: '5%', top: 'center', textStyle: { color: '#cbd5e1' } },
       series: [{
         type: 'pie',
@@ -151,37 +180,36 @@ const initCharts = () => {
     charts.push(modeChart)
   }
 
-  // --- 2. 拥堵趋势折线图 ---
+  // --- 2. 绿色出行趋势折线图 (更换为环保主题色) ---
   if (trendChartRef.value) {
     const trendChart = echarts.init(trendChartRef.value)
-    const days = ['Day 1', 'Day 2', 'Day 3', 'Day 4', 'Day 5', 'Day 6', 'Day 7']
+    const days = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
     
     trendChart.setOption({
-      grid: { top: 30, bottom: 20, left: 40, right: 20 },
-      tooltip: { trigger: 'axis', backgroundColor: 'rgba(10,14,23,0.9)', textStyle: { color: '#fff' } },
+      grid: { top: 30, bottom: 20, left: 45, right: 20 },
+      tooltip: { 
+        trigger: 'axis', backgroundColor: 'rgba(10,14,23,0.9)', 
+        textStyle: { color: '#fff', fontWeight:'bold' },
+        formatter: (params) => `${params[0].name}<br/>比例: ${(params[0].value * 100).toFixed(1)}%`
+      },
       xAxis: { 
-        type: 'category', 
-        data: days, 
-        axisLabel: { color: '#94a3b8' }, 
-        axisLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } } 
+        type: 'category', data: days, 
+        axisLabel: { color: '#94a3b8' }, axisLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } } 
       },
       yAxis: { 
-        type: 'value', 
-        min: 'dataMin',
-        axisLabel: { color: '#94a3b8' }, 
+        type: 'value', min: 'dataMin',
+        axisLabel: { color: '#94a3b8', formatter: (val) => (val * 100).toFixed(0) + '%' }, 
         splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } } 
       },
       series: [{
         data: data.trend, 
-        type: 'line', 
-        smooth: true, 
-        symbolSize: 8,
-        itemStyle: { color: '#FF4D00' },
-        lineStyle: { width: 3, color: '#FF4D00' },
+        type: 'line', smooth: true, symbolSize: 8,
+        itemStyle: { color: '#00FF88' }, // 绿色主题
+        lineStyle: { width: 3, color: '#00FF88' },
         areaStyle: { 
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(255, 77, 0, 0.4)' }, 
-            { offset: 1, color: 'rgba(255, 77, 0, 0)' }
+            { offset: 0, color: 'rgba(0, 255, 136, 0.4)' }, 
+            { offset: 1, color: 'rgba(0, 255, 136, 0)' }
           ]) 
         }
       }]
@@ -190,9 +218,7 @@ const initCharts = () => {
   }
 }
 
-const handleResize = () => {
-  charts.forEach(c => c.resize())
-}
+const handleResize = () => { charts.forEach(c => c.resize()) }
 
 onMounted(() => {
   loadData()
@@ -208,9 +234,9 @@ onUnmounted(() => {
 <style scoped>
 .region-detail-container {
   min-height: calc(100vh - 64px);
-  background-color: #0A0E17;
+  background-color: transparent;
   color: #e2e8f0;
-  padding: 20px 30px;
+  padding: 0 10px;
   font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
   box-sizing: border-box;
 }
@@ -327,21 +353,19 @@ onUnmounted(() => {
   padding: 20px 10px;
   text-align: center;
 }
-.metric-label { font-size: 13px; color: #94a3b8; margin-bottom: 10px; }
+.metric-label { font-size: 13px; color: #94a3b8; margin-bottom: 10px; font-weight: bold; }
 .metric-value { 
   font-size: 32px; 
   font-weight: bold; 
   font-family: 'Din', 'Arial', sans-serif;
   text-shadow: 0 0 10px currentColor;
 }
-.text-red { color: #FF0033; }
+.text-blue { color: #38bdf8; }
 .text-green { color: #00FF88; }
-.text-orange { color: #FF9900; }
+.text-orange { color: #FFD700; }
 
-/* 图表容器 */
 .chart-container { width: 100%; height: 220px; }
 
-/* 表格样式 */
 .cyber-table {
   --el-table-bg-color: transparent;
   --el-table-tr-bg-color: transparent;
@@ -351,7 +375,6 @@ onUnmounted(() => {
 :deep(.el-table__inner-wrapper::before) { display: none; }
 :deep(.el-table tbody tr:hover > td) { background-color: rgba(56, 189, 248, 0.1) !important; }
 
-/* 排名徽章 */
 .rank-badge {
   display: inline-block;
   width: 24px;
@@ -362,17 +385,16 @@ onUnmounted(() => {
   color: #fff;
   font-weight: bold;
 }
-.rank-1 { background: #FF0033; box-shadow: 0 0 8px #FF0033; }
-.rank-2 { background: #FF6600; box-shadow: 0 0 8px #FF6600; }
-.rank-3 { background: #FF9900; box-shadow: 0 0 8px #FF9900; }
-.text-highlight { color: #38bdf8; font-weight: bold; font-family: monospace; font-size: 16px; }
+.rank-1 { background: #00FF88; box-shadow: 0 0 8px rgba(0,255,136,0.6); color: #000; }
+.rank-2 { background: #00A8FF; box-shadow: 0 0 8px rgba(0,168,255,0.6); }
+.rank-3 { background: #FFD700; box-shadow: 0 0 8px rgba(255,215,0,0.6); color: #000; }
+.text-highlight { font-weight: bold; font-family: monospace; font-size: 16px; }
 
-/* 治理建议 */
 .suggestion-content {
-  font-size: 16px;
+  font-size: 15px;
   line-height: 1.8;
   color: #cbd5e1;
-  padding: 10px 20px;
+  padding: 15px 20px;
   background: linear-gradient(90deg, rgba(56,189,248,0.1), transparent);
   border-left: 4px solid #38bdf8;
   border-radius: 4px;
@@ -386,7 +408,6 @@ onUnmounted(() => {
   vertical-align: middle;
 }
 
-/* 动画 */
 .fade-up { animation: fadeInUp 0.5s ease forwards; }
 @keyframes fadeInUp {
   from { opacity: 0; transform: translateY(20px); }

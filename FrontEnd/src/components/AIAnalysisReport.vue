@@ -42,7 +42,6 @@ const reportText = ref('');
 const loading = ref(false);
 const scrollContainer = ref<HTMLElement | null>(null);
 
-// 流式接口调用
 const generateReport = async () => {
   if (loading.value) return;
   
@@ -54,7 +53,7 @@ const generateReport = async () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('token')}` // 确保携带 Token
+        'Authorization': `Bearer ${localStorage.getItem('token')}` 
       },
       body: JSON.stringify({
         trajectoryId: 'current-task-001' 
@@ -73,7 +72,6 @@ const generateReport = async () => {
       const chunk = decoder.decode(value, { stream: true });
       reportText.value += chunk;
 
-      // 自动滚动到底部
       await nextTick();
       if (scrollContainer.value) {
         scrollContainer.value.scrollTop = scrollContainer.value.scrollHeight;

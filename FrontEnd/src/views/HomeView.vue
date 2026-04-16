@@ -8,9 +8,8 @@
 
     <div class="content-wrapper" :class="{ 'is-loaded': isLoaded }">
 
-        <!-- <PageHeader title="多源数据融合驱动的城市交通拥堵溯源与绿色出行评估" subtitle="基于轨迹-路网-天气多模态数据与递进式深度学习实验" /> -->
       
-      <div class="data-scale-bar">
+      <!-- <div class="data-scale-bar">
         <div class="stat-item">
           <span class="stat-label">处理轨迹点</span>
           <span class="stat-value">1500 万+</span>
@@ -35,7 +34,7 @@
           <span class="stat-label">数据时间跨度</span>
           <span class="stat-value">2008-2012 (GeoLife) + 2024 报告</span>
         </div>
-      </div>
+      </div> -->
 
       <HomePage />
 
@@ -47,7 +46,6 @@
 import { ref, onMounted } from 'vue'
 import HomePage from '@/components/HomePage.vue'
 import PageHeader from '@/components/PageHeader.vue'
-// 控制首屏进场动画
 const isLoaded = ref(false)
 
 onMounted(() => {

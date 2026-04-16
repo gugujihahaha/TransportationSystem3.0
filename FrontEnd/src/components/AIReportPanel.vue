@@ -40,7 +40,6 @@ const isGenerating = ref(false)
 const reportContent = ref('')
 const scrollBox = ref<HTMLElement | null>(null)
 
-// 处理换行符，简单的Markdown渲染转换
 const formattedReport = computed(() => {
   if (!reportContent.value) return ''
   return reportContent.value
@@ -48,7 +47,6 @@ const formattedReport = computed(() => {
     .replace(/\n/g, '<br/>')
 })
 
-// 监听内容变化，实现自动平滑滚动到底部
 watch(reportContent, () => {
   nextTick(() => {
     if (scrollBox.value) {
@@ -62,7 +60,6 @@ const generateAIReport = async () => {
   reportContent.value = ''
   
   try {
-    // 构造 Prompt
     const prompt = `你是一个专业的交通智能分析专家。请基于以下数据生成分析报告：
     1. 早高峰私家车占比45%，公交28%。
     2. 共享单车出行减少碳排放约 1,245 kg。
@@ -88,7 +85,6 @@ const generateAIReport = async () => {
 
     if (!response.body) throw new Error('浏览器不支持 ReadableStream')
 
-    // 处理数据流
     const reader = response.body.getReader()
     const decoder = new TextDecoder('utf-8')
 
@@ -106,7 +102,6 @@ const generateAIReport = async () => {
             const text = data.choices[0].delta.content || ''
             reportContent.value += text
           } catch (e) {
-            // 忽略 JSON 解析截断导致的错误，继续读取下一块
           }
         }
       }
@@ -148,7 +143,6 @@ const exportToPDF = () => {
   const cursor = clone.querySelector('.typing-cursor')
   if (cursor) cursor.remove()
   
-  // 生成并下载
   html2pdf().set(opt).from(clone).save()
 }
 </script>

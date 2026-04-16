@@ -80,6 +80,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTrajectoryStore } from '@/stores/trajectory'
 import PageHeader from '@/components/PageHeader.vue'
+import { ElMessage } from 'element-plus'
 const router = useRouter()
 const trajectoryStore = useTrajectoryStore()
 
@@ -99,7 +100,6 @@ onMounted(async () => {
   }
 })
 
-// 分页逻辑
 const totalPages = computed(() => Math.ceil(trajectoryStore.history.length / ITEMS_PER_PAGE))
 const currentRecords = computed(() => {
   const start = (currentPage.value - 1) * ITEMS_PER_PAGE
@@ -107,14 +107,12 @@ const currentRecords = computed(() => {
   return trajectoryStore.history.slice(start, end)
 })
 
-// 防御性取值函数
 const getRecordMode = (record: any): string => String(record.pred_label || record.mode || record.predicted_mode || 'Unknown')
 const getRecordConfidence = (record: any): string => {
   const conf = record.confidence || record.prob || 0
   return (Number(conf) * 100).toFixed(0) + '%'
 }
 
-// 时间格式化
 const formatDate = (dateString?: string) => {
   if (!dateString) return '未知时间'
   const date = new Date(dateString)
@@ -123,10 +121,16 @@ const formatDate = (dateString?: string) => {
 
 // 回溯对应场景
 const goToDetail = (record: any) => {
+  if (!record.id) {
+    ElMessage.warning('该档案数据不完整，无法查阅详情')
+    return
+  }
   if (record.scene === 'green') {
     router.push({ path: '/green-travel', query: { id: record.id } })
+  } else if (record.scene === 'compare') {
+    router.push({ path: '/model-compare', query: { id: record.id } })
   } else {
-    router.push({ path: '/congestion-analysis', query: { id: record.id } })
+    router.push({ path: '/green-travel', query: { id: record.id } })
   }
 }
 
@@ -162,7 +166,6 @@ const getBadgeIcon = (mode: string) => {
   font-family: 'Rajdhani', 'Microsoft YaHei', sans-serif;
 }
 
-/* 顶部标题区 */
 .header-section {
   display: flex;
   flex-direction: column;

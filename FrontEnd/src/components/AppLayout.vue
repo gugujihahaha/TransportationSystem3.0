@@ -12,7 +12,10 @@
 <nav class="header-nav">
   <div class="nav-item" :class="{ active: currentPath === '/' }" @click="$router.push('/')">首页总览</div>
   <div class="nav-item" :class="{ active: currentPath === '/insight' }" @click="$router.push('/insight')">数据洞察</div>
-  <div class="nav-item" :class="{ active: currentPath === '/congestion-analysis' }" @click="$router.push('/congestion-analysis')">拥堵溯源</div>
+  
+  <div class="nav-item" :class="{ active: currentPath === '/model-compare' }" @click="$router.push('/model-compare')">多模型对比</div>
+  <div class="nav-item" :class="{ active: currentPath === '/carbon-heatmap' }" @click="$router.push('/carbon-heatmap')">碳普惠热力</div>
+  
   <div class="nav-item" :class="{ active: currentPath === '/history' }" @click="$router.push('/history')">我的记录</div>
   <div class="nav-item" :class="{ active: currentPath === '/tech-support' }" @click="$router.push('/tech-support')">技术支撑</div>
 </nav>
@@ -47,7 +50,6 @@ const authStore = useAuthStore()
 
 const currentPath = computed(() => route.path)
 
-// 动态系统时间
 const currentTime = ref('')
 let timer: number
 
