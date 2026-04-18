@@ -77,17 +77,12 @@ const handleSubmit = async () => {
 
   try {
     if (isLogin.value) {
-      // 1. 执行登录
       const res = await authApi.login(username.value, password.value)
-      // 2. 存入 Pinia 状态库
       authStore.setAuth(res.access_token, username.value)
-      // 3. 登录成功，跳转到首页面板
       router.push('/') 
     } else {
-      // 1. 执行注册
       await authApi.register(username.value, password.value)
       alert('注册成功！请使用新账号登录。')
-      // 2. 注册成功后切回登录界面，清空密码
       isLogin.value = true
       password.value = ''
     }

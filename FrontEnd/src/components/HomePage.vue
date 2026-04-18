@@ -238,7 +238,7 @@ inRange: {
 color: ['#A8E6CF', '#FFE082', '#FFC107', '#FF9800', '#F44336', '#D32F2F']
 },
   outOfRange: {
-    color: '#0A0E17'  // 无数据区域也显示科技蓝
+    color: '#0A0E17'  
   }
 },
       series: [{
