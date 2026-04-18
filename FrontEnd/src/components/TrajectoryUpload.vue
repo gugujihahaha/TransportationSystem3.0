@@ -154,7 +154,7 @@ function handleFileChange(file: any) {
   --glass-border: rgba(0, 240, 255, 0.2);
   
   display: grid;
-  grid-template-columns: 1fr 1fr; /* 左右双栏等宽 */
+  grid-template-columns: 1fr 1fr; 
   gap: 24px;
   width: 100%;
   min-height: 500px;
@@ -162,11 +162,9 @@ function handleFileChange(file: any) {
 
 @media (max-width: 992px) {
   .trajectory-dashboard {
-    grid-template-columns: 1fr; /* 小屏自动折叠为上下结构 */
+    grid-template-columns: 1fr;
   }
 }
-
-/* 玻璃拟态卡片基础 */
 .glass-card {
   background: var(--glass-bg);
   backdrop-filter: blur(16px);
@@ -179,7 +177,6 @@ function handleFileChange(file: any) {
   flex-direction: column;
 }
 
-/* 面板头部 */
 .panel-header {
   margin-bottom: 24px;
 }
@@ -205,7 +202,6 @@ function handleFileChange(file: any) {
   box-shadow: 0 0 8px var(--neon-cyan);
 }
 
-/* 模型选择器重构 */
 .model-selector {
   margin-bottom: 24px;
   display: flex;
@@ -219,8 +215,6 @@ function handleFileChange(file: any) {
   text-shadow: 0 0 5px rgba(0, 240, 255, 0.4);
   white-space: nowrap;
 }
-
-/* 深度覆写 Element Plus 的 Select 样式 */
 :deep(.el-select) {
   flex: 1;
 }
@@ -238,8 +232,6 @@ function handleFileChange(file: any) {
 :deep(.el-input__inner) {
   color: #fff !important;
 }
-
-/* 拖拽上传区域暗黑重构 */
 .cyber-upload-area {
   flex: 1;
   display: flex;
@@ -304,7 +296,6 @@ function handleFileChange(file: any) {
   text-shadow: 0 0 15px var(--neon-cyan);
 }
 
-/* 弹窗内部样式重构 */
 .format-info {
   color: #cdd9e5;
 }
@@ -336,7 +327,6 @@ function handleFileChange(file: any) {
   line-height: 1.8;
 }
 
-/* --- 全局样式注入 (为了覆盖 body 下的 El-Dialog) --- */
 :global(.cyber-dialog) {
   background: rgba(10, 15, 30, 0.95) !important;
   border: 1px solid rgba(0, 240, 255, 0.3) !important;

@@ -253,7 +253,6 @@ function formatTimelineTime(progress: number): string {
 
 .map-container { flex: 1; position: relative; overflow: hidden; }
 
-/* 右侧 AI 报告面板的绝对定位 */
 .right-floating-island {
   position: absolute;
   top: 24px;

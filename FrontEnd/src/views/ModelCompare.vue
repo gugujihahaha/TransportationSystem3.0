@@ -347,45 +347,37 @@ const exportToPDF = () => {
 onMounted(async () => {
   nextTick(() => { initMap() })
 
-  const recordId = route.query.id
+const recordId = route.query.id
   if (recordId) {
     try {
-      isAnalyzing.value = true
+      isAnalyzing.value = true      
+      const dbRecord = await trajectoryApi.getHistoryById(recordId as string)
       
-      const response = await fetch(`http://127.0.0.1:8000/api/trajectory/history/${recordId}`, {
-        headers: {
-          'Authorization': `Bearer ${authStore.token}`
-        }
-      })
+      const pointsList = typeof dbRecord.points === 'string' 
+        ? JSON.parse(dbRecord.points) 
+        : dbRecord.points
+      
+      const modeCN = translateMode(dbRecord.predicted_mode || 'unknown')
+      const confPercent = (dbRecord.confidence * 100).toFixed(1)
 
-      if (response.ok) {
-        const dbRecord = await response.json()
-        
-        const pointsList = typeof dbRecord.points === 'string' ? JSON.parse(dbRecord.points) : dbRecord.points
-        const modeCN = translateMode(dbRecord.predicted_mode || 'unknown')
-        const confPercent = (dbRecord.confidence * 100).toFixed(1)
-
-        singleReports.value.exp4 = {
-          mode: modeCN,
-          confidence: confPercent,
-          points: pointsList
-        }
-
-        hasData.value = true
-        activeEngine.value = 'exp4'
-        currentMode.value = modeCN
-        confidence.value = confPercent
-
-        renderTrajectory(pointsList, modeCN)
-        ElMessage.success('历史档案调阅成功')
-
-        await generateReport()
-      } else {
-        ElMessage.error('调阅档案失败：服务器未找到该记录')
+      singleReports.value.exp4 = {
+        mode: modeCN,
+        confidence: confPercent,
+        points: pointsList
       }
+
+      hasData.value = true
+      activeEngine.value = 'exp4'
+      currentMode.value = modeCN
+      confidence.value = confPercent
+
+      renderTrajectory(pointsList, modeCN)
+      ElMessage.success('已成功调阅您的私有时空档案')
+      await generateReport()
+      
     } catch (error) {
       console.error('调阅异常:', error)
-      ElMessage.error('网络连接异常，无法调阅档案')
+      ElMessage.error('档案提取失败，可能该记录已被删除')
     } finally {
       isAnalyzing.value = false
     }

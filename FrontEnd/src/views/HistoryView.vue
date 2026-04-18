@@ -80,7 +80,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTrajectoryStore } from '@/stores/trajectory'
 import PageHeader from '@/components/PageHeader.vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from 'element-plus' // 引入消息提示
+
 const router = useRouter()
 const trajectoryStore = useTrajectoryStore()
 
@@ -90,8 +91,13 @@ const ITEMS_PER_PAGE = 10
 
 const refreshData = async () => {
   loading.value = true
-  await trajectoryStore.fetchHistory()
-  loading.value = false
+  try {
+    await trajectoryStore.fetchHistory()
+  } catch (error) {
+    console.error('同步数据失败:', error)
+  } finally {
+    loading.value = false
+  }
 }
 
 onMounted(async () => {
@@ -118,19 +124,16 @@ const formatDate = (dateString?: string) => {
   const date = new Date(dateString)
   return isNaN(date.getTime()) ? '未知时间' : date.toLocaleString('zh-CN', { hour12: false })
 }
-
-// 回溯对应场景
 const goToDetail = (record: any) => {
   if (!record.id) {
-    ElMessage.warning('该档案数据不完整，无法查阅详情')
+    ElMessage.warning('档案记录不完整，无法调阅')
     return
   }
+  
   if (record.scene === 'green') {
     router.push({ path: '/green-travel', query: { id: record.id } })
-  } else if (record.scene === 'compare') {
-    router.push({ path: '/model-compare', query: { id: record.id } })
   } else {
-    router.push({ path: '/green-travel', query: { id: record.id } })
+    router.push({ path: '/model-compare', query: { id: record.id } })
   }
 }
 
@@ -186,7 +189,6 @@ const getBadgeIcon = (mode: string) => {
 }
 .sync-btn:hover:not(:disabled) { background: rgba(0, 240, 255, 0.2); box-shadow: 0 0 15px rgba(0, 240, 255, 0.2); }
 
-/* 面板与状态 */
 .panel-glass {
   background: rgba(13, 20, 40, 0.5); border: 1px solid rgba(0, 240, 255, 0.15);
   backdrop-filter: blur(12px); border-radius: 12px; padding: 30px; min-height: 400px;
@@ -197,7 +199,6 @@ const getBadgeIcon = (mode: string) => {
 .text-slate { color: #94a3b8; }
 .loading-ring { width: 40px; height: 40px; border: 3px solid rgba(0,240,255,0.2); border-top-color: #00f0ff; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px; }
 
-/* 表格与徽章 */
 .table-wrapper { width: 100%; overflow-x: auto; }
 .history-table { width: 100%; border-collapse: collapse; text-align: left; }
 .history-table th { border-bottom: 2px solid rgba(0, 240, 255, 0.3); color: #00f0ff; padding: 15px; letter-spacing: 1px; }

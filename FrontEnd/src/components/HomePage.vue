@@ -22,7 +22,7 @@
                 <div class="highlight-item"><span class="highlight-ratio">Exp2</span> 公交召回率提升 +10%</div>
                 <div class="highlight-item"><span class="highlight-ratio">Exp3</span> 雨天识别准确率提升 +9%</div>
                 <div class="highlight-item"><span class="highlight-ratio">Exp4</span> 小汽车长尾 F1 值 +0.04</div>
-                <div class="highlight-item" style="color: #38bdf8;">📊 多模态融合显著提升复杂场景鲁棒性</div>
+                <div class="highlight-item" style="color: #38bdf8;"> 多模态融合显著提升复杂场景鲁棒性</div>
               </div>
               
               <div class="carbon-panel">
@@ -82,7 +82,7 @@
           <div class="card-title" style="margin-bottom: 20px;">多源数据融合规模与模型实验统计</div>
           <div class="stats-row">
             <div class="stat-box">
-              <div class="stat-value">1500 <span class="unit">万+</span></div>
+              <div class="stat-value">13 <span class="unit">万+</span></div>
               <div class="stat-label">处理轨迹点</div>
             </div>
             <div class="stat-box">
@@ -98,7 +98,7 @@
               <div class="stat-label">覆盖交通方式</div>
             </div>
             <div class="stat-box">
-              <div class="stat-value" style="font-size: 20px; margin-top: 8px;">2008-2012</div>
+              <div class="stat-value" style="font-size: 20px; margin-top: 8px;">2007-2012</div>
               <div class="stat-label">数据时间跨度</div>
             </div>
           </div>
@@ -151,7 +151,6 @@ const districtStats = {}
 
 const loadData = async () => {
   try {
-    // 1. 核心改动：不再请求 heatmap_grid，直接请求全局的 region_data.json
     const [resMode, resRegion, geoRes] = await Promise.all([
       fetch('/homepage_data.json').then(r => r.json()),
       fetch('/region_data.json').then(r => r.json()),
@@ -159,15 +158,10 @@ const loadData = async () => {
     ])
 
     echarts.registerMap('BJ', geoRes)
-
-    // 2. 核心改动：彻底删除了几十行 Turf.js 的循环聚合代码！直接用后端/JSON备好的数据
-
     loading.value = false
     await nextTick()
     
     animateValue(animatedCarbonKg, 452.8, 2500)
-
-    // 3. 将各区真实数据 resRegion 传给画图函数
     initCharts(resMode.mode_distribution, resRegion)
 
   } catch (err) {
@@ -197,12 +191,19 @@ const initCharts = (modeDistribution, regionData) => {
     charts.push(chart1)
   }
 
-  // --- 卡片2：真实轨迹覆盖行政区划热力图 ---
+  // --- 卡片2：轨迹覆盖行政区划热力图 ---
   if (chart2Ref.value && regionData) {
     const chart2 = echarts.init(chart2Ref.value)
     
-    // 4. 从 regionData 中读取 pointCount
-    const mapData = Object.entries(regionData).map(([name, stats]) => ({ name, value: stats.pointCount }))
+const allDistricts = [
+  '东城区', '西城区', '朝阳区', '海淀区', '丰台区', '石景山区',
+  '通州区', '大兴区', '昌平区', '顺义区', '房山区', '门头沟区',
+  '怀柔区', '密云区', '平谷区', '延庆区'
+];
+const mapData = allDistricts.map(name => ({
+  name: name,
+  value: regionData[name] ? regionData[name].pointCount : 0
+}));
     
     const validCounts = mapData.map(d => d.value).filter(v => v > 0).sort((a, b) => a - b)
     const p80Index = Math.floor(validCounts.length * 0.80)
@@ -224,15 +225,22 @@ const initCharts = (modeDistribution, regionData) => {
           return ''
         }
       },
-      visualMap: {
-        show: true, type: 'continuous', min: 0, 
-        max: optimalMax, 
-        left: 15, bottom: 15, text: ['极密集', '低覆盖'],
-        textStyle: { color: '#e2e8f0', fontSize: 10, fontWeight: 'bold' },
-        inRange: { 
-          color : ['#1E3A5F', '#2D6A8F', '#0EA5E9', '#FBBF24', '#F97316', '#EF4444'] 
-        }
-      },
+visualMap: {
+  show: true,
+  type: 'continuous',
+  min: 0,
+  max: optimalMax,
+  left: 15,
+  bottom: 15,
+  text: ['极密集', '低覆盖'],
+  textStyle: { color: '#e2e8f0', fontSize: 10, fontWeight: 'bold' },
+inRange: {
+color: ['#A8E6CF', '#FFE082', '#FFC107', '#FF9800', '#F44336', '#D32F2F']
+},
+  outOfRange: {
+    color: '#0A0E17'  // 无数据区域也显示科技蓝
+  }
+},
       series: [{
         type: 'map', map: 'BJ', roam: true, zoom: 1.1, center: [116.405285, 40.003989],
         label: { show: true, fontSize: 11, fontWeight: 'bold', color: '#fff', textShadow: '0 0 4px #000' },
@@ -257,7 +265,6 @@ const initCharts = (modeDistribution, regionData) => {
   if (chart4Ref.value && regionData) {
     const chart4 = echarts.init(chart4Ref.value)
     
-    // 5. 读取 greenRatio 并排序
     const top5Data = Object.entries(regionData)
       .sort((a, b) => b[1].greenRatio - a[1].greenRatio)
       .slice(0, 5)

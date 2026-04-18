@@ -56,7 +56,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* --- 全局与背景样式 --- */
 .fui-home-container { 
   min-height: 100vh; 
   background-color: #070b19; 
@@ -87,7 +86,6 @@ onMounted(() => {
   border-radius: 50%; filter: blur(50px); 
 }
 
-/* 扩宽到 1400px 以减少两侧留白，适配大屏看板风格 */
 .content-wrapper { 
   position: relative; 
   z-index: 1; 
@@ -103,7 +101,6 @@ onMounted(() => {
 }
 .content-wrapper.is-loaded { opacity: 1; transform: translateY(0); }
 
-/* --- 1. 学术研究标题区样式 --- */
 .research-header {
   text-align: center;
   margin-top: 10px;
@@ -113,7 +110,7 @@ onMounted(() => {
   font-size: 24px;
   font-weight: 600;
   color: #e2e8f0;
-  text-shadow: 0 0 10px rgba(56, 189, 248, 0.2); /* 微弱的发光 */
+  text-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
   margin-bottom: 6px;
   letter-spacing: 1.5px;
 }
@@ -123,7 +120,6 @@ onMounted(() => {
   letter-spacing: 1px;
 }
 
-/* --- 2. 顶部数据规模卡片条样式 --- */
 .data-scale-bar {
   display: flex;
   flex-wrap: wrap;
@@ -136,7 +132,7 @@ onMounted(() => {
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-  margin-bottom: 5px; /* 让卡片和下面内容的衔接更紧凑 */
+  margin-bottom: 5px; 
 }
 
 .stat-item {
