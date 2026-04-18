@@ -567,7 +567,6 @@ onUnmounted(() => {
 .version-tab {
   padding: 5px 24px; font-size: 15px; font-weight: bold; color: #94a3b8; cursor: pointer;
   background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.1);
-  /* transform: skewX(-15deg); transition: all 0.3s; */
 }
 .version-tab:hover { background: rgba(0, 240, 255, 0.05); color: #e2e8f0; }
 .version-tab.active { 

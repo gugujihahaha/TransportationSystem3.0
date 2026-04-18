@@ -1,31 +1,34 @@
 <template>
   <div class="region-detail-container">
     <div class="breadcrumb-header">
-      <router-link to="/" class="back-link">
+      <router-link to="/dashboard" class="back-link">
         <span class="back-arrow">←</span> 返回全局态势
       </router-link>
       <span class="separator">/</span>
-      <span class="current-page">区域多模态画像</span>
+      <span class="current-page">区域绿色出行档案</span>
       <span class="separator">/</span>
       <span class="region-name">{{ regionName }}</span>
     </div>
 
     <div v-if="loading" class="status-container">
       <div class="loading-spinner"></div>
-      <p>正在拉取区域多源融合数据...</p>
+      <p>正在加载 {{ regionName }} 区域数据...</p>
     </div>
+    
     <div v-else-if="!regionData" class="status-container">
       <div class="empty-icon">📂</div>
-      <p>该区域（{{ regionName }}）数据整理中，敬请期待...</p>
+      <p>该区域（{{ regionName }}）暂无轨迹数据。</p>
     </div>
 
     <div v-else class="detail-content fade-up">
+      <!-- 第一行：两个卡片左右对称 -->
       <div class="dashboard-row row-1">
+        <!-- 左侧：核心指标 -->
         <div class="glass-card metrics-card">
           <div class="card-title">区域出行核心特征</div>
           <div class="metrics-grid">
             <div class="metric-item">
-              <div class="metric-label">区域轨迹覆盖量</div>
+              <div class="metric-label">轨迹样本总量</div>
               <div class="metric-value text-blue">{{ regionData.pointCount.toLocaleString() }}</div>
             </div>
             <div class="metric-item">
@@ -33,21 +36,44 @@
               <div class="metric-value text-green">{{ (regionData.greenRatio * 100).toFixed(1) }}%</div>
             </div>
             <div class="metric-item">
-              <div class="metric-label">全市低碳榜排名</div>
+              <div class="metric-label">全市绿色排名</div>
               <div class="metric-value text-orange">TOP {{ regionData.rank }}</div>
             </div>
           </div>
         </div>
 
-        <div class="glass-card chart-card">
-          <div class="card-title">模型识别出行结构占比</div>
-          <div ref="modeChartRef" class="chart-container"></div>
+        <!-- 右侧：对比卡片 + 建议 -->
+        <div class="glass-card compare-card">
+          <div class="card-title">绿色出行水平对比</div>
+          <div class="compare-content">
+            <div class="compare-item">
+              <span class="compare-label">本区绿色比例</span>
+              <span class="compare-value">{{ (regionData.greenRatio * 100).toFixed(1) }}%</span>
+            </div>
+            <div class="compare-item">
+              <span class="compare-label">全市平均绿色比例</span>
+              <span class="compare-value">{{ (avgGreenRatio * 100).toFixed(1) }}%</span>
+            </div>
+            <div class="compare-diff" :class="diffClass">
+              {{ diffText }}
+            </div>
+            <div class="suggestion-box">
+              <span class="suggestion-icon">💡</span>
+              <span class="suggestion-label">建议</span>
+              <span class="suggestion-text">{{ suggestionText }}</span>
+            </div>
+            <div class="data-note">
+              * 全市平均基于所有区县真实数据计算<br>
+              * 绿色出行 = 步行 + 骑行
+            </div>
+          </div>
         </div>
       </div>
 
+      <!-- 第二行：绿色出行热点网格表格（全宽） -->
       <div class="dashboard-row row-2">
-        <div class="glass-card table-card">
-          <div class="card-title">重点微循环网格 (高频绿色出行商圈)</div>
+        <div class="glass-card table-card full-width">
+          <div class="card-title">🌿 区域内绿色出行热点网格</div>
           <el-table 
             :data="regionData.topGreenGrids" 
             style="width: 100%" 
@@ -56,12 +82,12 @@
             :cell-style="{ borderBottom: '1px solid rgba(255,255,255,0.08)' }"
             :header-cell-style="{ background: 'rgba(56,189,248,0.1)', color: '#e2e8f0', fontWeight: 'bold', borderBottom: '1px solid rgba(56,189,248,0.3)' }"
           >
-            <el-table-column type="index" label="排名" width="80" align="center">
+            <el-table-column type="index" label="排位" width="80" align="center">
               <template #default="scope">
                 <span :class="['rank-badge', `rank-${scope.$index + 1}`]">{{ scope.$index + 1 }}</span>
               </template>
             </el-table-column>
-            <el-table-column prop="name" label="网格/商圈名称" />
+            <el-table-column prop="name" label="网格/核心地标名称" />
             <el-table-column prop="ratio" label="绿色出行占比" align="right">
               <template #default="scope">
                 <span class="text-highlight" style="color: #00FF88;">{{ scope.row.ratio }}</span>
@@ -69,348 +95,179 @@
             </el-table-column>
           </el-table>
         </div>
-
-        <div class="glass-card chart-card">
-          <div class="card-title">近7天绿色出行比例趋势分析</div>
-          <div ref="trendChartRef" class="chart-container"></div>
-        </div>
-      </div>
-
-      <div class="dashboard-row row-3">
-        <div class="glass-card suggestion-card">
-          <div class="card-title">基于多模态融合模型的低碳建设洞察</div>
-          <div class="suggestion-content">
-            <span class="quote-mark">“</span>
-            {{ regionData.insight }}
-            <span class="quote-mark">”</span>
-          </div>
-        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import * as echarts from 'echarts'
 
 const route = useRoute()
-const regionName = ref(route.params.name || route.query.name || '海淀区')
-
+const regionName = ref(route.params.name || '海淀区')
 const loading = ref(true)
 const regionData = ref(null)
+const allRegionData = ref({})
 
-const modeChartRef = ref(null)
-const trendChartRef = ref(null)
-const charts = []
+// 计算全市平均绿色比例（基于所有区真实数据）
+const avgGreenRatio = computed(() => {
+  const values = Object.values(allRegionData.value).map(r => r.greenRatio)
+  if (values.length === 0) return 0
+  return values.reduce((a, b) => a + b, 0) / values.length
+})
 
-// 模拟各个区域的新版测试数据
-const mockRegionDatabase = {
-  '朝阳区': {
-    pointCount: 384500,
-    greenRatio: 0.38,
-    rank: 3,
-    modeDistribution: { '步行': 22, '骑行': 16, '公交': 25, '地铁': 20, '火车': 2, '小汽车': 15 },
-    topGreenGrids: [
-      { name: '三里屯-工人体育场', ratio: '62.4%' },
-      { name: '望京 SOHO 核心区', ratio: '58.1%' },
-      { name: '国贸 CBD', ratio: '54.3%' },
-      { name: '朝阳大悦城周边', ratio: '49.8%' }
-    ],
-    trend: [0.35, 0.36, 0.38, 0.37, 0.39, 0.41, 0.38],
-    insight: "Exp4 模型精准识别出该区域呈现极强的‘潮汐接驳’特征：早晚高峰存在大量‘骑行-地铁’多模态切换行为。建议在国贸及望京地铁站点周边 500 米范围扩容非机动车电子围栏，以承接庞大的共享单车接驳需求。"
-  },
-  '海淀区': {
-    pointCount: 425600,
-    greenRatio: 0.46,
-    rank: 1,
-    modeDistribution: { '步行': 25, '骑行': 21, '公交': 22, '地铁': 18, '火车': 1, '小汽车': 13 },
-    topGreenGrids: [
-      { name: '中关村软件园', ratio: '71.2%' },
-      { name: '五道口-清华科技园', ratio: '68.5%' },
-      { name: '人大-知春路沿线', ratio: '64.0%' },
-      { name: '西北旺区域', ratio: '58.7%' }
-    ],
-    trend: [0.42, 0.44, 0.46, 0.45, 0.47, 0.49, 0.46],
-    insight: "得益于高校与互联网园区的密集分布，该区常态化绿色出行比例领跑全市。Exp2 空间特征分析表明，园区内部步道及周边专用自行车道利用率极高，建议作为‘慢行系统友好型示范区’向全市推广。"
+// 对比文字和样式
+const diffText = computed(() => {
+  if (!regionData.value) return ''
+  const diff = regionData.value.greenRatio - avgGreenRatio.value
+  if (diff > 0.05) return `高于全市平均 ${(diff * 100).toFixed(1)}%`
+  if (diff < -0.05) return `低于全市平均 ${(-diff * 100).toFixed(1)}%`
+  return '接近全市平均水平'
+})
+const diffClass = computed(() => {
+  if (!regionData.value) return ''
+  const diff = regionData.value.greenRatio - avgGreenRatio.value
+  if (diff > 0.05) return 'higher'
+  if (diff < -0.05) return 'lower'
+  return 'equal'
+})
+
+// 基于对比结果给出建议（合理推论）
+const suggestionText = computed(() => {
+  if (!regionData.value) return ''
+  const diff = regionData.value.greenRatio - avgGreenRatio.value
+  if (diff > 0.05) {
+    return '该区绿色出行比例高于全市平均，建议继续保持并推广慢行交通设施。'
+  } else if (diff < -0.05) {
+    return '该区绿色出行比例低于全市平均，建议优化公交接驳、增加非机动车道，提升绿色出行吸引力。'
+  } else {
+    return '该区绿色出行比例与全市平均持平，可进一步挖掘潜在绿色出行需求，如增设共享单车停放点。'
   }
-}
+})
 
 const loadData = async () => {
   try {
-    // 真实项目中这里依然可以用 fetch 请求 /region_data.json
-    // 这里为了演示直接 fallback 到 mock 数据库
-    await new Promise(resolve => setTimeout(resolve, 600)) // 模拟网络延迟
-    regionData.value = mockRegionDatabase[regionName.value] || mockRegionDatabase['朝阳区']
+    loading.value = true
+    const response = await fetch('/region_data.json')
+    if (response.ok) {
+      allRegionData.value = await response.json()
+      regionData.value = allRegionData.value[regionName.value] || null
+    }
   } catch (err) {
-    console.error('加载区域详情数据失败:', err)
+    console.error('加载区域数据失败:', err)
   } finally {
     loading.value = false
-    if (regionData.value) {
-      await nextTick()
-      initCharts()
-    }
   }
 }
-
-const initCharts = () => {
-  if (!regionData.value) return
-  const data = regionData.value
-
-  // --- 1. 出行结构环形图 ---
-  if (modeChartRef.value) {
-    const modeChart = echarts.init(modeChartRef.value)
-    const modeColors = { '步行': '#00FF88', '骑行': '#00FFFF', '公交': '#FFDD00', '地铁': '#CC33FF', '火车': '#FF6600', '小汽车': '#FF0033' }
-    
-    modeChart.setOption({
-      tooltip: { trigger: 'item', backgroundColor: 'rgba(10,14,23,0.9)', textStyle: { color: '#fff', fontWeight: 'bold' }, formatter: '{b}: {c}%' },
-      legend: { orient: 'vertical', right: '5%', top: 'center', textStyle: { color: '#cbd5e1' } },
-      series: [{
-        type: 'pie',
-        radius: ['55%', '80%'],
-        center: ['35%', '50%'],
-        itemStyle: { borderColor: 'rgba(10,14,23,0.8)', borderWidth: 2 },
-        label: { show: false },
-        data: Object.entries(data.modeDistribution).map(([name, value]) => ({
-          name, value, itemStyle: { color: modeColors[name] || '#38bdf8' }
-        }))
-      }]
-    })
-    charts.push(modeChart)
-  }
-
-  // --- 2. 绿色出行趋势折线图 (更换为环保主题色) ---
-  if (trendChartRef.value) {
-    const trendChart = echarts.init(trendChartRef.value)
-    const days = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
-    
-    trendChart.setOption({
-      grid: { top: 30, bottom: 20, left: 45, right: 20 },
-      tooltip: { 
-        trigger: 'axis', backgroundColor: 'rgba(10,14,23,0.9)', 
-        textStyle: { color: '#fff', fontWeight:'bold' },
-        formatter: (params) => `${params[0].name}<br/>比例: ${(params[0].value * 100).toFixed(1)}%`
-      },
-      xAxis: { 
-        type: 'category', data: days, 
-        axisLabel: { color: '#94a3b8' }, axisLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } } 
-      },
-      yAxis: { 
-        type: 'value', min: 'dataMin',
-        axisLabel: { color: '#94a3b8', formatter: (val) => (val * 100).toFixed(0) + '%' }, 
-        splitLine: { lineStyle: { color: 'rgba(255,255,255,0.05)' } } 
-      },
-      series: [{
-        data: data.trend, 
-        type: 'line', smooth: true, symbolSize: 8,
-        itemStyle: { color: '#00FF88' }, // 绿色主题
-        lineStyle: { width: 3, color: '#00FF88' },
-        areaStyle: { 
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(0, 255, 136, 0.4)' }, 
-            { offset: 1, color: 'rgba(0, 255, 136, 0)' }
-          ]) 
-        }
-      }]
-    })
-    charts.push(trendChart)
-  }
-}
-
-const handleResize = () => { charts.forEach(c => c.resize()) }
 
 onMounted(() => {
   loadData()
-  window.addEventListener('resize', handleResize)
-})
-
-onUnmounted(() => {
-  window.removeEventListener('resize', handleResize)
-  charts.forEach(c => c.dispose())
 })
 </script>
 
 <style scoped>
-.region-detail-container {
-  min-height: calc(100vh - 64px);
-  background-color: transparent;
-  color: #e2e8f0;
-  padding: 0 10px;
-  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
-  box-sizing: border-box;
-}
-
-.breadcrumb-header {
-  display: flex;
-  align-items: center;
-  font-size: 14px;
-  margin-bottom: 24px;
-  color: #94a3b8;
-}
-.back-link {
-  color: #38bdf8;
-  text-decoration: none;
-  display: flex;
-  align-items: center;
-  transition: opacity 0.3s;
-}
-.back-link:hover { opacity: 0.8; }
-.back-arrow { margin-right: 4px; font-weight: bold; }
+.region-detail-container { min-height: calc(100vh - 64px); color: #e2e8f0; padding: 0 10px; box-sizing: border-box; }
+.breadcrumb-header { display: flex; align-items: center; font-size: 14px; margin-bottom: 24px; color: #94a3b8; }
+.back-link { color: #38bdf8; text-decoration: none; display: flex; align-items: center; }
 .separator { margin: 0 10px; color: #475569; }
-.current-page { color: #cbd5e1; }
-.region-name { 
-  color: #fff; 
-  font-weight: 600; 
-  margin-left: 10px;
-  padding-left: 10px;
-  border-left: 2px solid #38bdf8;
-}
+.region-name { color: #fff; font-weight: 600; margin-left: 10px; padding-left: 10px; border-left: 2px solid #38bdf8; }
 
-.status-container {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 400px;
-  color: #94a3b8;
-  font-size: 16px;
-}
-.loading-spinner {
-  width: 40px;
-  height: 40px;
-  border: 4px solid rgba(56, 189, 248, 0.2);
-  border-top-color: #38bdf8;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-  margin-bottom: 16px;
-}
+.status-container { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 400px; color: #94a3b8; }
+.loading-spinner { width: 40px; height: 40px; border: 4px solid rgba(56, 189, 248, 0.2); border-top-color: #38bdf8; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 16px; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.empty-icon { font-size: 48px; margin-bottom: 16px; opacity: 0.8; }
 
-.detail-content {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-.dashboard-row {
-  display: grid;
-  gap: 20px;
-}
+.detail-content { display: flex; flex-direction: column; gap: 20px; }
+.dashboard-row { display: grid; gap: 20px; }
 .row-1 { grid-template-columns: 1fr 1fr; }
-.row-2 { grid-template-columns: 1fr 1fr; }
-.row-3 { grid-template-columns: 1fr; }
+.row-2 { grid-template-columns: 1fr; }
 
-@media (max-width: 1024px) {
-  .row-1, .row-2 { grid-template-columns: 1fr; }
-}
+.glass-card { background: rgba(15, 25, 45, 0.6); backdrop-filter: blur(10px); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 16px; padding: 20px; }
+.card-title { font-size: 16px; color: #e2e8f0; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; }
+.card-title::before { content: ''; width: 4px; height: 16px; background: #38bdf8; margin-right: 8px; border-radius: 2px; }
 
-.glass-card {
-  background: rgba(15, 25, 45, 0.6);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border: 1px solid rgba(56, 189, 248, 0.25);
-  border-radius: 16px;
-  padding: 20px;
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  transition: all 0.3s ease;
-}
-.glass-card:hover {
-  box-shadow: 0 0 12px rgba(56, 189, 248, 0.2);
-  border-color: rgba(56, 189, 248, 0.5);
-}
-.card-title {
-  font-size: 16px;
-  color: #e2e8f0;
-  font-weight: 600;
-  margin-bottom: 16px;
-  display: flex;
-  align-items: center;
-}
-.card-title::before {
-  content: '';
-  display: inline-block;
-  width: 4px;
-  height: 16px;
-  background-color: #38bdf8;
-  margin-right: 8px;
-  border-radius: 2px;
-}
-
-.metrics-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 15px;
-  flex: 1;
-  align-items: center;
-}
-.metric-item {
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid rgba(255,255,255,0.05);
-  border-radius: 12px;
-  padding: 20px 10px;
-  text-align: center;
-}
-.metric-label { font-size: 13px; color: #94a3b8; margin-bottom: 10px; font-weight: bold; }
-.metric-value { 
-  font-size: 32px; 
-  font-weight: bold; 
-  font-family: 'Din', 'Arial', sans-serif;
-  text-shadow: 0 0 10px currentColor;
-}
+.metrics-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }
+.metric-item { background: rgba(0, 0, 0, 0.3); border-radius: 12px; padding: 20px 10px; text-align: center; }
+.metric-label { font-size: 13px; color: #94a3b8; margin-bottom: 10px; }
+.metric-value { font-size: 32px; font-weight: bold; font-family: 'Din', sans-serif; }
 .text-blue { color: #38bdf8; }
 .text-green { color: #00FF88; }
-.text-orange { color: #FFD700; }
+.text-orange { color: #facc15; }
 
-.chart-container { width: 100%; height: 220px; }
-
-.cyber-table {
-  --el-table-bg-color: transparent;
-  --el-table-tr-bg-color: transparent;
-  background-color: transparent !important;
-  font-size: 14px;
+.compare-card .compare-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
-:deep(.el-table__inner-wrapper::before) { display: none; }
-:deep(.el-table tbody tr:hover > td) { background-color: rgba(56, 189, 248, 0.1) !important; }
-
-.rank-badge {
-  display: inline-block;
-  width: 24px;
-  height: 24px;
-  line-height: 24px;
-  border-radius: 4px;
-  background: rgba(255,255,255,0.1);
-  color: #fff;
+.compare-item {
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px dashed rgba(255,255,255,0.1);
+  padding-bottom: 8px;
+}
+.compare-label {
+  color: #94a3b8;
+}
+.compare-value {
   font-weight: bold;
+  color: #e2e8f0;
 }
-.rank-1 { background: #00FF88; box-shadow: 0 0 8px rgba(0,255,136,0.6); color: #000; }
-.rank-2 { background: #00A8FF; box-shadow: 0 0 8px rgba(0,168,255,0.6); }
-.rank-3 { background: #FFD700; box-shadow: 0 0 8px rgba(255,215,0,0.6); color: #000; }
-.text-highlight { font-weight: bold; font-family: monospace; font-size: 16px; }
-
-.suggestion-content {
-  font-size: 15px;
-  line-height: 1.8;
+.compare-diff {
+  margin-top: 4px;
+  text-align: center;
+  font-weight: bold;
+  padding: 6px;
+  border-radius: 4px;
+}
+.higher {
+  background: rgba(0, 255, 136, 0.15);
+  color: #00FF88;
+}
+.lower {
+  background: rgba(255, 69, 0, 0.15);
+  color: #FF4500;
+}
+.equal {
+  background: rgba(255, 255, 255, 0.1);
+  color: #FFD700;
+}
+.suggestion-box {
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 13px;
+}
+.suggestion-icon {
+  font-size: 16px;
+}
+.suggestion-label {
+  font-weight: bold;
+  color: #38bdf8;
+}
+.suggestion-text {
   color: #cbd5e1;
-  padding: 15px 20px;
-  background: linear-gradient(90deg, rgba(56,189,248,0.1), transparent);
-  border-left: 4px solid #38bdf8;
-  border-radius: 4px;
-  position: relative;
+  line-height: 1.5;
 }
-.quote-mark {
-  color: rgba(56,189,248,0.4);
-  font-size: 24px;
-  font-family: serif;
-  font-weight: bold;
-  vertical-align: middle;
+.data-note {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 12px;
+  text-align: center;
 }
+.full-width {
+  width: 100%;
+}
+.cyber-table { background: transparent !important; font-size: 14px; }
+.rank-badge { display: inline-block; width: 24px; height: 24px; line-height: 24px; border-radius: 4px; background: rgba(255,255,255,0.1); text-align: center; }
+.rank-1 { background: #00FF88; color: #000; }
+.rank-2 { background: #00A8FF; }
+.rank-3 { background: #FFD700; color: #000; }
 
 .fade-up { animation: fadeInUp 0.5s ease forwards; }
-@keyframes fadeInUp {
-  from { opacity: 0; transform: translateY(20px); }
-  to { opacity: 1; transform: translateY(0); }
-}
+@keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
 </style>

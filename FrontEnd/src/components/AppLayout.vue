@@ -93,8 +93,6 @@ onUnmounted(() => clearInterval(timer))
   backdrop-filter: blur(10px);
   z-index: 1000;
 }
-
-/* --- 左侧标题区 --- */
 .header-left {
   display: flex;
   align-items: center;
@@ -134,8 +132,6 @@ onUnmounted(() => clearInterval(timer))
   opacity: 0.7;
   margin-top: 2px;
 }
-
-/* --- 中右侧聚合导航区 --- */
 .header-nav {
   flex: 1;
   display: flex;
@@ -163,7 +159,6 @@ onUnmounted(() => clearInterval(timer))
   background: rgba(0, 240, 255, 0.1);
   text-shadow: 0 0 8px rgba(0, 240, 255, 0.5);
 }
-/* 底部发光指示条 */
 .nav-item::after {
   content: '';
   position: absolute;
@@ -180,7 +175,6 @@ onUnmounted(() => clearInterval(timer))
   width: 100%;
 }
 
-/* --- 最右侧状态区 --- */
 .header-right {
   display: flex;
   align-items: center;
@@ -236,13 +230,10 @@ onUnmounted(() => clearInterval(timer))
   overflow-y: auto;
   position: relative;
 }
-
-/* 滚动条美化 */
 .main-content::-webkit-scrollbar { width: 6px; }
 .main-content::-webkit-scrollbar-thumb { background: rgba(0, 240, 255, 0.3); border-radius: 10px; }
 .main-content::-webkit-scrollbar-track { background: rgba(10, 15, 30, 0.5); }
 
-/* 页面切换动画 */
 .fade-enter-active, .fade-leave-active { transition: opacity 0.3s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 </style>

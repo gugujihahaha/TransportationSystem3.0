@@ -609,8 +609,6 @@ onUnmounted(() => { if (map) { map.remove(); map = null } })
 .pdf-ai-text {
   font-size: 18px; line-height: 1.8; color: #455a64; text-align: justify; position: relative; z-index: 2;
 }
-
-/* ！！！重要：强制覆盖 formattedReport 里的暗黑模式内联样式 ！！！ */
 .light-mode-text :deep(h2) { color: #1b5e20 !important; border-bottom-color: #c8e6c9 !important; font-size: 22px !important; }
 .light-mode-text :deep(h3) { color: #2e7d32 !important; font-size: 18px !important; }
 .light-mode-text :deep(strong) { color: #4caf50 !important; }

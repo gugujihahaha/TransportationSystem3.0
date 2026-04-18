@@ -143,7 +143,6 @@ onUnmounted(() => {
   scrollbar-width: thin;
 }
 
-/* 霓虹滚动条 */
 .report-content-wrapper::-webkit-scrollbar {
   width: 4px;
 }

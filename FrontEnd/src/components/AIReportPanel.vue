@@ -203,17 +203,15 @@ button {
 
 .report-content {
   flex: 1;
-  overflow-y: auto; /* 保留内部滚动 */
+  overflow-y: auto; 
   color: #f8fafc;
   line-height: 1.6;
   font-size: 15px;
   padding: 10px;
-  /* 优化滚动条样式 */
   scrollbar-width: thin;
   scrollbar-color: rgba(56, 189, 248, 0.5) transparent;
 }
 
-/* Chrome/Safari 滚动条 */
 .report-content::-webkit-scrollbar {
   width: 6px;
 }
@@ -227,8 +225,6 @@ button {
   color: #64748b;
   margin-top: 40px;
 }
-
-/* 骨架屏动画 */
 .skeleton-loader { width: 100%; }
 .skeleton-line {
   height: 12px;
@@ -244,8 +240,6 @@ button {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
-
-/* 打字机光标动画 */
 .typing-cursor {
   display: inline-block;
   width: 8px;
