@@ -110,14 +110,13 @@ const loading = ref(true)
 const regionData = ref(null)
 const allRegionData = ref({})
 
-// 计算全市平均绿色比例（基于所有区真实数据）
+// 计算全市平均绿色比例
 const avgGreenRatio = computed(() => {
   const values = Object.values(allRegionData.value).map(r => r.greenRatio)
   if (values.length === 0) return 0
   return values.reduce((a, b) => a + b, 0) / values.length
 })
 
-// 对比文字和样式
 const diffText = computed(() => {
   if (!regionData.value) return ''
   const diff = regionData.value.greenRatio - avgGreenRatio.value

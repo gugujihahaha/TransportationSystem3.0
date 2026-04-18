@@ -8,34 +8,6 @@
 
     <div class="content-wrapper" :class="{ 'is-loaded': isLoaded }">
 
-      
-      <!-- <div class="data-scale-bar">
-        <div class="stat-item">
-          <span class="stat-label">处理轨迹点</span>
-          <span class="stat-value">1500 万+</span>
-        </div>
-        <div class="stat-divider"></div>
-        <div class="stat-item">
-          <span class="stat-label">特征维度</span>
-          <span class="stat-value">49 维</span>
-        </div>
-        <div class="stat-divider"></div>
-        <div class="stat-item">
-          <span class="stat-label">递进实验模型</span>
-          <span class="stat-value">4 个</span>
-        </div>
-        <div class="stat-divider"></div>
-        <div class="stat-item">
-          <span class="stat-label">覆盖交通方式</span>
-          <span class="stat-value">6 类</span>
-        </div>
-        <div class="stat-divider"></div>
-        <div class="stat-item">
-          <span class="stat-label">数据时间跨度</span>
-          <span class="stat-value">2008-2012 (GeoLife) + 2024 报告</span>
-        </div>
-      </div> -->
-
       <HomePage />
 
     </div>

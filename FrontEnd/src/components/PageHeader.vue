@@ -1,4 +1,4 @@
-<!-- src/components/PageHeader.vue -->
+src/components/PageHeader.vue
 <template>
   <div class="page-header">
     <div class="header-left">

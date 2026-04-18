@@ -184,7 +184,6 @@ onUnmounted(() => {
 .right-panel { width: 420px; }
 .center-panel { flex: 1; display: flex; position: relative; z-index: 5;}
 
-/* 通用卡片 */
 .cyber-card { 
   background: #1E293B; 
   border: 1px solid #334155; 

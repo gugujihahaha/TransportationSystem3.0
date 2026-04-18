@@ -408,7 +408,6 @@ const renderCMChart = async () => {
 // ================= 图表 4: 置信度箱线图 =================
 const renderConfidenceChart = async () => {
   destroyCurrentChart()
-   // 如果是 exp4，直接使用硬编码的箱线图数据
   if (selectedExpConf.value === 'exp4') {
     if (!confChartRef.value) return
     const chineseModes = transportModes.map(m => modeDict[m])

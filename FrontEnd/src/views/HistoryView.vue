@@ -80,7 +80,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTrajectoryStore } from '@/stores/trajectory'
 import PageHeader from '@/components/PageHeader.vue'
-import { ElMessage } from 'element-plus' // 引入消息提示
+import { ElMessage } from 'element-plus' 
 
 const router = useRouter()
 const trajectoryStore = useTrajectoryStore()
@@ -136,8 +136,6 @@ const goToDetail = (record: any) => {
     router.push({ path: '/model-compare', query: { id: record.id } })
   }
 }
-
-// 徽章样式映射 
 const getBadgeStyle = (mode: string) => {
   const m = mode.toLowerCase()
   if (m.includes('walk')) return { background: 'rgba(16, 185, 129, 0.2)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.5)' }
