@@ -35,7 +35,7 @@ def generate_carbon_data():
         grid_green_ratio = base_green_ratio * (0.9 + random.random() * 0.2)
         grid_green_ratio = min(max(grid_green_ratio, 0.1), 0.95)  # 约束在10%-95%
 
-        # 4. 【关键】生成前端 Vue 模板所需的特定字段
+        # 4. 生成前端 Vue 模板所需的特定字段
         final_heatmap.append({
             "lat": point['lat'],
             "lng": point['lng'],

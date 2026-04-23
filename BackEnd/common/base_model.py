@@ -118,7 +118,7 @@ class BaseTransportationClassifier(nn.Module):
 
 class HierarchicalTransportationClassifier(BaseTransportationClassifier):
     """
-    层次化时序编码器（论文创新点一）
+    层次化时序编码器
 
     核心思想：
         局部编码器捕捉短时运动模式（如加速、转弯），

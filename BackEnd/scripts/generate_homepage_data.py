@@ -2,7 +2,6 @@ import pandas as pd
 import json
 from collections import Counter
 
-# 使用原始字符串避免转义问题
 base_path = r'D:\TransportationSystem3.0\BackEnd'
 
 exp1 = pd.read_csv(f'{base_path}\\exp1\\evaluation_results\\predictions_exp1.csv')
@@ -10,7 +9,6 @@ exp2 = pd.read_csv(f'{base_path}\\exp2\\evaluation_results\\predictions_exp2.csv
 exp3 = pd.read_csv(f'{base_path}\\exp3\\evaluation_results\\predictions_exp3.csv')
 exp4 = pd.read_csv(f'{base_path}\\exp4\\evaluation_results\\predictions_exp4.csv')
 
-# 打开JSON文件时指定encoding='utf-8-sig'以处理BOM
 with open(f'{base_path}\\exp1\\evaluation_results\\evaluation_report.json', 'r', encoding='utf-8-sig') as f:
     eval1 = json.load(f)
 with open(f'{base_path}\\exp2\\evaluation_results\\evaluation_report.json', 'r', encoding='utf-8-sig') as f:

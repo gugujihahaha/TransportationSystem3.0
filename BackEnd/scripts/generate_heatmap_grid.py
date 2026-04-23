@@ -17,15 +17,11 @@ print(f"总点数: {len(df)}, 小汽车点数: {len(car_df)}")
 lon_bins = np.arange(LON_MIN, LON_MAX, GRID_SIZE)
 lat_bins = np.arange(LAT_MIN, LAT_MAX, GRID_SIZE)
 
-# 注意：histogram2d 的返回矩阵形状为 (len(lat_bins)-1, len(lon_bins)-1)
 heatmap, _, _ = np.histogram2d(car_df['longitude'], car_df['latitude'], bins=[lon_bins, lat_bins])
-# 修正：heatmap 的 shape 是 (经度网格数, 纬度网格数)？实际上根据文档，第一个维度对应 x (经度)，第二个对应 y (纬度)
-# 但为了清晰，我们统一转置为 (纬度, 经度) 以便按 (lat, lon) 索引
-heatmap = heatmap.T   # 现在 shape = (纬度网格数, 经度网格数)
+heatmap = heatmap.T
 heatmap_norm = (heatmap - heatmap.min()) / (heatmap.max() - heatmap.min() + 1e-6)
 
 grid_data = []
-# 正确顺序：外层循环纬度（行），内层循环经度（列）
 for i in range(len(lat_bins)-1):      # 纬度索引
     for j in range(len(lon_bins)-1):  # 经度索引
         val = float(heatmap_norm[i, j])   # 注意顺序 [i, j]

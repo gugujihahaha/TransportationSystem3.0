@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-为 Exp1~Exp4 生成带地理信息的预测 CSV（最终修正版）
+为 Exp1~Exp4 生成带地理信息的预测 CSV
 支持 Exp2 的 21 维点级特征、Exp3/Exp4 的双输入（21维轨迹+空间 + 10维天气）
 """
 
@@ -16,7 +16,6 @@ from sklearn.preprocessing import LabelEncoder
 from tqdm import tqdm
 from collections import Counter
 
-# ==================== 配置（请修改为您的实际路径）====================
 BACKEND_DIR = r"D:\TransportationSystem3.0\BackEnd"
 sys.path.insert(0, BACKEND_DIR)
 
